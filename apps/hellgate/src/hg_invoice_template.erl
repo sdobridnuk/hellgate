@@ -26,6 +26,13 @@
 
 -export([publish_event/2]).
 
+%% Msgpack marshalling callbacks
+
+-behaviour(hg_msgpack_marshalling).
+
+-export([marshal/2]).
+-export([unmarshal/2]).
+
 %% API
 
 -export([get/1]).
@@ -293,7 +300,10 @@ publish_event(ID, Changes) ->
 -include("legacy_structures.hrl").
 
 marshal(Changes) when is_list(Changes) ->
-    [marshal(change, Change) || Change <- Changes].
+    marshal({list, change}, Changes).
+
+-spec marshal(term(), term()) ->
+    term().
 
 marshal(change, ?tpl_created(InvoiceTpl)) ->
     [2, #{
@@ -323,17 +333,17 @@ marshal(invoice_template, #domain_InvoiceTemplate{} = InvoiceTpl) ->
 
 marshal(invoice_template_diff, #payproc_InvoiceTemplateUpdateParams{} = Diff) ->
     genlib_map:compact(#{
-        <<"details">>       => marshal(details, Diff#payproc_InvoiceTemplateUpdateParams.details),
-        <<"lifetime">>      => marshal(lifetime, Diff#payproc_InvoiceTemplateUpdateParams.invoice_lifetime),
-        <<"cost">>          => marshal(cost, Diff#payproc_InvoiceTemplateUpdateParams.cost),
+        <<"details">>       => marshal({maybe, details}, Diff#payproc_InvoiceTemplateUpdateParams.details),
+        <<"lifetime">>      => marshal({maybe, lifetime}, Diff#payproc_InvoiceTemplateUpdateParams.invoice_lifetime),
+        <<"cost">>          => marshal({maybe, cost}, Diff#payproc_InvoiceTemplateUpdateParams.cost),
         <<"context">>       => hg_content:marshal(Diff#payproc_InvoiceTemplateUpdateParams.context)
     });
 
 marshal(details, #domain_InvoiceDetails{} = Details) ->
     genlib_map:compact(#{
         <<"product">>       => marshal(str, Details#domain_InvoiceDetails.product),
-        <<"description">>   => marshal(str, Details#domain_InvoiceDetails.description),
-        <<"cart">>          => marshal(cart, Details#domain_InvoiceDetails.cart)
+        <<"description">>   => marshal({maybe, str}, Details#domain_InvoiceDetails.description),
+        <<"cart">>          => marshal({maybe, cart}, Details#domain_InvoiceDetails.cart)
     });
 
 marshal(cart, #domain_InvoiceCart{lines = Lines}) ->
@@ -349,9 +359,9 @@ marshal(line, #domain_InvoiceLine{} = InvoiceLine) ->
 
 marshal(lifetime, #domain_LifetimeInterval{years = Years, months = Months, days = Days}) ->
     genlib_map:compact(#{
-        <<"years">>         => marshal(int, Years),
-        <<"months">>        => marshal(int, Months),
-        <<"days">>          => marshal(int, Days)
+        <<"years">>         => marshal({maybe, int}, Years),
+        <<"months">>        => marshal({maybe, int}, Months),
+        <<"days">>          => marshal({maybe, int}, Days)
     });
 
 marshal(cost, {fixed, Cash}) ->
@@ -364,14 +374,14 @@ marshal(cost, {unlim, _}) ->
 marshal(metadata, Metadata) ->
     maps:fold(
         fun(K, V, Acc) ->
-            maps:put(marshal(str, K), hg_msgpack_marshalling:unmarshal(V), Acc)
+            maps:put(marshal(str, K), marshal(msgpack, V), Acc)
         end,
         #{},
         Metadata
     );
 
-marshal(_, Other) ->
-    Other.
+marshal(Term, Value) ->
+    hg_msgpack_marshalling:marshal(Term, Value, ?MODULE).
 
 %%
 
@@ -381,12 +391,10 @@ unmarshal(Events) when is_list(Events) ->
 unmarshal({ID, Dt, Payload}) ->
     {ID, Dt, unmarshal({list, change}, Payload)}.
 
-%% Version > 1
-
-unmarshal({list, change}, Changes) when is_list(Changes) ->
-    [unmarshal(change, Change) || Change <- Changes];
-
 %% Version 1
+
+-spec unmarshal(term(), term()) ->
+    term().
 
 unmarshal({list, change}, {bin, Bin}) when is_binary(Bin) ->
     ?ev(Changes) = binary_to_term(Bin),
@@ -434,9 +442,9 @@ unmarshal(invoice_template, #{
 
 unmarshal(invoice_template_diff, #{} = V) ->
     #payproc_InvoiceTemplateUpdateParams{
-        details              = unmarshal(details, genlib_map:get(<<"details">>, V)),
-        invoice_lifetime     = unmarshal(lifetime, genlib_map:get(<<"lifetime">>, V)),
-        cost                 = unmarshal(cost, genlib_map:get(<<"cost">>, V)),
+        details              = unmarshal({maybe, details}, genlib_map:get(<<"details">>, V)),
+        invoice_lifetime     = unmarshal({maybe, lifetime}, genlib_map:get(<<"lifetime">>, V)),
+        cost                 = unmarshal({maybe, cost}, genlib_map:get(<<"cost">>, V)),
         context              = hg_content:unmarshal(genlib_map:get(<<"context">>, V))
     };
 
@@ -447,9 +455,9 @@ unmarshal(invoice_template_diff_legacy, {payproc_InvoiceTemplateUpdateParams,
     Context
 }) ->
     #payproc_InvoiceTemplateUpdateParams{
-        details              = unmarshal(details_legacy, Details),
-        invoice_lifetime     = unmarshal(lifetime_legacy, Lifetime),
-        cost                 = unmarshal(cost_legacy, Cost),
+        details              = unmarshal({maybe, details_legacy}, Details),
+        invoice_lifetime     = unmarshal({maybe, lifetime_legacy}, Lifetime),
+        cost                 = unmarshal({maybe, cost_legacy}, Cost),
         context              = hg_content:unmarshal(Context)
     };
 
@@ -477,14 +485,14 @@ unmarshal(details, #{<<"product">> := Product} = Details) ->
     Cart = maps:get(<<"cart">>, Details, undefined),
     #domain_InvoiceDetails{
         product     = unmarshal(str, Product),
-        description = unmarshal(str, Description),
-        cart        = unmarshal(cart, Cart)
+        description = unmarshal({maybe, str}, Description),
+        cart        = unmarshal({maybe, cart}, Cart)
     };
 
 unmarshal(details_legacy, ?legacy_invoice_details(Product, Description)) ->
     #domain_InvoiceDetails{
         product     = unmarshal(str, Product),
-        description = unmarshal(str, Description)
+        description = unmarshal({maybe, str}, Description)
     };
 
 unmarshal(cart, Lines) when is_list(Lines) ->
@@ -505,16 +513,16 @@ unmarshal(line, #{
 
 unmarshal(lifetime, #{} = V) ->
     #domain_LifetimeInterval{
-        years               = unmarshal(int, genlib_map:get(<<"years">>, V)),
-        months              = unmarshal(int, genlib_map:get(<<"months">>, V)),
-        days                = unmarshal(int, genlib_map:get(<<"days">>, V))
+        years               = unmarshal({maybe, int}, genlib_map:get(<<"years">>, V)),
+        months              = unmarshal({maybe, int}, genlib_map:get(<<"months">>, V)),
+        days                = unmarshal({maybe, int}, genlib_map:get(<<"days">>, V))
     };
 
 unmarshal(lifetime_legacy, {domain_LifetimeInterval, Years, Months, Days}) ->
     #domain_LifetimeInterval{
-        years               = unmarshal(int, Years),
-        months              = unmarshal(int, Months),
-        days                = unmarshal(int, Days)
+        years               = unmarshal({maybe, int}, Years),
+        months              = unmarshal({maybe, int}, Months),
+        days                = unmarshal({maybe, int}, Days)
     };
 
 unmarshal(cost, [<<"fixed">>, Cash]) ->
@@ -534,11 +542,11 @@ unmarshal(cost_legacy, {unlim, _}) ->
 unmarshal(metadata, Metadata) ->
     maps:fold(
         fun(K, V, Acc) ->
-            maps:put(unmarshal(str, K), hg_msgpack_marshalling:marshal(V), Acc)
+            maps:put(unmarshal(str, K), unmarshal(msgpack, V), Acc)
         end,
         #{},
         Metadata
     );
 
-unmarshal(_, Other) ->
-    Other.
+unmarshal(Term, Value) ->
+    hg_msgpack_marshalling:unmarshal(Term, Value, ?MODULE).

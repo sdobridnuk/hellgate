@@ -5,9 +5,17 @@
 -export([marshal/1]).
 -export([unmarshal/1]).
 
+-export([marshal/3]).
+-export([unmarshal/3]).
+
 -export_type([value/0]).
 
 -type value() :: term().
+
+-callback marshal(term(), term()) ->
+    term().
+
+%%
 
 -spec marshal(value()) ->
     dmsl_msgpack_thrift:'Value'().
@@ -34,6 +42,7 @@ marshal(Object) when is_map(Object) ->
 marshal(Array) when is_list(Array) ->
     {arr, lists:map(fun marshal/1, Array)}.
 
+
 -spec unmarshal(dmsl_msgpack_thrift:'Value'()) ->
     value().
 unmarshal({nl, #msgpack_Nil{}}) ->
@@ -52,3 +61,47 @@ unmarshal({obj, Object}) ->
     maps:fold(fun(K, V, Acc) -> maps:put(unmarshal(K), unmarshal(V), Acc) end, #{}, Object);
 unmarshal({arr, Array}) ->
     lists:map(fun unmarshal/1, Array).
+
+%%
+
+-spec marshal(atom(), value(), atom()) ->
+    value().
+
+marshal(str, String, _) when is_binary(String) ->
+    String;
+marshal(bin, Binary, _) when is_binary(Binary) ->
+    {bin, Binary};
+marshal(int, Integer, _) when is_integer(Integer) ->
+    Integer;
+marshal({map, str, str}, Map, _) when is_map(Map) ->
+    Map;
+marshal({maybe, _}, undefined, _) ->
+    undefined;
+marshal({maybe, Term}, Value, Module) ->
+    marshal(Term, Value, Module);
+marshal({list, Term}, Values, Module) when is_list(Values) ->
+    [Module:marshal(Term, Value) || Value <- Values];
+marshal(msgpack, Msgpack, _) ->
+    unmarshal(Msgpack);
+marshal(Term, Value, Module) ->
+    Module:marshal(Term, Value).
+
+-spec unmarshal(atom(), value(), atom()) ->
+    value().
+
+unmarshal(str, String, _) ->
+    String;
+unmarshal(bin, Binary, _) ->
+    Binary;
+unmarshal(int, Integer, _) ->
+    Integer;
+unmarshal({map, str, str}, Map, _) ->
+    Map;
+unmarshal({maybe, _}, _, _) ->
+    undefined;
+unmarshal({list, Term}, Values, Module) when is_list(Values) ->
+    [Module:unmarshal(Term, Value) || Value <- Values];
+unmarshal(msgpack, Msgpack, _) ->
+    marshal(Msgpack);
+unmarshal(Term, Value, Module) ->
+    Module:unmarshal(Term, Value).

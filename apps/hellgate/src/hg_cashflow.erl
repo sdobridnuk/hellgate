@@ -27,6 +27,13 @@
 -export([marshal/1]).
 -export([unmarshal/1]).
 
+%% Msgpack marshalling callbacks
+
+-behaviour(hg_msgpack_marshalling).
+
+-export([marshal/2]).
+-export([unmarshal/2]).
+
 %%
 
 -define(posting(Source, Destination, Volume, Details),
@@ -193,6 +200,9 @@ get_partial_remainders(CashFlow) ->
 marshal(CashFlow) ->
     marshal(final_cash_flow, CashFlow).
 
+-spec marshal(term(), final_cash_flow()) ->
+    hg_msgpack_marshalling:value().
+
 marshal(final_cash_flow, CashFlow) ->
     [2, [marshal(final_cash_flow_posting, CashFlowPosting) || CashFlowPosting <- CashFlow]];
 
@@ -229,15 +239,19 @@ marshal(account_type, {external, income}) ->
 marshal(account_type, {external, outcome}) ->
     [<<"external">>, <<"outcome">>];
 
-marshal(_, Other) ->
-    Other.
+marshal(Term, Value) ->
+    hg_msgpack_marshalling:marshal(Term, Value, ?MODULE).
 
 %% Unmarshalling
 
--spec unmarshal(hg_msgpack_marshalling:value()) -> final_cash_flow().
+-spec unmarshal(hg_msgpack_marshalling:value()) ->
+    final_cash_flow().
 
 unmarshal(CashFlow) ->
     unmarshal(final_cash_flow, CashFlow).
+
+-spec unmarshal(term(), hg_msgpack_marshalling:value()) ->
+    final_cash_flow().
 
 unmarshal(final_cash_flow, [_, CashFlow]) ->
     [unmarshal(final_cash_flow_posting, CashFlowPosting) || CashFlowPosting <- CashFlow];
@@ -298,5 +312,5 @@ unmarshal(account_type, [<<"external">>, <<"outcome">>]) ->
 unmarshal(account_type, {AccType1, AccType2} = AccType) when is_atom(AccType1), is_atom(AccType2) ->
     AccType;
 
-unmarshal(_, Other) ->
-    Other.
+unmarshal(Term, Value) ->
+    hg_msgpack_marshalling:unmarshal(Term, Value, ?MODULE).

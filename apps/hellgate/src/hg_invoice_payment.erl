@@ -54,6 +54,13 @@
 -export([marshal/1]).
 -export([unmarshal/1]).
 
+%% Msgpack marshalling callbacks
+
+-behaviour(hg_msgpack_marshalling).
+
+-export([marshal/2]).
+-export([unmarshal/2]).
+
 %%
 
 -record(st, {
@@ -1105,6 +1112,9 @@ marshal(Change) ->
 
 %% Changes
 
+-spec marshal(term(), term()) ->
+    term().
+
 marshal(change, ?payment_started(Payment, RiskScore, Route, Cashflow)) ->
     [2, #{
         <<"change">>        => <<"started">>,
@@ -1192,7 +1202,7 @@ marshal(session_change, ?trx_bound(Trx)) ->
 marshal(session_change, ?proxy_st_changed(ProxySt)) ->
     [2, [
         <<"proxy_state_changed">>,
-        marshal(bin, {bin, ProxySt})
+        marshal(bin, ProxySt)
     ]];
 marshal(session_change, ?interaction_requested(UserInteraction)) ->
     [2, [
@@ -1254,21 +1264,21 @@ marshal(payer, #domain_Payer{} = Payer) ->
 
 marshal(client_info, #domain_ClientInfo{} = ClientInfo) ->
     genlib_map:compact(#{
-        <<"ip_address">>    => marshal(str, ClientInfo#domain_ClientInfo.ip_address),
-        <<"fingerprint">>   => marshal(str, ClientInfo#domain_ClientInfo.fingerprint)
+        <<"ip_address">>    => marshal({maybe, str}, ClientInfo#domain_ClientInfo.ip_address),
+        <<"fingerprint">>   => marshal({maybe, str}, ClientInfo#domain_ClientInfo.fingerprint)
     });
 
 marshal(contact_info, #domain_ContactInfo{} = ContactInfo) ->
     genlib_map:compact(#{
-        <<"phone_number">>  => marshal(str, ContactInfo#domain_ContactInfo.phone_number),
-        <<"email">>         => marshal(str, ContactInfo#domain_ContactInfo.email)
+        <<"phone_number">>  => marshal({maybe, str}, ContactInfo#domain_ContactInfo.phone_number),
+        <<"email">>         => marshal({maybe, str}, ContactInfo#domain_ContactInfo.email)
     });
 
 marshal(trx, #domain_TransactionInfo{} = TransactionInfo) ->
     genlib_map:compact(#{
         <<"id">>            => marshal(str, TransactionInfo#domain_TransactionInfo.id),
         <<"timestamp">>     => marshal(str, TransactionInfo#domain_TransactionInfo.timestamp),
-        <<"extra">>         => marshal(map_str, TransactionInfo#domain_TransactionInfo.extra)
+        <<"extra">>         => marshal({map, str, str}, TransactionInfo#domain_TransactionInfo.extra)
     });
 
 marshal(interaction, {redirect, {get_request, #'BrowserGetRequest'{uri = URI}}}) ->
@@ -1284,7 +1294,7 @@ marshal(interaction, {redirect, {post_request, #'BrowserPostRequest'{uri = URI, 
             <<"post_request">>,
             #{
                 <<"uri">>   => marshal(str, URI),
-                <<"form">>  => marshal(map_str, Form)
+                <<"form">>  => marshal({map, str, str}, Form)
             }
         ]
     };
@@ -1309,8 +1319,8 @@ marshal(risk_score, high) ->
 marshal(risk_score, fatal) ->
     <<"fatal">>;
 
-marshal(_, Other) ->
-    Other.
+marshal(Term, Value) ->
+    hg_msgpack_marshalling:marshal(Term, Value, ?MODULE).
 
 %% Unmarshalling
 
@@ -1320,6 +1330,9 @@ unmarshal(Change) ->
     unmarshal(change, Change).
 
 %% Changes
+
+-spec unmarshal(term(), term()) ->
+    term().
 
 unmarshal(change, [2, #{
     <<"change">>        := <<"started">>,
@@ -1587,16 +1600,16 @@ unmarshal(client_info, ClientInfo) ->
 
 unmarshal(contact_info, ?legacy_contract_info(PhoneNumber, Email)) ->
     #domain_ContactInfo{
-        phone_number    = unmarshal(str, PhoneNumber),
-        email           = unmarshal(str, Email)
+        phone_number    = unmarshal({maybe, str}, PhoneNumber),
+        email           = unmarshal({maybe, str}, Email)
     };
 
 unmarshal(contact_info, ContractInfo) ->
     PhoneNumber = maps:get(<<"phone_number">>, ContractInfo, undefined),
     Email = maps:get(<<"email">>, ContractInfo, undefined),
     #domain_ContactInfo{
-        phone_number    = unmarshal(str, PhoneNumber),
-        email           = unmarshal(str, Email)
+        phone_number    = unmarshal({maybe, str}, PhoneNumber),
+        email           = unmarshal({maybe, str}, Email)
     };
 
 unmarshal(trx, #{
@@ -1607,14 +1620,14 @@ unmarshal(trx, #{
     #domain_TransactionInfo{
         id          = unmarshal(str, ID),
         timestamp   = unmarshal(str, Timestamp),
-        extra       = unmarshal(map_str, Extra)
+        extra       = unmarshal({map, str, str}, Extra)
     };
 
 unmarshal(trx, ?legacy_trx(ID, Timestamp, Extra)) ->
     #domain_TransactionInfo{
         id          = unmarshal(str, ID),
         timestamp   = unmarshal(str, Timestamp),
-        extra       = unmarshal(map_str, Extra)
+        extra       = unmarshal({map, str, str}, Extra)
     };
 
 unmarshal(interaction, #{<<"redirect">> := [<<"get_request">>, URI]}) ->
@@ -1626,7 +1639,7 @@ unmarshal(interaction, #{<<"redirect">> := [<<"post_request">>, #{
     {redirect, {post_request,
         #'BrowserPostRequest'{
             uri     = unmarshal(str, URI),
-            form    = unmarshal(map_str, Form)
+            form    = unmarshal({map, str, str}, Form)
         }
     }};
 
@@ -1636,7 +1649,7 @@ unmarshal(interaction, ?legacy_post_request(URI, Form)) ->
     {redirect, {post_request,
         #'BrowserPostRequest'{
             uri     = unmarshal(str, URI),
-            form    = unmarshal(map_str, Form)
+            form    = unmarshal({map, str, str}, Form)
         }
     }};
 
@@ -1675,5 +1688,5 @@ unmarshal(risk_score, <<"fatal">>) ->
 unmarshal(risk_score, RiskScore) when is_atom(RiskScore) ->
     RiskScore;
 
-unmarshal(_, Other) ->
-    Other.
+unmarshal(Term, Value) ->
+    hg_msgpack_marshalling:unmarshal(Term, Value, ?MODULE).

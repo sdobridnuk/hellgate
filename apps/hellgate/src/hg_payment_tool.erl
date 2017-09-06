@@ -11,6 +11,13 @@
 -export([marshal/1]).
 -export([unmarshal/1]).
 
+%% Msgpack marshalling callbacks
+
+-behaviour(hg_msgpack_marshalling).
+
+-export([marshal/2]).
+-export([unmarshal/2]).
+
 %%
 
 -type t() :: dmsl_domain_thrift:'PaymentTool'().
@@ -47,6 +54,9 @@ test_bank_card_condition({bin_in, RangeRef}, #domain_BankCard{bin = BIN}, Rev) -
 
 marshal(PaymentTool) ->
     marshal(payment_tool, PaymentTool).
+
+-spec marshal(term(), term()) ->
+    hg_msgpack_marshalling:value().
 
 marshal(payment_tool, {bank_card, #domain_BankCard{} = BankCard}) ->
     [2, #{
@@ -86,8 +96,8 @@ marshal(payment_system, nspkmir) ->
 marshal(terminal_type, euroset) ->
     <<"euroset">>;
 
-marshal(_, Other) ->
-    Other.
+marshal(Term, Value) ->
+    hg_msgpack_marshalling:marshal(Term, Value, ?MODULE).
 
 %% Unmarshalling
 
@@ -96,6 +106,9 @@ marshal(_, Other) ->
 
 unmarshal(PaymentTool) ->
     unmarshal(payment_tool, PaymentTool).
+
+-spec unmarshal(term(), hg_msgpack_marshalling:value()) ->
+    term().
 
 unmarshal(payment_tool, [2, #{
     <<"token">>             := Token,
@@ -153,5 +166,5 @@ unmarshal(terminal_type, <<"euroset">>) ->
 unmarshal(payment_system, PaymentSystem) when is_atom(PaymentSystem) ->
     PaymentSystem;
 
-unmarshal(_, Other) ->
-    Other.
+unmarshal(Term, Value) ->
+    hg_msgpack_marshalling:unmarshal(Term, Value, ?MODULE).

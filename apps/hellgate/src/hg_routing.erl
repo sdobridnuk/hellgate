@@ -8,6 +8,13 @@
 -export([marshal/1]).
 -export([unmarshal/1]).
 
+%% Msgpack marshalling callbacks
+
+-behaviour(hg_msgpack_marshalling).
+
+-export([marshal/2]).
+-export([unmarshal/2]).
+
 %%
 
 -type t() :: dmsl_domain_thrift:'InvoicePaymentRoute'().
@@ -104,6 +111,9 @@ is_flow_suitable(PaymentFlowTerminal, PaymentFlow) ->
 marshal(Route) ->
     marshal(route, Route).
 
+-spec marshal(term(), term()) ->
+    hg_msgpack_marshalling:value().
+
 marshal(route, #domain_InvoicePaymentRoute{} = Route) ->
     [2, #{
         <<"provider">> => marshal(provider_ref, Route#domain_InvoicePaymentRoute.provider),
@@ -116,8 +126,8 @@ marshal(provider_ref, #domain_ProviderRef{id = ObjectID}) ->
 marshal(terminal_ref, #domain_TerminalRef{id = ObjectID}) ->
     marshal(int, ObjectID);
 
-marshal(_, Other) ->
-    Other.
+marshal(Term, Value) ->
+    hg_msgpack_marshalling:marshal(Term, Value, ?MODULE).
 
 %% Unmarshalling
 
@@ -126,6 +136,9 @@ marshal(_, Other) ->
 
 unmarshal(Route) ->
     unmarshal(route, Route).
+
+-spec unmarshal(term(), hg_msgpack_marshalling:value()) ->
+    term().
 
 unmarshal(route, [2, #{
     <<"provider">> := Provider,
@@ -153,5 +166,5 @@ unmarshal(terminal_ref, ?legacy_terminal(ObjectID)) ->
 unmarshal(terminal_ref, ObjectID) ->
     #domain_TerminalRef{id = unmarshal(int, ObjectID)};
 
-unmarshal(_, Other) ->
-    Other.
+unmarshal(Term, Value) ->
+    hg_msgpack_marshalling:unmarshal(Term, Value, ?MODULE).
