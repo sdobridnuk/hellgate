@@ -2,32 +2,30 @@
 -include_lib("dmsl/include/dmsl_domain_thrift.hrl").
 -include("domain.hrl").
 
--export([marshal/1]).
--export([unmarshal/1]).
-
--type cash() :: dmsl_domain_thrift:'Cash'().
+-export([marshal/2]).
+-export([unmarshal/2]).
 
 %% Marshalling
 
--spec marshal(cash()) ->
-    hg_msgpack_marshalling:value().
-
-marshal(Cash) ->
-    marshal(cash, Cash).
+-spec marshal(term(), term()) ->
+    term().
 
 marshal(cash, ?cash(Amount, ?currency(SymbolicCode))) ->
-    [2, [Amount, SymbolicCode]].
+    [2, [marshal(int, Amount), marshal(str, SymbolicCode)]];
+
+marshal(Term, Value) ->
+    hg_msgpack_marshalling:marshal(Term, Value, ?MODULE).
 
 %% Unmarshalling
 
--spec unmarshal(hg_msgpack_marshalling:value()) ->
-    cash().
-
-unmarshal(Cash) ->
-    unmarshal(cash, Cash).
+-spec unmarshal(term(), term()) ->
+    term().
 
 unmarshal(cash, [2, [Amount, SymbolicCode]]) ->
-    ?cash(Amount, ?currency(SymbolicCode));
+    ?cash(unmarshal(int, Amount), ?currency(unmarshal(str, SymbolicCode)));
 
 unmarshal(cash, [1, {'domain_Cash', Amount, {'domain_CurrencyRef', SymbolicCode}}]) ->
-    ?cash(Amount, ?currency(SymbolicCode)).
+    ?cash(unmarshal(int, Amount), ?currency(unmarshal(str, SymbolicCode)));
+
+unmarshal(Term, Value) ->
+    hg_msgpack_marshalling:unmarshal(Term, Value, ?MODULE).

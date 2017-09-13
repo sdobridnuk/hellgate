@@ -24,9 +24,6 @@
 
 -export([get_partial_remainders/1]).
 
--export([marshal/1]).
--export([unmarshal/1]).
-
 %% Msgpack marshalling callbacks
 
 -behaviour(hg_msgpack_marshalling).
@@ -194,14 +191,8 @@ get_partial_remainders(CashFlow) ->
 -include("legacy_structures.hrl").
 %% Marshalling
 
--spec marshal(final_cash_flow()) ->
-    hg_msgpack_marshalling:value().
-
-marshal(CashFlow) ->
-    marshal(final_cash_flow, CashFlow).
-
--spec marshal(term(), final_cash_flow()) ->
-    hg_msgpack_marshalling:value().
+-spec marshal(term(), term()) ->
+    term().
 
 marshal(final_cash_flow, CashFlow) ->
     [2, [marshal(final_cash_flow_posting, CashFlowPosting) || CashFlowPosting <- CashFlow]];
@@ -213,9 +204,9 @@ marshal(final_cash_flow_posting, #domain_FinalCashFlowPosting{} = CashFlowPostin
         <<"destination">>   =>
             marshal(final_cash_flow_account, CashFlowPosting#domain_FinalCashFlowPosting.destination),
         <<"volume">>        =>
-            hg_cash:marshal(CashFlowPosting#domain_FinalCashFlowPosting.volume),
+            hg_cash:marshal(cash, CashFlowPosting#domain_FinalCashFlowPosting.volume),
         <<"details">>       =>
-            marshal(str, CashFlowPosting#domain_FinalCashFlowPosting.details)
+            marshal({maybe, str}, CashFlowPosting#domain_FinalCashFlowPosting.details)
     });
 
 marshal(final_cash_flow_account, #domain_FinalCashFlowAccount{} = CashFlowAccount) ->
@@ -223,7 +214,7 @@ marshal(final_cash_flow_account, #domain_FinalCashFlowAccount{} = CashFlowAccoun
         <<"type">>  =>
             marshal(account_type, CashFlowAccount#domain_FinalCashFlowAccount.account_type),
         <<"id">>    =>
-             marshal(str, CashFlowAccount#domain_FinalCashFlowAccount.account_id)
+             marshal(int, CashFlowAccount#domain_FinalCashFlowAccount.account_id)
     };
 
 marshal(account_type, {merchant, settlement}) ->
@@ -244,14 +235,8 @@ marshal(Term, Value) ->
 
 %% Unmarshalling
 
--spec unmarshal(hg_msgpack_marshalling:value()) ->
-    final_cash_flow().
-
-unmarshal(CashFlow) ->
-    unmarshal(final_cash_flow, CashFlow).
-
--spec unmarshal(term(), hg_msgpack_marshalling:value()) ->
-    final_cash_flow().
+-spec unmarshal(term(), term()) ->
+    term().
 
 unmarshal(final_cash_flow, [_, CashFlow]) ->
     [unmarshal(final_cash_flow_posting, CashFlowPosting) || CashFlowPosting <- CashFlow];
@@ -261,12 +246,11 @@ unmarshal(final_cash_flow_posting, #{
     <<"destination">>   := Destination,
     <<"volume">>        := Volume
 } = CashFlow) ->
-    Details = maps:get(<<"details">>, CashFlow, undefined),
     #domain_FinalCashFlowPosting{
         source          = unmarshal(final_cash_flow_account, Source),
         destination     = unmarshal(final_cash_flow_account, Destination),
-        volume          = hg_cash:unmarshal(Volume),
-        details         = unmarshal(str, Details)
+        volume          = hg_cash:unmarshal(cash, Volume),
+        details         = unmarshal({maybe, str}, genlib_map:get(<<"details">>, CashFlow))
     };
 
 unmarshal(final_cash_flow_posting,
@@ -275,8 +259,8 @@ unmarshal(final_cash_flow_posting,
     #domain_FinalCashFlowPosting{
         source          = unmarshal(final_cash_flow_account, Source),
         destination     = unmarshal(final_cash_flow_account, Destination),
-        volume          = hg_cash:unmarshal([1, Volume]),
-        details         = unmarshal(str, Details)
+        volume          = hg_cash:unmarshal(cash, [1, Volume]),
+        details         = unmarshal({maybe, str}, Details)
     };
 
 unmarshal(final_cash_flow_account, #{
@@ -285,7 +269,7 @@ unmarshal(final_cash_flow_account, #{
 }) ->
     #domain_FinalCashFlowAccount{
         account_type    = unmarshal(account_type, AccountType),
-        account_id      = unmarshal(str, AccountId)
+        account_id      = unmarshal(int, AccountId)
     };
 
 unmarshal(final_cash_flow_account,
@@ -293,7 +277,7 @@ unmarshal(final_cash_flow_account,
 ) ->
     #domain_FinalCashFlowAccount{
         account_type    = unmarshal(account_type, AccountType),
-        account_id      = unmarshal(str, AccountId)
+        account_id      = unmarshal(int, AccountId)
     };
 
 unmarshal(account_type, [<<"merchant">>, <<"settlement">>]) ->

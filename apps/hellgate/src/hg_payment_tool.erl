@@ -8,9 +8,6 @@
 -export([get_method/1]).
 -export([test_condition/3]).
 
--export([marshal/1]).
--export([unmarshal/1]).
-
 %% Msgpack marshalling callbacks
 
 -behaviour(hg_msgpack_marshalling).
@@ -49,14 +46,8 @@ test_bank_card_condition({bin_in, RangeRef}, #domain_BankCard{bin = BIN}, Rev) -
 -include("legacy_structures.hrl").
 %% Marshalling
 
--spec marshal(t()) ->
-    hg_msgpack_marshalling:value().
-
-marshal(PaymentTool) ->
-    marshal(payment_tool, PaymentTool).
-
 -spec marshal(term(), term()) ->
-    hg_msgpack_marshalling:value().
+    term().
 
 marshal(payment_tool, {bank_card, #domain_BankCard{} = BankCard}) ->
     [2, #{
@@ -101,13 +92,7 @@ marshal(Term, Value) ->
 
 %% Unmarshalling
 
--spec unmarshal(hg_msgpack_marshalling:value()) ->
-    t().
-
-unmarshal(PaymentTool) ->
-    unmarshal(payment_tool, PaymentTool).
-
--spec unmarshal(term(), hg_msgpack_marshalling:value()) ->
+-spec unmarshal(term(), term()) ->
     term().
 
 unmarshal(payment_tool, [2, #{

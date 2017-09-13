@@ -2,18 +2,13 @@
 -include_lib("dmsl/include/dmsl_domain_thrift.hrl").
 -include("domain.hrl").
 
--export([marshal/1]).
--export([unmarshal/1]).
-
--type cash_range() :: dmsl_domain_thrift:'CashRange'().
+-export([marshal/2]).
+-export([unmarshal/2]).
 
 %% Marshalling
 
--spec marshal(cash_range()) ->
-    hg_msgpack_marshalling:value().
-
-marshal(CashRange) ->
-    marshal(cash_range, CashRange).
+-spec marshal(term(), term()) ->
+    term().
 
 marshal(cash_range, #domain_CashRange{
     lower = Lower,
@@ -22,7 +17,7 @@ marshal(cash_range, #domain_CashRange{
     [2, [marshal(cash_bound, Lower), marshal(cash_bound, Upper)]];
 
 marshal(cash_bound, {Exclusiveness, Cash}) ->
-    [marshal(exclusiveness, Exclusiveness), hg_cash:marshal(Cash)];
+    [marshal(exclusiveness, Exclusiveness), hg_cash:marshal(cash, Cash)];
 
 marshal(exclusiveness, inclusive) ->
     <<"inclusive">>;
@@ -31,11 +26,8 @@ marshal(exclusiveness, exclusive) ->
 
 %% Unmarshalling
 
--spec unmarshal(hg_msgpack_marshalling:value()) ->
-    cash_range().
-
-unmarshal(CashRange) ->
-    unmarshal(cash_range, CashRange).
+-spec unmarshal(term(), term()) ->
+    term().
 
 unmarshal(cash_range, [2, [Lower, Upper]]) ->
     #domain_CashRange{
@@ -44,7 +36,7 @@ unmarshal(cash_range, [2, [Lower, Upper]]) ->
     };
 
 unmarshal(cash_bound, [Exclusiveness, Cash]) ->
-    {unmarshal(exclusiveness, Exclusiveness), hg_cash:unmarshal(Cash)};
+    {unmarshal(exclusiveness, Exclusiveness), hg_cash:unmarshal(cash, Cash)};
 
 unmarshal(exclusiveness, <<"inclusive">>) ->
     inclusive;
@@ -60,4 +52,4 @@ unmarshal(cash_range, [1, {'domain_CashRange', Upper, Lower}]) ->
 unmarshal(cash_bound_legacy, {Exclusiveness, Cash}) when
     Exclusiveness == exclusive; Exclusiveness == inclusive
 ->
-    {Exclusiveness, hg_cash:unmarshal([1, Cash])}.
+    {Exclusiveness, hg_cash:unmarshal(cash, [1, Cash])}.

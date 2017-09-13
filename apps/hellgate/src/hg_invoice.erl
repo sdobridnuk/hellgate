@@ -300,7 +300,7 @@ unmarshal_history_result(Error) ->
     hg_event_provider:public_event().
 
 publish_event(InvoiceID, Changes) ->
-    {{invoice_id, InvoiceID}, ?invoice_ev(unmarshal({list, changes}, Changes))}.
+    {{invoice_id, InvoiceID}, ?invoice_ev(unmarshal({list, change}, Changes))}.
 
 %%
 
@@ -816,7 +816,7 @@ get_message(invoice_status_changed) ->
 %% Marshalling
 
 marshal(Changes) when is_list(Changes) ->
-    [marshal(change, Change) || Change <- Changes].
+    marshal({list, change}, Changes).
 
 %% Changes
 
@@ -837,7 +837,7 @@ marshal(change, ?payment_ev(PaymentID, Payload)) ->
     [2, #{
         <<"change">>    => <<"payment_change">>,
         <<"id">>        => marshal(str, PaymentID),
-        <<"payload">>   => hg_invoice_payment:marshal(Payload)
+        <<"payload">>   => hg_invoice_payment:marshal(change, Payload)
     }];
 
 %% Change components
@@ -848,18 +848,11 @@ marshal(invoice, #domain_Invoice{} = Invoice) ->
         <<"shop_id">>       => marshal(str, Invoice#domain_Invoice.shop_id),
         <<"owner_id">>      => marshal(str, Invoice#domain_Invoice.owner_id),
         <<"created_at">>    => marshal(str, Invoice#domain_Invoice.created_at),
-        <<"cost">>          => hg_cash:marshal(Invoice#domain_Invoice.cost),
+        <<"cost">>          => hg_cash:marshal(cash, Invoice#domain_Invoice.cost),
         <<"due">>           => marshal(str, Invoice#domain_Invoice.due),
-        <<"details">>       => marshal(details, Invoice#domain_Invoice.details),
-        <<"context">>       => hg_content:marshal(Invoice#domain_Invoice.context),
+        <<"details">>       => hg_invoice_details:marshal(details, Invoice#domain_Invoice.details),
+        <<"context">>       => hg_content:marshal({maybe, content}, Invoice#domain_Invoice.context),
         <<"template_id">>   => marshal({maybe, str}, Invoice#domain_Invoice.template_id)
-    });
-
-marshal(details, #domain_InvoiceDetails{} = Details) ->
-    genlib_map:compact(#{
-        <<"product">> => marshal(str, Details#domain_InvoiceDetails.product),
-        <<"description">> => marshal({maybe, str}, Details#domain_InvoiceDetails.description),
-        <<"cart">> => marshal({maybe, cart}, Details#domain_InvoiceDetails.cart)
     });
 
 marshal(status, ?invoice_paid()) ->
@@ -876,26 +869,6 @@ marshal(status, ?invoice_fulfilled(Reason)) ->
         <<"fulfilled">>,
         marshal(str, Reason)
     ];
-
-marshal(cart, #domain_InvoiceCart{lines = Lines}) ->
-    marshal({list,  line}, Lines);
-
-marshal(line, #domain_InvoiceLine{} = InvoiceLine) ->
-    #{
-        <<"product">> => marshal(str, InvoiceLine#domain_InvoiceLine.product),
-        <<"quantity">> => marshal(int, InvoiceLine#domain_InvoiceLine.quantity),
-        <<"price">> => hg_cash:marshal(InvoiceLine#domain_InvoiceLine.price),
-        <<"metadata">> => marshal(metadata, InvoiceLine#domain_InvoiceLine.metadata)
-    };
-
-marshal(metadata, Metadata) ->
-    maps:fold(
-        fun(K, V, Acc) ->
-            maps:put(marshal(str, K), marshal(msgpack, V), Acc)
-        end,
-        #{},
-        Metadata
-    );
 
 marshal(Term, Value) ->
     hg_msgpack_marshalling:marshal(Term, Value, ?MODULE).
@@ -936,7 +909,7 @@ unmarshal(change, [2, #{
 }]) ->
     ?payment_ev(
         unmarshal(str, PaymentID),
-        hg_invoice_payment:unmarshal(Payload)
+        hg_invoice_payment:unmarshal(change, Payload)
     );
 
 unmarshal(change, [1, ?legacy_invoice_created(Invoice)]) ->
@@ -946,7 +919,7 @@ unmarshal(change, [1, ?legacy_invoice_status_changed(Status)]) ->
 unmarshal(change, [1, ?legacy_payment_ev(PaymentID, Payload)]) ->
     ?payment_ev(
         unmarshal(str, PaymentID),
-        hg_invoice_payment:unmarshal([1, Payload])
+        hg_invoice_payment:unmarshal(change, [1, Payload])
     );
 
 %% Change components
@@ -960,19 +933,17 @@ unmarshal(invoice, #{
     <<"due">>           := Due,
     <<"details">>       := Details
 } = Invoice) ->
-    Context = maps:get(<<"context">>, Invoice, undefined),
-    TemplateID = maps:get(<<"template_id">>, Invoice, undefined),
     #domain_Invoice{
         id              = unmarshal(str, ID),
         shop_id         = unmarshal(str, ShopID),
         owner_id        = unmarshal(str, PartyID),
         created_at      = unmarshal(str, CreatedAt),
-        cost            = hg_cash:unmarshal(Cash),
+        cost            = hg_cash:unmarshal(cash, Cash),
         due             = unmarshal(str, Due),
-        details         = unmarshal(details, Details),
+        details         = hg_invoice_details:unmarshal(details, Details),
         status          = ?invoice_unpaid(),
-        context         = hg_content:unmarshal(Context),
-        template_id     = unmarshal({maybe, str}, TemplateID)
+        context         = hg_content:unmarshal({maybe, content}, genlib_map:get(<<"context">>, Invoice)),
+        template_id     = unmarshal({maybe, str}, genlib_map:get(<<"template_id">>, Invoice))
     };
 
 unmarshal(invoice,
@@ -983,11 +954,11 @@ unmarshal(invoice,
         shop_id         = unmarshal(str, ShopID),
         owner_id        = unmarshal(str, PartyID),
         created_at      = unmarshal(str, CreatedAt),
-        cost            = hg_cash:unmarshal([1, Cash]),
+        cost            = hg_cash:unmarshal(cash, [1, Cash]),
         due             = unmarshal(str, Due),
-        details         = unmarshal(details, Details),
+        details         = hg_invoice_details:unmarshal(details, Details),
         status          = unmarshal(status, Status),
-        context         = hg_content:unmarshal(Context),
+        context         = hg_content:unmarshal({maybe, content}, Context),
         template_id     = unmarshal({maybe, str}, TemplateID)
     };
 
@@ -1008,46 +979,6 @@ unmarshal(status, ?legacy_invoice_cancelled(Reason)) ->
     ?invoice_cancelled(unmarshal(str, Reason));
 unmarshal(status, ?legacy_invoice_fulfilled(Reason)) ->
     ?invoice_fulfilled(unmarshal(str, Reason));
-
-unmarshal(details, #{<<"product">> := Product} = Details) ->
-    Description = maps:get(<<"description">>, Details, undefined),
-    Cart = maps:get(<<"cart">>, Details, undefined),
-    #domain_InvoiceDetails{
-        product     = unmarshal(str, Product),
-        description = unmarshal({maybe, str}, Description),
-        cart        = unmarshal({maybe, cart}, Cart)
-    };
-
-unmarshal(details, ?legacy_invoice_details(Product, Description)) ->
-    #domain_InvoiceDetails{
-        product     = unmarshal(str, Product),
-        description = unmarshal({maybe, str}, Description)
-    };
-
-unmarshal(cart, Lines) when is_list(Lines) ->
-    #domain_InvoiceCart{lines = unmarshal({list, line}, Lines)};
-
-unmarshal(line, #{
-    <<"product">> := Product,
-    <<"quantity">> := Quantity,
-    <<"price">> := Price,
-    <<"metadata">> := Metadata
-}) ->
-    #domain_InvoiceLine{
-        product = unmarshal(str, Product),
-        quantity = unmarshal(int, Quantity),
-        price = hg_cash:unmarshal(Price),
-        metadata = unmarshal(metadata, Metadata)
-    };
-
-unmarshal(metadata, Metadata) ->
-    maps:fold(
-        fun(K, V, Acc) ->
-            maps:put(unmarshal(str, K), unmarshal(msgpack, V), Acc)
-        end,
-        #{},
-        Metadata
-    );
 
 unmarshal(Term, Value) ->
     hg_msgpack_marshalling:unmarshal(Term, Value, ?MODULE).

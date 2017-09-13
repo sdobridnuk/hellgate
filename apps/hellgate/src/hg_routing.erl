@@ -5,9 +5,6 @@
 
 -export([choose/2]).
 
--export([marshal/1]).
--export([unmarshal/1]).
-
 %% Msgpack marshalling callbacks
 
 -behaviour(hg_msgpack_marshalling).
@@ -105,14 +102,8 @@ is_flow_suitable(PaymentFlowTerminal, PaymentFlow) ->
 -include("legacy_structures.hrl").
 %% Marshalling
 
--spec marshal(t()) ->
-    hg_msgpack_marshalling:value().
-
-marshal(Route) ->
-    marshal(route, Route).
-
 -spec marshal(term(), term()) ->
-    hg_msgpack_marshalling:value().
+    term().
 
 marshal(route, #domain_InvoicePaymentRoute{} = Route) ->
     [2, #{
@@ -131,13 +122,7 @@ marshal(Term, Value) ->
 
 %% Unmarshalling
 
--spec unmarshal(hg_msgpack_marshalling:value()) ->
-    t().
-
-unmarshal(Route) ->
-    unmarshal(route, Route).
-
--spec unmarshal(term(), hg_msgpack_marshalling:value()) ->
+-spec unmarshal(term(), term()) ->
     term().
 
 unmarshal(route, [2, #{

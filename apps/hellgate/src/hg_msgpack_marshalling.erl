@@ -15,7 +15,7 @@
 -callback marshal(term(), term()) ->
     term().
 
-%%
+%% Common marshalling
 
 -spec marshal(value()) ->
     dmsl_msgpack_thrift:'Value'().
@@ -62,9 +62,9 @@ unmarshal({obj, Object}) ->
 unmarshal({arr, Array}) ->
     lists:map(fun unmarshal/1, Array).
 
-%%
+%% Marshalling that depends from module
 
--spec marshal(atom(), value(), atom()) ->
+-spec marshal(term(), value(), atom()) ->
     value().
 
 marshal(str, String, _) when is_binary(String) ->
@@ -86,7 +86,7 @@ marshal(msgpack, Msgpack, _) ->
 marshal(Term, Value, Module) ->
     Module:marshal(Term, Value).
 
--spec unmarshal(atom(), value(), atom()) ->
+-spec unmarshal(term(), value(), atom()) ->
     value().
 
 unmarshal(str, String, _) ->
@@ -97,8 +97,10 @@ unmarshal(int, Integer, _) ->
     Integer;
 unmarshal({map, str, str}, Map, _) ->
     Map;
-unmarshal({maybe, _}, _, _) ->
+unmarshal({maybe, _}, undefined, _) ->
     undefined;
+unmarshal({maybe, Term}, Value, Module) ->
+    unmarshal(Term, Value, Module);
 unmarshal({list, Term}, Values, Module) when is_list(Values) ->
     [Module:unmarshal(Term, Value) || Value <- Values];
 unmarshal(msgpack, Msgpack, _) ->

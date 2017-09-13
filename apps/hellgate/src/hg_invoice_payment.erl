@@ -51,9 +51,6 @@
 
 -export([get_log_params/2]).
 
--export([marshal/1]).
--export([unmarshal/1]).
-
 %% Msgpack marshalling callbacks
 
 -behaviour(hg_msgpack_marshalling).
@@ -1104,12 +1101,6 @@ get_message(invoice_payment_status_changed) ->
 -include("legacy_structures.hrl").
 %% Marshalling
 
--spec marshal(change()) ->
-    hg_msgpack_marshalling:value().
-
-marshal(Change) ->
-    marshal(change, Change).
-
 %% Changes
 
 -spec marshal(term(), term()) ->
@@ -1120,8 +1111,8 @@ marshal(change, ?payment_started(Payment, RiskScore, Route, Cashflow)) ->
         <<"change">>        => <<"started">>,
         <<"payment">>       => marshal(payment, Payment),
         <<"risk_score">>    => marshal(risk_score, RiskScore),
-        <<"route">>         => hg_routing:marshal(Route),
-        <<"cash_flow">>     => hg_cashflow:marshal(Cashflow)
+        <<"route">>         => hg_routing:marshal(route, Route),
+        <<"cash_flow">>     => hg_cashflow:marshal(final_cash_flow, Cashflow)
     }];
 marshal(change, ?payment_status_changed(Status)) ->
     [2, #{
@@ -1147,11 +1138,11 @@ marshal(payment, #domain_InvoicePayment{} = Payment) ->
     genlib_map:compact(#{
         <<"id">>                => marshal(str, Payment#domain_InvoicePayment.id),
         <<"created_at">>        => marshal(str, Payment#domain_InvoicePayment.created_at),
-        <<"domain_revision">>   => marshal(str, Payment#domain_InvoicePayment.domain_revision),
-        <<"cost">>              => hg_cash:marshal(Payment#domain_InvoicePayment.cost),
+        <<"domain_revision">>   => marshal(int, Payment#domain_InvoicePayment.domain_revision),
+        <<"cost">>              => hg_cash:marshal(cash, Payment#domain_InvoicePayment.cost),
         <<"payer">>             => marshal(payer, Payment#domain_InvoicePayment.payer),
         <<"flow">>              => marshal(flow, Payment#domain_InvoicePayment.flow),
-        <<"context">>           => hg_content:marshal(Payment#domain_InvoicePayment.context)
+        <<"context">>           => hg_content:marshal({maybe, content}, Payment#domain_InvoicePayment.context)
     });
 
 marshal(flow, ?invoice_payment_flow_instant()) ->
@@ -1175,12 +1166,12 @@ marshal(status, ?failed(Failure)) ->
 marshal(status, ?captured_with_reason(Reason)) ->
     [
         <<"captured">>,
-        marshal(str, Reason)
+        marshal({maybe, str}, Reason)
     ];
 marshal(status, ?cancelled_with_reason(Reason)) ->
     [
         <<"cancelled">>,
-        marshal(str, Reason)
+        marshal({maybe, str}, Reason)
     ];
 
 marshal(session_change, ?session_started()) ->
@@ -1235,9 +1226,9 @@ marshal(adj, #domain_InvoicePaymentAdjustment{} = Adjustment) ->
         <<"created_at">>            => marshal(str, Adjustment#domain_InvoicePaymentAdjustment.created_at),
         <<"domain_revision">>       => marshal(int, Adjustment#domain_InvoicePaymentAdjustment.domain_revision),
         <<"reason">>                => marshal(str, Adjustment#domain_InvoicePaymentAdjustment.reason),
-        <<"old_cash_flow_inverse">> => hg_cashflow:marshal(
+        <<"old_cash_flow_inverse">> => hg_cashflow:marshal(final_cash_flow,
             Adjustment#domain_InvoicePaymentAdjustment.old_cash_flow_inverse),
-        <<"new_cash_flow">>         => hg_cashflow:marshal(
+        <<"new_cash_flow">>         => hg_cashflow:marshal(final_cash_flow,
             Adjustment#domain_InvoicePaymentAdjustment.new_cash_flow)
     };
 
@@ -1256,7 +1247,7 @@ marshal(adj_status, ?adjustment_cancelled(At)) ->
 
 marshal(payer, #domain_Payer{} = Payer) ->
     #{
-        <<"payment_tool">>  => hg_payment_tool:marshal(Payer#domain_Payer.payment_tool),
+        <<"payment_tool">>  => hg_payment_tool:marshal(payment_tool, Payer#domain_Payer.payment_tool),
         <<"session_id">>    => marshal(str, Payer#domain_Payer.session_id),
         <<"client_info">>   => marshal(client_info, Payer#domain_Payer.client_info),
         <<"contact_info">>  => marshal(contact_info, Payer#domain_Payer.contact_info)
@@ -1277,7 +1268,7 @@ marshal(contact_info, #domain_ContactInfo{} = ContactInfo) ->
 marshal(trx, #domain_TransactionInfo{} = TransactionInfo) ->
     genlib_map:compact(#{
         <<"id">>            => marshal(str, TransactionInfo#domain_TransactionInfo.id),
-        <<"timestamp">>     => marshal(str, TransactionInfo#domain_TransactionInfo.timestamp),
+        <<"timestamp">>     => marshal({maybe, str}, TransactionInfo#domain_TransactionInfo.timestamp),
         <<"extra">>         => marshal({map, str, str}, TransactionInfo#domain_TransactionInfo.extra)
     });
 
@@ -1324,11 +1315,6 @@ marshal(Term, Value) ->
 
 %% Unmarshalling
 
--spec unmarshal(hg_msgpack_marshalling:value()) -> change().
-
-unmarshal(Change) ->
-    unmarshal(change, Change).
-
 %% Changes
 
 -spec unmarshal(term(), term()) ->
@@ -1344,8 +1330,8 @@ unmarshal(change, [2, #{
     ?payment_started(
         unmarshal(payment, Payment),
         unmarshal(risk_score, RiskScore),
-        hg_routing:unmarshal(Route),
-        hg_cashflow:unmarshal(Cashflow)
+        hg_routing:unmarshal(route, Route),
+        hg_cashflow:unmarshal(final_cash_flow, Cashflow)
     );
 unmarshal(change, [2, #{
     <<"change">>    := <<"status_changed">>,
@@ -1369,8 +1355,8 @@ unmarshal(change, [1, ?legacy_payment_started(Payment, RiskScore, Route, Cashflo
     ?payment_started(
         unmarshal(payment, Payment),
         unmarshal(risk_score, RiskScore),
-        hg_routing:unmarshal([1, Route]),
-        hg_cashflow:unmarshal([1, Cashflow])
+        hg_routing:unmarshal(route, [1, Route]),
+        hg_cashflow:unmarshal(final_cash_flow, [1, Cashflow])
     );
 unmarshal(change, [1, ?legacy_payment_status_changed(Status)]) ->
     ?payment_status_changed(unmarshal(status, Status));
@@ -1389,16 +1375,15 @@ unmarshal(payment, #{
     <<"payer">>             := Payer,
     <<"flow">>              := Flow
 } = Payment) ->
-    Context = maps:get(<<"context">>, Payment, undefined),
     #domain_InvoicePayment{
         id              = unmarshal(str, ID),
         created_at      = unmarshal(str, CreatedAt),
         domain_revision = unmarshal(int, Revision),
-        cost            = hg_cash:unmarshal(Cash),
+        cost            = hg_cash:unmarshal(cash, Cash),
         payer           = unmarshal(payer, Payer),
         status          = ?pending(),
         flow            = unmarshal(flow, Flow),
-        context         = hg_content:unmarshal(Context)
+        context         = hg_content:unmarshal({maybe, content}, genlib_map:get(<<"context">>, Payment))
     };
 
 unmarshal(payment,
@@ -1409,10 +1394,10 @@ unmarshal(payment,
         created_at      = unmarshal(str, CreatedAt),
         domain_revision = unmarshal(int, Revision),
         status          = unmarshal(status, Status),
-        cost            = hg_cash:unmarshal([1, Cash]),
+        cost            = hg_cash:unmarshal(cash, [1, Cash]),
         payer           = unmarshal(payer, Payer),
         flow            = ?invoice_payment_flow_instant(),
-        context         = hg_content:unmarshal(Context)
+        context         = hg_content:unmarshal({maybe, content}, Context)
     };
 
 %% Flow
@@ -1437,9 +1422,9 @@ unmarshal(status, <<"processed">>) ->
 unmarshal(status, [<<"failed">>, Failure]) ->
     ?failed(unmarshal(failure, Failure));
 unmarshal(status, [<<"captured">>, Reason]) ->
-    ?captured_with_reason(unmarshal(str, Reason));
+    ?captured_with_reason(unmarshal({maybe, str}, Reason));
 unmarshal(status, [<<"cancelled">>, Reason]) ->
-    ?cancelled_with_reason(unmarshal(str, Reason));
+    ?cancelled_with_reason(unmarshal({maybe, str}, Reason));
 
 unmarshal(status, ?legacy_pending()) ->
     ?pending();
@@ -1448,9 +1433,9 @@ unmarshal(status, ?legacy_processed()) ->
 unmarshal(status, ?legacy_failed(Failure)) ->
     ?failed(unmarshal(failure, [1, Failure]));
 unmarshal(status, ?legacy_captured(Reason)) ->
-    ?captured_with_reason(unmarshal(str, Reason));
+    ?captured_with_reason(unmarshal({maybe, str}, Reason));
 unmarshal(status, ?legacy_cancelled(Reason)) ->
-    ?cancelled_with_reason(unmarshal(str, Reason));
+    ?cancelled_with_reason(unmarshal({maybe, str}, Reason));
 
 %% Session change
 
@@ -1524,8 +1509,8 @@ unmarshal(adj, #{
         created_at            = unmarshal(str, CreatedAt),
         domain_revision       = unmarshal(int, Revision),
         reason                = unmarshal(str, Reason),
-        old_cash_flow_inverse = hg_cashflow:unmarshal(OldCashFlowInverse),
-        new_cash_flow         = hg_cashflow:unmarshal(NewCashFlow)
+        old_cash_flow_inverse = hg_cashflow:unmarshal(final_cash_flow, OldCashFlowInverse),
+        new_cash_flow         = hg_cashflow:unmarshal(final_cash_flow, NewCashFlow)
     };
 
 unmarshal(adj,
@@ -1537,8 +1522,8 @@ unmarshal(adj,
         created_at            = unmarshal(str, CreatedAt),
         domain_revision       = unmarshal(int, Revision),
         reason                = unmarshal(str, Reason),
-        old_cash_flow_inverse = hg_cashflow:unmarshal([1, OldCashFlowInverse]),
-        new_cash_flow         = hg_cashflow:unmarshal([1, NewCashFlow])
+        old_cash_flow_inverse = hg_cashflow:unmarshal(final_cash_flow, [1, OldCashFlowInverse]),
+        new_cash_flow         = hg_cashflow:unmarshal(final_cash_flow, [1, NewCashFlow])
     };
 
 %% Adjustment status
@@ -1566,7 +1551,7 @@ unmarshal(payer, #{
     <<"contact_info">>  := ContractInfo
 }) ->
     #domain_Payer{
-        payment_tool    = hg_payment_tool:unmarshal(PaymentTool),
+        payment_tool    = hg_payment_tool:unmarshal(payment_tool, PaymentTool),
         session_id      = unmarshal(str, SessionId),
         client_info     = unmarshal(client_info, ClientInfo),
         contact_info    = unmarshal(contact_info, ContractInfo)
@@ -1574,7 +1559,7 @@ unmarshal(payer, #{
 
 unmarshal(payer, ?legacy_payer(PaymentTool, SessionId, ClientInfo, ContractInfo)) ->
     #domain_Payer{
-        payment_tool    = hg_payment_tool:unmarshal([1, PaymentTool]),
+        payment_tool    = hg_payment_tool:unmarshal(payment_tool, [1, PaymentTool]),
         session_id      = unmarshal(str, SessionId),
         client_info     = unmarshal(client_info, ClientInfo),
         contact_info    = unmarshal(contact_info, ContractInfo)
@@ -1589,11 +1574,9 @@ unmarshal(client_info, ?legacy_client_info(IpAddress, Fingerprint)) ->
     };
 
 unmarshal(client_info, ClientInfo) ->
-    IpAddress = maps:get(<<"ip_address">>, ClientInfo, undefined),
-    Fingerprint = maps:get(<<"fingerprint">>, ClientInfo, undefined),
     #domain_ClientInfo{
-        ip_address      = unmarshal(str, IpAddress),
-        fingerprint     = unmarshal(str, Fingerprint)
+        ip_address      = unmarshal(str, genlib_map:get(<<"ip_address">>, ClientInfo)),
+        fingerprint     = unmarshal(str, genlib_map:get(<<"fingerprint">>, ClientInfo))
     };
 
 %% Contract info
@@ -1605,28 +1588,25 @@ unmarshal(contact_info, ?legacy_contract_info(PhoneNumber, Email)) ->
     };
 
 unmarshal(contact_info, ContractInfo) ->
-    PhoneNumber = maps:get(<<"phone_number">>, ContractInfo, undefined),
-    Email = maps:get(<<"email">>, ContractInfo, undefined),
     #domain_ContactInfo{
-        phone_number    = unmarshal({maybe, str}, PhoneNumber),
-        email           = unmarshal({maybe, str}, Email)
+        phone_number    = unmarshal({maybe, str}, genlib_map:get(<<"phone_number">>, ContractInfo)),
+        email           = unmarshal({maybe, str}, genlib_map:get(<<"email">>, ContractInfo))
     };
 
 unmarshal(trx, #{
     <<"id">>    := ID,
     <<"extra">> := Extra
 } = TRX) ->
-    Timestamp = maps:get(<<"timestamp">>, TRX, undefined),
     #domain_TransactionInfo{
         id          = unmarshal(str, ID),
-        timestamp   = unmarshal(str, Timestamp),
+        timestamp   = unmarshal({maybe, str}, genlib_map:get(<<"timestamp">>, TRX)),
         extra       = unmarshal({map, str, str}, Extra)
     };
 
 unmarshal(trx, ?legacy_trx(ID, Timestamp, Extra)) ->
     #domain_TransactionInfo{
         id          = unmarshal(str, ID),
-        timestamp   = unmarshal(str, Timestamp),
+        timestamp   = unmarshal({maybe, str}, Timestamp),
         extra       = unmarshal({map, str, str}, Extra)
     };
 
@@ -1656,10 +1636,9 @@ unmarshal(interaction, ?legacy_post_request(URI, Form)) ->
 unmarshal(failure, [2, <<"operation_timeout">>]) ->
     {operation_timeout, #domain_OperationTimeout{}};
 unmarshal(failure, [2, [<<"external_failure">>, #{<<"code">> := Code} = ExternalFailure]]) ->
-    Description = maps:get(<<"description">>, ExternalFailure, undefined),
     {external_failure, #domain_ExternalFailure{
         code        = unmarshal(str, Code),
-        description = unmarshal(str, Description)
+        description = unmarshal(str, genlib_map:get(<<"description">>, ExternalFailure))
     }};
 
 unmarshal(failure, [1, ?legacy_operation_timeout()]) ->
