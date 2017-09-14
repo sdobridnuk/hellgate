@@ -185,6 +185,8 @@ modify_remainder(#domain_FinalCashFlowAccount{account_type = AccountType}, ?cash
         Acc
     ).
 
+-include("legacy_structures.hrl").
+
 %% Marshalling
 
 -spec marshal(term(), term()) ->
