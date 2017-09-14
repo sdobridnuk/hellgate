@@ -10,7 +10,7 @@
 -spec marshal(term(), term()) ->
     term().
 
-marshal(cash, ?cash(Amount, ?currency(SymbolicCode))) ->
+marshal(cash, ?cash(Amount, SymbolicCode)) ->
     [2, [marshal(int, Amount), marshal(str, SymbolicCode)]];
 
 marshal(Term, Value) ->
@@ -22,10 +22,10 @@ marshal(Term, Value) ->
     term().
 
 unmarshal(cash, [2, [Amount, SymbolicCode]]) ->
-    ?cash(unmarshal(int, Amount), ?currency(unmarshal(str, SymbolicCode)));
+    ?cash(unmarshal(int, Amount), unmarshal(str, SymbolicCode));
 
 unmarshal(cash, [1, {'domain_Cash', Amount, {'domain_CurrencyRef', SymbolicCode}}]) ->
-    ?cash(unmarshal(int, Amount), ?currency(unmarshal(str, SymbolicCode)));
+    ?cash(unmarshal(int, Amount), unmarshal(str, SymbolicCode));
 
 unmarshal(Term, Value) ->
     hg_msgpack_marshalling:unmarshal(Term, Value, ?MODULE).

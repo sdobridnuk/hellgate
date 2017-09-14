@@ -1563,7 +1563,7 @@ marshal(adjustment_change, ?adjustment_status_changed(Status)) ->
 %% Refund change
 
 marshal(refund_change, ?refund_created(Refund, Cashflow)) ->
-    [2, [<<"created">>, marshal(refund, Refund), hg_cashflow:marshal(Cashflow)]];
+    [2, [<<"created">>, marshal(refund, Refund), hg_cashflow:marshal(final_cash_flow, Cashflow)]];
 marshal(refund_change, ?refund_status_changed(Status)) ->
     [2, [<<"status">>, marshal(refund_status, Status)]];
 marshal(refund_change, ?session_ev(_Target, Payload)) ->
@@ -1803,6 +1803,8 @@ unmarshal(status, [<<"captured">>, Reason]) ->
     ?captured_with_reason(unmarshal({maybe, str}, Reason));
 unmarshal(status, [<<"cancelled">>, Reason]) ->
     ?cancelled_with_reason(unmarshal({maybe, str}, Reason));
+unmarshal(status, <<"refunded">>) ->
+    ?refunded();
 
 unmarshal(status, ?legacy_pending()) ->
     ?pending();
@@ -1874,7 +1876,7 @@ unmarshal(adjustment_change, [1, ?legacy_adjustment_status_changed(Status)]) ->
 %% Refund change
 
 unmarshal(refund_change, [2, [<<"created">>, Refund, Cashflow]]) ->
-    ?refund_created(unmarshal(refund, Refund), hg_cashflow:unmarshal(Cashflow));
+    ?refund_created(unmarshal(refund, Refund), hg_cashflow:unmarshal(final_cash_flow, Cashflow));
 unmarshal(refund_change, [2, [<<"status">>, Status]]) ->
     ?refund_status_changed(unmarshal(refund_status, Status));
 unmarshal(refund_change, [2, [<<"session">>, Payload]]) ->
