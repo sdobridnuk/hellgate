@@ -68,6 +68,8 @@
 
 %%
 
+-define(SYNC_INTERVAL, 1).
+
 -type activity()      :: undefined | payment | {refund, refund_id()}.
 
 -record(st, {
@@ -893,19 +895,40 @@ process(Action, St) ->
     finish_processing(Result, St).
 
 process_finished_session(St) ->
-    Target = case get_payment_flow(get_payment(St)) of
+    case get_payment_flow(get_payment(St)) of
         ?invoice_payment_flow_instant() ->
-            ?captured();
+            process_receipt_registration(St);
         ?invoice_payment_flow_hold(OnHoldExpiration, _) ->
-            case OnHoldExpiration of
+            Target = case OnHoldExpiration of
                 cancel ->
                     ?cancelled();
                 capture ->
                     ?captured()
-            end
-    end,
-    {ok, Result} = start_session(Target),
-    {done, Result}.
+            end,
+            {ok, Result} = start_session(Target),
+            {done, Result}
+    end.
+
+process_receipt_registration(St) ->
+    Opts = get_opts(St),
+    Shop = get_shop(Opts),
+    case Shop#domain_Shop.cash_register of
+        undefined ->
+            {ok, Result} = start_session(?captured()),
+            {done, Result};
+        _CashRegister ->
+            _ReceiptID = register_receipt(St),
+            Changes = [],
+            Action = hg_machine_action:set_timeout(?SYNC_INTERVAL),
+            {next, {Changes, Action}}
+    end.
+
+register_receipt(St) ->
+    Opts = get_opts(St),
+    Party = get_party(Opts),
+    Invoice = get_invoice(Opts),
+    Payment = get_payment(St),
+    hg_cashreg_gateway:register_receipt(Party, Invoice, Payment).
 
 handle_callback(Payload, Action, St) ->
     ProxyContext = construct_proxy_context(St),
