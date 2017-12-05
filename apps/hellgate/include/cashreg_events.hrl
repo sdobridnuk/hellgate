@@ -1,9 +1,5 @@
--ifndef(__hellgate_receipt_events__).
--define(__hellgate_receipt_events__, 42).
-
-%%
-%% Recurrent Payment Tools
-%%
+-ifndef(__hellgate_cashreg_events__).
+-define(__hellgate_cashreg_events__, 42).
 
 % Events
 
