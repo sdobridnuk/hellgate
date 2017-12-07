@@ -27,6 +27,8 @@
 -export([payment_success/1]).
 -export([payment_w_terminal_success/1]).
 -export([payment_w_customer_success/1]).
+-export([payment_w_incorrect_customer/1]).
+-export([payment_w_deleted_customer/1]).
 -export([payment_success_on_second_try/1]).
 -export([payment_fail_after_silent_callback/1]).
 -export([invoice_success_on_third_payment/1]).
@@ -84,6 +86,8 @@ all() ->
         payment_success,
         payment_w_terminal_success,
         payment_w_customer_success,
+        payment_w_incorrect_customer,
+        payment_w_deleted_customer,
         payment_success_on_second_try,
         payment_fail_after_silent_callback,
         invoice_success_on_third_payment,
@@ -501,6 +505,32 @@ payment_w_customer_success(C) ->
         [?payment_state(?payment_w_status(PaymentID, ?captured()))]
     ) = hg_client_invoicing:get(InvoiceID, Client).
 
+-spec payment_w_incorrect_customer(config()) -> test_return().
+
+payment_w_incorrect_customer(C) ->
+    Client = cfg(client, C),
+    PartyID = cfg(party_id, C),
+    ShopID = cfg(shop_id, C),
+    PartyClient = cfg(party_client, C),
+    AnotherShopID = hg_ct_helper:create_battle_ready_shop(?cat(2), ?tmpl(2), PartyClient),
+    InvoiceID = start_invoice(AnotherShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+    CustomerID = make_customer_w_rec_tool(PartyID, ShopID, cfg(customer_client, C)),
+    PaymentParams = make_customer_payment_params(CustomerID),
+    {exception, #'InvalidRequest'{}} = hg_client_invoicing:start_payment(InvoiceID, PaymentParams, Client).
+
+-spec payment_w_deleted_customer(config()) -> test_return().
+
+payment_w_deleted_customer(C) ->
+    Client = cfg(client, C),
+    CustomerClient = cfg(customer_client, C),
+    PartyID = cfg(party_id, C),
+    ShopID = cfg(shop_id, C),
+    InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(10), 42000, C),
+    CustomerID = make_customer_w_rec_tool(PartyID, ShopID, CustomerClient),
+    ok = hg_client_customer:delete(CustomerID, CustomerClient),
+    PaymentParams = make_customer_payment_params(CustomerID),
+    {exception, #'InvalidRequest'{}} = hg_client_invoicing:start_payment(InvoiceID, PaymentParams, Client).
+
 -spec payment_success_on_second_try(config()) -> test_return().
 
 payment_success_on_second_try(C) ->
@@ -631,12 +661,12 @@ payment_adjustment_success(C) ->
     %% update terminal cashflow
     ProviderRef = ?prv(100),
     Provider = hg_domain:get(hg_domain:head(), {provider, ProviderRef}),
-    ProviderTerms = Provider#domain_Provider.terms,
+    ProviderTerms = Provider#domain_Provider.payment_terms,
     ok = hg_domain:upsert(
         {provider, #domain_ProviderObject{
             ref = ProviderRef,
             data = Provider#domain_Provider{
-                terms = ProviderTerms#domain_PaymentsProvisionTerms{
+                payment_terms = ProviderTerms#domain_PaymentsProvisionTerms{
                     cash_flow = {value,
                         get_adjustment_provider_cashflow(actual)
                     }
@@ -701,7 +731,7 @@ get_adjustment_fixture(Revision) ->
                 terminal = {value, [?trm(100)]},
                 proxy = #domain_Proxy{ref = ?prx(1), additional = #{}},
                 accounts = hg_ct_fixture:construct_provider_account_set([?cur(<<"RUB">>)]),
-                terms = #domain_PaymentsProvisionTerms{
+                payment_terms = #domain_PaymentsProvisionTerms{
                     currencies = {value, ?ordset([
                         ?cur(<<"RUB">>)
                     ])},
@@ -1338,6 +1368,12 @@ construct_domain_fixture() ->
                     )
                 ]}
             }
+        },
+        recurrent_paytools = #domain_RecurrentPaytoolsServiceTerms{
+            payment_methods = {value, ordsets:from_list([
+                ?pmt(bank_card, visa),
+                ?pmt(bank_card, mastercard)
+            ])}
         }
     },
     DefaultTermSet = #domain_TermSet{
@@ -1559,7 +1595,7 @@ construct_domain_fixture() ->
                 },
                 abs_account = <<"1234567890">>,
                 accounts = hg_ct_fixture:construct_provider_account_set([?cur(<<"RUB">>)]),
-                terms = #domain_PaymentsProvisionTerms{
+                payment_terms = #domain_PaymentsProvisionTerms{
                     currencies = {value, ?ordset([
                         ?cur(<<"RUB">>)
                     ])},
@@ -1623,6 +1659,14 @@ construct_domain_fixture() ->
                             )
                         ]}
                     }
+                },
+                recurrent_paytool_terms = #domain_RecurrentPaytoolsProvisionTerms{
+                    categories = {value, ?ordset([?cat(1)])},
+                    payment_methods = {value, ?ordset([
+                        ?pmt(bank_card, visa),
+                        ?pmt(bank_card, mastercard)
+                    ])},
+                    cash_value = {value, ?cash(1000, <<"RUB">>)}
                 }
             }
         }},
@@ -1648,7 +1692,7 @@ construct_domain_fixture() ->
                 },
                 abs_account = <<"1234567890">>,
                 accounts = hg_ct_fixture:construct_provider_account_set([?cur(<<"RUB">>)]),
-                terms = #domain_PaymentsProvisionTerms{
+                payment_terms = #domain_PaymentsProvisionTerms{
                     currencies = {value, ?ordset([
                         ?cur(<<"RUB">>)
                     ])},
@@ -1750,7 +1794,7 @@ construct_domain_fixture() ->
                 },
                 abs_account = <<"0987654321">>,
                 accounts = hg_ct_fixture:construct_provider_account_set([?cur(<<"RUB">>)]),
-                terms = #domain_PaymentsProvisionTerms{
+                payment_terms = #domain_PaymentsProvisionTerms{
                     currencies = {value, ?ordset([
                         ?cur(<<"RUB">>)
                     ])},

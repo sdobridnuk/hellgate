@@ -11,7 +11,6 @@
 
 -export([create_party_and_shop/1]).
 -export([create_battle_ready_shop/3]).
--export([create_customer_w_binding/1]).
 -export([get_account/1]).
 -export([get_first_contract_id/1]).
 -export([get_first_battle_ready_contract_id/1]).
@@ -57,6 +56,7 @@
 -export([make_terminal_payment_tool/0]).
 -export([make_tds_payment_tool/0]).
 -export([make_simple_payment_tool/0]).
+-export([make_simple_payment_tool/1]).
 -export([make_bad_payment_tool/0]).
 -export([is_bad_payment_tool/1]).
 -export([make_disposable_payment_resource/0]).
@@ -95,7 +95,7 @@ start_app(lager = AppName) ->
         {error_logger_hwm, 600},
         {suppress_application_start_stop, true},
         {handlers, [
-            %% {lager_common_test_backend, [debug, {lager_logstash_formatter, []}]}
+            % {lager_common_test_backend, [debug, {lager_logstash_formatter, []}]}
             {lager_common_test_backend, warning}
         ]}
     ]), #{}};
@@ -294,11 +294,6 @@ create_battle_ready_shop(Category, TemplateRef, Client) ->
     ok = hg_client_party:accept_claim(ClaimID, ClaimRevision, Client),
     _Shop = hg_client_party:get_shop(ShopID, Client),
     ShopID.
-
--spec create_customer_w_binding(Client :: pid()) -> ok.
-
-create_customer_w_binding(_Client) ->
-    ok.
 
 -spec get_first_contract_id(Client :: pid()) ->
     contract_id().
@@ -617,10 +612,16 @@ make_tds_payment_tool() ->
 -spec make_simple_payment_tool() -> {hg_domain_thrift:'PaymentTool'(), hg_domain_thrift:'PaymentSessionID'()}.
 
 make_simple_payment_tool() ->
+    make_simple_payment_tool(visa).
+
+-spec make_simple_payment_tool(visa | mastercard) ->
+    {hg_domain_thrift:'PaymentTool'(), hg_domain_thrift:'PaymentSessionID'()}.
+
+make_simple_payment_tool(PaymentSystem) ->
     {
         {bank_card, #domain_BankCard{
             token          = bank_card_simple_token(),
-            payment_system = visa,
+            payment_system = PaymentSystem,
             bin            = <<"424242">>,
             masked_pan     = <<"4242">>
         }},
