@@ -106,20 +106,13 @@ namespace() ->
 -spec init(receipt_id(), [receipt_params() | proxy()]) ->
     hg_machine:result().
 init(_ReceiptID, [ReceiptParams, Proxy]) ->
-    ReceiptProxyResult = register_receipt(ReceiptParams, Proxy, undefined),
-    Changes1 = [
-        ?cashreg_receipt_created(ReceiptParams, Proxy),
-        ?cashreg_receipt_session_changed(?cashreg_receipt_session_started())
-    ],
-    {Changes2, Action, Receipt} = handle_proxy_result(ReceiptProxyResult, hg_machine_action:new()),
-    Changes = Changes1 ++ Changes2,
-    handle_result(finish_processing({Changes, Action, Receipt}, #st{})).
-
-register_receipt(ReceiptParams, Proxy, ProxyState) ->
-    ReceiptContext = construct_receipt_context(ReceiptParams, Proxy),
-    Session = construct_session(ProxyState),
-    {ok, ReceiptProxyResult} = hg_cashreg_provider:register_receipt(ReceiptContext, Session, Proxy),
-    ReceiptProxyResult.
+    Changes = [?cashreg_receipt_created(ReceiptParams, Proxy)],
+    Action = hg_machine_action:instant(),
+    Result = #{
+        changes => Changes,
+        action  => Action
+    },
+    handle_result(Result).
 
 -spec process_signal(hg_machine:signal(), hg_machine:history(), hg_machine:auxst()) ->
     hg_machine:result().
@@ -143,12 +136,19 @@ process(
     #st{
         receipt_params = ReceiptParams,
         proxy = Proxy,
-        session = #{proxy_state := ProxyState}
+        session = Session
     } = St
 ) ->
+    ProxyState = maps:get(proxy_state, Session, undefined),
     ReceiptProxyResult = register_receipt(ReceiptParams, Proxy, ProxyState),
     Result = handle_proxy_result(ReceiptProxyResult, Action),
     finish_processing(Result, St).
+
+register_receipt(ReceiptParams, Proxy, ProxyState) ->
+    ReceiptContext = construct_receipt_context(ReceiptParams, Proxy),
+    Session = construct_session(ProxyState),
+    {ok, ReceiptProxyResult} = hg_cashreg_provider:register_receipt(ReceiptContext, Session, Proxy),
+    ReceiptProxyResult.
 
 process_callback_timeout(Action, St) ->
     Result = handle_proxy_callback_timeout(Action),
@@ -173,7 +173,7 @@ make_proxy_result(Changes, Action, Receipt) ->
 wrap_session_events(SessionEvents) ->
     [?cashreg_receipt_session_changed(Ev) || Ev <- SessionEvents].
 
--spec process_call({callback, tag(), _}, hg_machine:history(), hg_machine:auxst()) ->
+-spec process_call({callback, _}, hg_machine:history(), hg_machine:auxst()) ->
     {hg_machine:response(), hg_machine:result()}.
 process_call(Call, History, _AuxSt) ->
     St = collapse_history(unmarshal(History)),
@@ -243,7 +243,8 @@ apply_change(Event, undefined) ->
 apply_change(?cashreg_receipt_created(ReceiptParams, Proxy), St) ->
     St#st{
         receipt_params = ReceiptParams,
-        proxy = Proxy
+        proxy = Proxy,
+        session = #{status => undefined}
     };
 apply_change(?cashreg_receipt_registered(_Receipt), St) ->
     St;
@@ -267,7 +268,7 @@ merge_session_change(?cashreg_receipt_proxy_st_changed(ProxyState), Session) ->
     {ok, callback_response()} | {error, invalid_callback | notfound | failed} | no_return().
 
 process_callback(Tag, Callback) ->
-    case hg_machine:call(?NS, {tag, Tag}, {callback, Tag, Callback}) of
+    case hg_machine:call(?NS, {tag, Tag}, {callback, Callback}) of
         {ok, {ok, _} = Ok} ->
             Ok;
         {ok, {exception, invalid_callback}} ->
@@ -314,7 +315,20 @@ handle_proxy_result(
 ) ->
     Changes1 = update_proxy_state(ProxyState),
     {Changes2, Action} = handle_proxy_intent(Intent, Action0),
-    Changes = Changes1 ++ Changes2,
+    handle_intent(Intent, Changes1 ++ Changes2, Action).
+
+handle_proxy_callback_result(
+    #cashreg_prxprv_ReceiptCallbackProxyResult{
+        intent = {_Type, Intent},
+        next_state = ProxyState
+    },
+    Action0
+) ->
+    Changes1 = update_proxy_state(ProxyState),
+    {Changes2, Action} = handle_proxy_intent(Intent, hg_machine_action:unset_timer(Action0)),
+    handle_intent(Intent, Changes1 ++ Changes2, Action).
+
+handle_intent(Intent, Changes, Action) ->
     case Intent of
         #cashreg_prxprv_FinishIntent{
             status = {'success', #cashreg_prxprv_Success{receipt_reg_entry = ReceiptRegEntry}}
@@ -323,20 +337,6 @@ handle_proxy_result(
         _ ->
             make_proxy_result(Changes, Action)
     end.
-
-handle_proxy_callback_result(
-    #cashreg_prxprv_ReceiptCallbackProxyResult{intent = {_Type, Intent}, next_state = ProxyState},
-    Action0
-) ->
-    Changes1 = update_proxy_state(ProxyState),
-    {Changes2, Action} = handle_proxy_intent(Intent, hg_machine_action:unset_timer(Action0)),
-    {wrap_session_events(Changes1 ++ Changes2), Action, undefined}; % FIX ME
-handle_proxy_callback_result(
-    #cashreg_prxprv_ReceiptCallbackProxyResult{intent = undefined, next_state = ProxyState},
-    Action
-) ->
-    Changes = update_proxy_state(ProxyState),
-    {wrap_session_events(Changes), Action, undefined}. % FIX ME
 
 finish_processing({Changes, Action, Receipt}, St) ->
     #st{session = Session} = apply_changes(Changes, St),

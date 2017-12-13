@@ -856,10 +856,10 @@ process_timeout(#st{activity = {receipt, ID}} = St0) ->
                     {[], hg_machine_action:set_timeout(?SYNC_INTERVAL)};
                 #receipt{status = registered} ->
                     [_|Other] = Changes,
-                    {Other, hg_machine_action:set_timeout(0)};
+                    {Other, hg_machine_action:instant()};
                 #receipt{status = {failed, _}} ->
                     [_|Other] = Changes,
-                    {Other, hg_machine_action:set_timeout(0)}
+                    {Other, hg_machine_action:instant()}
             end,
             {done, Result}
     end;

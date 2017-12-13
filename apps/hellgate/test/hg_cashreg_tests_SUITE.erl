@@ -41,8 +41,8 @@ cfg(Key, C) ->
 all() ->
     [
         receipt_registration_success,
-        receipt_registration_failed
-        % receipt_registration_success_suspend
+        receipt_registration_failed,
+        receipt_registration_success_suspend
     ].
 
 -spec init_per_suite(config()) -> config().
@@ -174,10 +174,11 @@ receipt_registration_success_suspend(C) ->
     Client = cfg(client, C),
     PartyClient = cfg(party_client, C),
     PartyID = cfg(party_id, C),
+    Tag = hg_utils:unique_id(),
     ShopCashRegister = #domain_ShopCashRegister{
         ref = ?cashreg(1),
         tax_system = osn,
-        options = #{<<"proxy_state">> => <<"suspending">>, <<"tag">> => <<"1">>, <<"callback">> => <<"ok">>}
+        options = #{<<"proxy_state">> => <<"suspending">>, <<"tag">> => Tag, <<"callback">> => <<"ok">>}
     },
     ShopID = hg_ct_helper:create_battle_ready_shop_with_cashreg(?cat(2), ?tmpl(2), PartyClient, ShopCashRegister),
     InvoiceParams = make_invoice_params(PartyID, ShopID),
@@ -185,12 +186,16 @@ receipt_registration_success_suspend(C) ->
 
     [?invoice_created(?invoice_w_status(?invoice_unpaid()))] = next_event(InvoiceID, Client),
     PaymentParams = make_payment_params(),
-    _PaymentID = process_payment(InvoiceID, PaymentParams, Client),
-    % PaymentID = await_receipt_created(InvoiceID, PaymentID, Client),
-    timer:sleep(2000),
-    _ = assert_success_post_request({hg_dummy_cashreg_provider:get_callback_url(), #{<<"tag">> => <<"1">>}}).
-    % PaymentID = await_receipt_failed(InvoiceID, PaymentID, Client),
-    % PaymentID = await_payment_process_failure(InvoiceID, PaymentID, Client).
+    PaymentID = process_payment(InvoiceID, PaymentParams, Client),
+    PaymentID = await_receipt_created(InvoiceID, PaymentID, Client),
+        timer:sleep(1000),
+    _ = assert_success_post_request({hg_dummy_cashreg_provider:get_callback_url(), #{<<"tag">> => Tag}}),
+    PaymentID = await_receipt_registered(InvoiceID, PaymentID, Client),
+    PaymentID = await_payment_capture(InvoiceID, PaymentID, Client),
+    ?invoice_state(
+        ?invoice_w_status(?invoice_paid()),
+        [?payment_state(?payment_w_status(PaymentID, ?captured()))]
+    ) = hg_client_invoicing:get(InvoiceID, Client).
 %%
 
 next_event(InvoiceID, Client) ->

@@ -70,7 +70,14 @@ handle_function(
     ],
     _
 ) ->
-    register_receipt(State, Options).
+    register_receipt(State, Options);
+handle_function(
+    'HandleReceiptCallback',
+    _,
+    _
+) ->
+    Receipt = get_default_receipt_result(),
+    handle_register_callback(Receipt).
 
 %%
 
@@ -83,7 +90,7 @@ register_receipt(
     undefined,
     #{<<"proxy_state">> := <<"suspending">>, <<"tag">> := Tag}
 ) ->
-    receipt_suspend(Tag, 3, {str, <<"suspending">>});
+    receipt_suspend(Tag, 1, {str, <<"suspending">>});
 register_receipt(
     undefined,
     #{<<"proxy_state">> := <<"finishing_failure">>}
@@ -117,6 +124,15 @@ receipt_suspend(Tag, Timeout, State) ->
     #cashreg_prxprv_ReceiptProxyResult{
         intent     = ?suspend(Tag, Timeout),
         next_state = State
+    }.
+
+handle_register_callback(Receipt) ->
+    #cashreg_prxprv_ReceiptCallbackResult{
+        response = {str, <<"ok">>},
+        result = #cashreg_prxprv_ReceiptCallbackProxyResult{
+            intent     = ?finish_success(Receipt),
+            next_state = undefined
+        }
     }.
 
 %%
