@@ -3,52 +3,52 @@
 
 % Events
 
--define(created(ReceiptParams, Proxy),
-    {created, #cashreg_proc_ReceiptCreated{
+-define(cashreg_receipt_created(ReceiptParams, Proxy),
+    {receipt_created, #cashreg_proc_ReceiptCreated{
         receipt_params = ReceiptParams,
         proxy = Proxy
     }}
 ).
 
--define(registered(Receipt),
-    {registered, #cashreg_proc_ReceiptRegistered{receipt = Receipt}}).
+-define(cashreg_receipt_registered(ReceiptRegEntry),
+    {receipt_registered, #cashreg_proc_ReceiptRegistered{receipt_reg_entry = ReceiptRegEntry}}).
 
--define(failed(Failure),
-    {failed, #cashreg_proc_ReceiptFailed{failure = Failure}}).
+-define(cashreg_receipt_failed(Failure),
+    {receipt_failed, #cashreg_proc_ReceiptFailed{failure = Failure}}).
 
--define(session_changed(Payload),
-    {session_changed, #cashreg_proc_ReceiptSessionChange{
+-define(cashreg_receipt_session_changed(Payload),
+    {receipt_session_changed, #cashreg_proc_ReceiptSessionChange{
         payload = Payload
     }}
 ).
 
 %% Sessions
 
--define(session_started(),
+-define(cashreg_receipt_session_started(),
     {session_started,
         #cashreg_proc_SessionStarted{}
     }
 ).
--define(session_finished(Result),
+-define(cashreg_receipt_session_finished(Result),
     {session_finished,
         #cashreg_proc_SessionFinished{result = Result}
     }
 ).
--define(session_suspended(Tag),
+-define(cashreg_receipt_session_suspended(Tag),
     {session_suspended,
         #cashreg_proc_SessionSuspended{tag = Tag}
     }
 ).
--define(proxy_st_changed(ProxySt),
+-define(cashreg_receipt_proxy_st_changed(ProxySt),
     {session_proxy_state_changed,
         #cashreg_proc_SessionProxyStateChanged{proxy_state = ProxySt}
     }
 ).
 
--define(session_succeeded(),
+-define(cashreg_receipt_session_succeeded(),
     {succeeded, #cashreg_proc_SessionSucceeded{}}
 ).
--define(session_failed(Failure),
+-define(cashreg_receipt_session_failed(Failure),
     {failed, #cashreg_proc_SessionFailed{failure = Failure}}
 ).
 

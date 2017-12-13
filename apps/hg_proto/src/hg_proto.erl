@@ -48,7 +48,9 @@ get_service(eventsink) ->
 get_service(cashreg) ->
     {cashreg_proto_processing_thrift, 'CashRegister'};
 get_service(cashreg_provider) ->
-    {cashreg_proto_proxy_provider_thrift, 'ProviderProxy'}.
+    {cashreg_proto_proxy_provider_thrift, 'ProviderProxy'};
+get_service(cashreg_host_provider) ->
+    {cashreg_proto_proxy_provider_thrift, 'ProviderProxyHost'}.
 
 -spec get_service_spec(Name :: atom()) -> service_spec().
 
@@ -76,4 +78,6 @@ get_service_spec(Name = cashreg, #{}) ->
 get_service_spec(Name = processor, #{namespace := Ns}) when is_binary(Ns) ->
     {?VERSION_PREFIX ++ "/stateproc/" ++ binary_to_list(Ns), get_service(Name)};
 get_service_spec(Name = proxy_host_provider, #{}) ->
-    {?VERSION_PREFIX ++ "/proxyhost/provider", get_service(Name)}.
+    {?VERSION_PREFIX ++ "/proxyhost/provider", get_service(Name)};
+get_service_spec(Name = cashreg_host_provider, #{}) ->
+    {?VERSION_PREFIX ++ "/cashreghost/provider", get_service(Name)}.

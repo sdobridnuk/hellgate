@@ -5,13 +5,13 @@
 
 -export([handle_function/3]).
 
--type tag()           :: cashreg_proto_main_thrift:'Tag'().
--type callback()      :: cashreg_proto_main_thrift:'Callback'().
+-type tag()           :: cashreg_proto_proxy_provider_thrift:'Tag'().
+-type callback()      :: cashreg_proto_proxy_provider_thrift:'Callback'().
 
--spec handle_function('RegisterReceiptCallback', [tag() | callback()], hg_woody_wrapper:handler_opts()) ->
+-spec handle_function('ProcessReceiptCallback', [tag() | callback()], hg_woody_wrapper:handler_opts()) ->
     term() | no_return().
 
-handle_function('RegisterReceiptCallback', [Tag, Callback], _) ->
+handle_function('ProcessReceiptCallback', [Tag, Callback], _) ->
     map_error(hg_cashreg_controller:process_callback(Tag, {provider, Callback})).
 
 map_error({ok, Response}) ->

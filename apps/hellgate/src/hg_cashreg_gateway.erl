@@ -1,13 +1,21 @@
 -module(hg_cashreg_gateway).
 
+-include_lib("include/cashreg_events.hrl").
+-include_lib("include/payment_events.hrl").
 -include_lib("dmsl/include/dmsl_domain_thrift.hrl").
+-include_lib("dmsl/include/dmsl_payment_processing_thrift.hrl").
 -include_lib("cashreg_proto/include/cashreg_proto_main_thrift.hrl").
+-include_lib("cashreg_proto/include/cashreg_proto_proxy_provider_thrift.hrl").
+-include_lib("cashreg_proto/include/cashreg_proto_processing_thrift.hrl").
 
 -export([register_receipt/3]).
+-export([get_changes/2]).
 
 -type party()             :: dmsl_domain_thrift:'Party'().
 -type invoice()           :: dmsl_domain_thrift:'Invoice'().
 -type payment()           :: dmsl_domain_thrift:'InvoicePayment'().
+-type change()            :: dmsl_payment_processing_thrift:'InvoicePaymentReceiptChange'().
+-type event_range()       :: dmsl_payment_processing_thrift:'EventRange'().
 -type receipt_id()        :: cashreg_proto_main_thrift:'ReceiptID'().
 
 -spec register_receipt(party(), invoice(), payment()) ->
@@ -16,6 +24,13 @@ register_receipt(Party, Invoice, Payment) ->
     ReceiptParams = construct_receipt_params(Party, Invoice, Payment),
     Proxy = construct_proxy(Party, Invoice),
     create_receipt(ReceiptParams, Proxy).
+
+-spec get_changes(receipt_id(), event_range()) ->
+    [change()].
+get_changes(ReceiptID, EventRange) ->
+    CashregEventRange = construct_event_range(EventRange),
+    Events = get_receipt_events(ReceiptID, CashregEventRange),
+    construct_payment_changes(Events).
 
 construct_receipt_params(Party, Invoice, Payment) ->
     #cashreg_main_ReceiptParams{
@@ -135,10 +150,55 @@ construct_payment_method(
 ) ->
     bank_card.
 
+construct_event_range(#payproc_EventRange{
+    'after' = LastEventID,
+    limit = Limit
+}) ->
+    #cashreg_proc_EventRange{
+        'after' = LastEventID,
+        limit = Limit
+    }.
+
+construct_payment_changes(ReceiptEvents) ->
+    lists:flatmap(
+        fun(#cashreg_proc_ReceiptEvent{source = ReceiptID, payload = Changes}) ->
+            lists:foldl(
+                fun(Change, Acc) ->
+                Acc ++ construct_payment_change(ReceiptID, Change)
+            end,
+            [],
+            Changes
+            )
+        end,
+        ReceiptEvents
+    ).
+
+construct_payment_change(ReceiptID, ?cashreg_receipt_created(_, _)) ->
+    [?receipt_ev(ReceiptID, ?receipt_created())];
+construct_payment_change(ReceiptID, ?cashreg_receipt_registered(_)) ->
+    [?receipt_ev(ReceiptID, ?receipt_registered())];
+construct_payment_change(ReceiptID, ?cashreg_receipt_failed(
+    {receipt_registration_failed, #cashreg_main_ReceiptRegistrationFailed{
+        reason = #cashreg_main_ExternalFailure{code = Code, description = Description}
+    }}
+)) ->
+    Failure = {external_failure, #domain_ExternalFailure{code = Code, description = Description}},
+    [?receipt_ev(ReceiptID, ?receipt_failed(Failure))];
+construct_payment_change(_, ?cashreg_receipt_session_changed(_)) ->
+    [].
+
 create_receipt(ReceiptParams, Proxy) ->
     case issue_receipt_call('CreateReceipt', [ReceiptParams, Proxy]) of
-        {ok, ReceiptID} ->
-            ReceiptID;
+        {ok, Receipt} ->
+            Receipt#cashreg_main_Receipt.id;
+        Error ->
+            Error
+    end.
+
+get_receipt_events(ReceiptID, EventRange) ->
+    case issue_receipt_call('GetReceiptEvents', [ReceiptID, EventRange]) of
+        {ok, Events} ->
+            Events;
         Error ->
             Error
     end.
@@ -160,9 +220,7 @@ construct_proxy(#domain_Shop{
     CashRegister = hg_domain:get(Revision, {cash_register, CashRegisterRef}),
     Proxy = CashRegister#domain_CashRegister.proxy,
     ProxyDef = hg_domain:get(Revision, {proxy, Proxy#domain_Proxy.ref}),
-    #cashreg_main_Proxy{
-        name = ProxyDef#domain_ProxyDefinition.name,
-        description = ProxyDef#domain_ProxyDefinition.description,
+    #cashreg_prxprv_Proxy{
         url = ProxyDef#domain_ProxyDefinition.url,
         options = CashRegOptions % ProxyDef#domain_ProxyDefinition.options translate to msgpack and added here
     }.
