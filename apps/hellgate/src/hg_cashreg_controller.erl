@@ -390,10 +390,395 @@ construct_session(State) ->
         state = State
     }.
 
-marshal(Data) ->
-    {bin, term_to_binary(Data)}.
+%% Marshalling
 
-unmarshal({ID, Dt, {bin, Binary}}) ->
-    {ID, Dt, binary_to_term(Binary)};
-unmarshal(Events) ->
-    [unmarshal(Event) || Event <- Events].
+marshal(Changes) when is_list(Changes) ->
+    [marshal(change, Change) || Change <- Changes].
+
+%% Changes
+
+marshal(change, ?cashreg_receipt_created(ReceiptParams, Proxy)) ->
+    [1, #{
+        <<"change">>            => <<"created">>,
+        <<"receipt_params">>    => marshal(receipt_params, ReceiptParams),
+        <<"proxy">>             => marshal(proxy, Proxy)
+    }];
+marshal(change, ?cashreg_receipt_registered(ReceiptRegEntry)) ->
+    [1, #{
+        <<"change">>                => <<"registered">>,
+        <<"receipt_reg_entry">>     => marshal(receipt_reg_entry, ReceiptRegEntry)
+    }];
+marshal(change, ?cashreg_receipt_failed(Failure)) ->
+    [1, #{
+        <<"change">>    => <<"failed">>,
+        <<"failure">>   => marshal(failure, Failure)
+    }];
+marshal(change, ?cashreg_receipt_session_changed(Payload)) ->
+    [1, #{
+        <<"change">>    => <<"session_changed">>,
+        <<"payload">>   => marshal(session_change, Payload)
+    }];
+
+marshal(receipt_params, #cashreg_main_ReceiptParams{} = ReceiptParams) ->
+    genlib_map:compact(#{
+        <<"party">>     => marshal(party, ReceiptParams#cashreg_main_ReceiptParams.party),
+        <<"operation">> => marshal(operation, ReceiptParams#cashreg_main_ReceiptParams.operation),
+        <<"purchase">>  => marshal(purchase, ReceiptParams#cashreg_main_ReceiptParams.purchase),
+        <<"payment">>   => marshal(payment, ReceiptParams#cashreg_main_ReceiptParams.payment),
+        <<"metadata">>  => marshal(msgpack_value, ReceiptParams#cashreg_main_ReceiptParams.metadata)
+    });
+
+marshal(party, #cashreg_main_Party{} = Party) ->
+    genlib_map:compact(#{
+        <<"reg_name">>          => marshal(str, Party#cashreg_main_Party.registered_name),
+        <<"reg_number">>        => marshal(str, Party#cashreg_main_Party.registered_number),
+        <<"inn">>               => marshal(str, Party#cashreg_main_Party.inn),
+        <<"actual_address">>    => marshal(str, Party#cashreg_main_Party.actual_address),
+        <<"tax_system">>        => marshal(tax_system, Party#cashreg_main_Party.tax_system),
+        <<"shop">>              => marshal(shop, Party#cashreg_main_Party.shop)
+    });
+
+marshal(tax_system, osn) ->
+    <<"osn">>;
+marshal(tax_system, usn_income) ->
+    <<"usn_income">>;
+marshal(tax_system, usn_income_outcome) ->
+    <<"usn_income_outcome">>;
+marshal(tax_system, envd) ->
+    <<"envd">>;
+marshal(tax_system, esn) ->
+    <<"esn">>;
+marshal(tax_system, patent) ->
+    <<"patent">>;
+
+marshal(shop, #cashreg_main_Shop{} = Shop) ->
+    genlib_map:compact(#{
+        <<"name">>        => marshal(str, Shop#cashreg_main_Shop.name),
+        <<"description">> => marshal(str, Shop#cashreg_main_Shop.description),
+        <<"location">>    => marshal(location, Shop#cashreg_main_Shop.location)
+    });
+
+marshal(location, {url, Url}) ->
+    [<<"url">>, marshal(str, Url)];
+
+marshal(operation, sell) ->
+    <<"sell">>;
+marshal(operation, sell_refund) ->
+    <<"sell_refund">>;
+
+marshal(purchase, #cashreg_main_Purchase{lines = Lines}) ->
+    [marshal(purchase_line, Line) || Line <- Lines];
+
+marshal(purchase_line, #cashreg_main_PurchaseLine{} = Line) ->
+    genlib_map:compact(#{
+        <<"product">> => marshal(str, Line#cashreg_main_PurchaseLine.product),
+        <<"quantity">> => marshal(int, Line#cashreg_main_PurchaseLine.quantity),
+        <<"price">> => marshal(cash, Line#cashreg_main_PurchaseLine.price),
+        <<"tax">> => marshal(tax, Line#cashreg_main_PurchaseLine.tax)
+    });
+
+marshal(cash, #cashreg_main_Cash{} = Cash) ->
+    [1, [
+        marshal(int, Cash#cashreg_main_Cash.amount),
+        marshal(currency, Cash#cashreg_main_Cash.currency)
+    ]];
+
+marshal(currency, #cashreg_main_Currency{} = Currency) ->
+    #{
+        <<"name">> => marshal(str, Currency#cashreg_main_Currency.name),
+        <<"symbolic_code">> => marshal(str, Currency#cashreg_main_Currency.symbolic_code),
+        <<"numeric_code">> => marshal(int, Currency#cashreg_main_Currency.numeric_code),
+        <<"exponent">> => marshal(int, Currency#cashreg_main_Currency.exponent)
+    };
+
+marshal(tax, {vat, VAT}) ->
+    [<<"vat">>, marshal(vat, VAT)];
+
+marshal(vat, vat0) ->
+    <<"vat0">>;
+marshal(vat, vat10) ->
+    <<"vat10">>;
+marshal(vat, vat18) ->
+    <<"vat18">>;
+marshal(vat, vat110) ->
+    <<"vat110">>;
+marshal(vat, vat118) ->
+    <<"vat118">>;
+
+marshal(payment, #cashreg_main_Payment{} = Payment) ->
+    #{
+        <<"payment_method">> => marshal(payment_method, Payment#cashreg_main_Payment.payment_method),
+        <<"cash">> => marshal(cash, Payment#cashreg_main_Payment.cash)
+    };
+
+marshal(payment_method, bank_card) ->
+    <<"bank_card">>;
+
+marshal(msgpack_value, undefined) ->
+    undefined;
+marshal(msgpack_value, MsgpackValue) ->
+    hg_cashreg_msgpack_marshalling:unmarshal(MsgpackValue);
+
+marshal(proxy, #cashreg_prxprv_Proxy{} = Proxy) ->
+    #{
+        <<"url">> => marshal(str, Proxy#cashreg_prxprv_Proxy.url),
+        <<"options">> => marshal(map_str, Proxy#cashreg_prxprv_Proxy.options)
+    };
+
+marshal(receipt_reg_entry, #cashreg_main_ReceiptRegistrationEntry{} = ReceiptRegEntry) ->
+    genlib_map:compact(#{
+        <<"id">> => marshal(str, ReceiptRegEntry#cashreg_main_ReceiptRegistrationEntry.id),
+        <<"metadata">> => marshal(msgpack_value, ReceiptRegEntry#cashreg_main_ReceiptRegistrationEntry.metadata)
+    });
+
+marshal(failure, {receipt_registration_failed, #cashreg_main_ReceiptRegistrationFailed{reason = ExternalFailure}}) ->
+    [1, [<<"registration_failed">>, genlib_map:compact(#{
+        <<"code">>          => marshal(str, ExternalFailure#cashreg_main_ExternalFailure.code),
+        <<"description">>   => marshal(str, ExternalFailure#cashreg_main_ExternalFailure.description),
+        <<"metadata">>      => marshal(msgpack_value, ExternalFailure#cashreg_main_ExternalFailure.metadata)
+    })]];
+
+marshal(session_change, ?cashreg_receipt_session_started()) ->
+    [1, <<"started">>];
+marshal(session_change, ?cashreg_receipt_session_finished(Result)) ->
+    [1, [
+        <<"finished">>,
+        marshal(session_status, Result)
+    ]];
+marshal(session_change, ?cashreg_receipt_session_suspended(Tag)) ->
+    [1, [
+        <<"suspended">>,
+        marshal(str, Tag)
+    ]];
+marshal(session_change, ?cashreg_receipt_proxy_st_changed(ProxySt)) ->
+    [1, [
+        <<"changed">>,
+        marshal(msgpack_value, ProxySt)
+    ]];
+
+marshal(session_status, ?cashreg_receipt_session_succeeded()) ->
+    <<"succeeded">>;
+marshal(session_status, ?cashreg_receipt_session_failed(Failure)) ->
+    [
+        <<"failed">>,
+        marshal(failure, Failure)
+    ];
+
+marshal(_, Other) ->
+    Other.
+
+%% Unmarshalling
+
+unmarshal(Events) when is_list(Events) ->
+    [unmarshal(Event) || Event <- Events];
+
+unmarshal({ID, Dt, Payload}) ->
+    {ID, Dt, unmarshal({list, changes}, Payload)}.
+
+unmarshal({list, changes}, Changes) when is_list(Changes) ->
+    [unmarshal(change, Change) || Change <- Changes];
+
+unmarshal(change, [1, #{
+    <<"change">>            := <<"created">>,
+    <<"receipt_params">>    := ReceiptParams,
+    <<"proxy">>             := Proxy
+}]) ->
+    ?cashreg_receipt_created(
+        unmarshal(receipt_params, ReceiptParams),
+        unmarshal(proxy, Proxy)
+    );
+unmarshal(change, [1, #{
+    <<"change">>            := <<"registered">>,
+    <<"receipt_reg_entry">> := ReceiptRegEntry
+}]) ->
+    ?cashreg_receipt_registered(
+        unmarshal(receipt_reg_entry, ReceiptRegEntry)
+    );
+unmarshal(change, [1, #{
+    <<"change">>    := <<"failed">>,
+    <<"failure">>   := Failure
+}]) ->
+    ?cashreg_receipt_failed(
+        unmarshal(failure, Failure)
+    );
+unmarshal(change, [1, #{
+    <<"change">>    := <<"session_changed">>,
+    <<"payload">>   := Payload
+}]) ->
+    ?cashreg_receipt_session_changed(
+        unmarshal(session_change, Payload)
+    );
+
+unmarshal(receipt_params, #{
+    <<"party">>     := Party,
+    <<"operation">> := Operation,
+    <<"purchase">>  := Purchase,
+    <<"payment">>   := Payment
+} = RP) ->
+    Metadata = genlib_map:get(<<"metadata">>, RP),
+    #cashreg_main_ReceiptParams{
+        party = unmarshal(party, Party),
+        operation = unmarshal(operation, Operation),
+        purchase = unmarshal(purchase, Purchase),
+        payment = unmarshal(payment, Payment),
+        metadata = unmarshal(msgpack_value, Metadata)
+    };
+
+unmarshal(party, #{
+    <<"reg_name">>          := RegName,
+    <<"reg_number">>        := RegNumber,
+    <<"inn">>               := Inn,
+    <<"actual_address">>    := ActualAddress,
+    <<"shop">>              := Shop
+} = P) ->
+    TaxSystem = genlib_map:get(<<"tax_system">>, P),
+    #cashreg_main_Party{
+        registered_name = unmarshal(str, RegName),
+        registered_number = unmarshal(str, RegNumber),
+        inn = unmarshal(str, Inn),
+        actual_address = unmarshal(str, ActualAddress),
+        tax_system = unmarshal(tax_system, TaxSystem),
+        shop = unmarshal(shop, Shop)
+    };
+
+unmarshal(tax_system, <<"osn">>) ->
+    osn;
+unmarshal(tax_system, <<"usn_income">>) ->
+    usn_income;
+unmarshal(tax_system, <<"usn_income_outcome">>) ->
+    usn_income_outcome;
+unmarshal(tax_system, <<"envd">>) ->
+    envd;
+unmarshal(tax_system, <<"esn">>) ->
+    esn;
+unmarshal(tax_system, <<"patent">>) ->
+    patent;
+
+unmarshal(shop, #{
+    <<"name">>        := Name,
+    <<"location">>    := Location
+} = S) ->
+    Description = genlib_map:get(<<"description">>, S),
+    #cashreg_main_Shop{
+        name = unmarshal(str, Name),
+        description = unmarshal(str, Description),
+        location = unmarshal(location, Location)
+    };
+
+unmarshal(location, [<<"url">>, Url]) ->
+    {url, unmarshal(str, Url)};
+
+unmarshal(operation, <<"sell">>) ->
+    sell;
+unmarshal(operation, <<"sell_refund">>) ->
+    sell_refund;
+
+unmarshal(purchase, Lines) when is_list(Lines) ->
+    #cashreg_main_Purchase{lines = [unmarshal(purchase_line, Line) || Line <- Lines]};
+
+unmarshal(purchase_line, #{
+    <<"product">> := Product,
+    <<"quantity">> := Quantity,
+    <<"price">> := Price
+} = PL) ->
+    Tax = genlib_map:get(<<"tax">>, PL),
+    #cashreg_main_PurchaseLine{
+        product = unmarshal(str, Product),
+        quantity = unmarshal(int, Quantity),
+        price = unmarshal(cash, Price),
+        tax = unmarshal(tax, Tax)
+    };
+
+unmarshal(cash, [1, [Amount, Currency]]) ->
+    #cashreg_main_Cash{
+        amount = unmarshal(int, Amount),
+        currency = unmarshal(currency, Currency)
+    };
+
+unmarshal(currency, #{
+    <<"name">> := Name,
+    <<"symbolic_code">> := SymbolicCode,
+    <<"numeric_code">> := NumericCode,
+    <<"exponent">> := Exponent
+}) ->
+    #cashreg_main_Currency{
+        name = unmarshal(str, Name),
+        symbolic_code = unmarshal(str, SymbolicCode),
+        numeric_code = unmarshal(int, NumericCode),
+        exponent = unmarshal(int, Exponent)
+    };
+
+unmarshal(tax, [<<"vat">>, VAT]) ->
+    {vat, unmarshal(vat, VAT)};
+
+unmarshal(vat, <<"vat0">>) ->
+    vat0;
+unmarshal(vat, <<"vat10">>) ->
+    vat10;
+unmarshal(vat, <<"vat18">>) ->
+    vat18;
+unmarshal(vat, <<"vat110">>) ->
+    vat110;
+unmarshal(vat, <<"vat118">>) ->
+    vat118;
+
+unmarshal(payment, #{
+    <<"payment_method">> := PaymentMethod,
+    <<"cash">> := Cash
+}) ->
+    #cashreg_main_Payment{
+        payment_method = unmarshal(payment_method, PaymentMethod),
+        cash = unmarshal(cash, Cash)
+    };
+
+unmarshal(payment_method, <<"bank_card">>) ->
+    bank_card;
+
+unmarshal(msgpack_value, undefined) ->
+    undefined;
+unmarshal(msgpack_value, MsgpackValue) ->
+    hg_cashreg_msgpack_marshalling:marshal(MsgpackValue);
+
+unmarshal(proxy, #{
+    <<"url">> := Url,
+    <<"options">> := Options
+}) ->
+    #cashreg_prxprv_Proxy{
+        url = unmarshal(str, Url),
+        options = unmarshal(map_str, Options)
+    };
+
+unmarshal(receipt_reg_entry, #{<<"id">> := Id} = RE) ->
+    Metadata = genlib_map:get(<<"metadata">>, RE),
+    #cashreg_main_ReceiptRegistrationEntry{
+        id = unmarshal(str, Id),
+        metadata = unmarshal(msgpack_value, Metadata)
+    };
+
+unmarshal(failure, [1, [<<"registration_failed">>, #{<<"code">> := Code} = RF]]) ->
+    Description = genlib_map:get(<<"description">>, RF),
+    Metadata = genlib_map:get(<<"metadata">>, RF),
+    {receipt_registration_failed, #cashreg_main_ReceiptRegistrationFailed{
+        reason = #cashreg_main_ExternalFailure{
+            code = marshal(str, Code),
+            description = marshal(str, Description),
+            metadata = marshal(msgpack_value, Metadata)
+        }
+    }};
+
+unmarshal(session_change, [1, <<"started">>]) ->
+    ?cashreg_receipt_session_started();
+unmarshal(session_change, [1, [<<"finished">>, Result]]) ->
+    ?cashreg_receipt_session_finished(unmarshal(session_status, Result));
+unmarshal(session_change, [1, [<<"suspended">>, Tag]]) ->
+    ?cashreg_receipt_session_suspended(unmarshal(str, Tag));
+unmarshal(session_change, [1, [<<"changed">>, ProxySt]]) ->
+    ?cashreg_receipt_proxy_st_changed(unmarshal(msgpack_value, ProxySt));
+
+unmarshal(session_status, <<"succeeded">>) ->
+    ?cashreg_receipt_session_succeeded();
+unmarshal(session_status, [<<"failed">>, Failure]) ->
+    ?cashreg_receipt_session_failed(unmarshal(failure, Failure));
+
+unmarshal(_, Other) ->
+    Other.

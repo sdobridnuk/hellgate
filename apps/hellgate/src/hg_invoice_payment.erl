@@ -1826,11 +1826,11 @@ marshal(refund_change, ?session_ev(_Target, Payload)) ->
 %% Receipt change
 
 marshal(receipt_change, ?receipt_created()) ->
-    [2, <<"created">>];
+    [1, <<"created">>];
 marshal(receipt_change, ?receipt_registered()) ->
-    [2, <<"registered">>];
+    [1, <<"registered">>];
 marshal(receipt_change, ?receipt_failed(Failure)) ->
-    [2, [<<"failed">>, marshal(failure, Failure)]];
+    [1, [<<"failed">>, marshal(failure, Failure)]];
 
 %% Adjustment
 
@@ -2184,11 +2184,11 @@ unmarshal(refund_change, [2, [<<"session">>, Payload]]) ->
 
 %% Receipt change
 
-unmarshal(receipt_change, [2, <<"created">>]) ->
+unmarshal(receipt_change, [1, <<"created">>]) ->
     ?receipt_created();
-unmarshal(receipt_change, [2, <<"registered">>]) ->
+unmarshal(receipt_change, [1, <<"registered">>]) ->
     ?receipt_registered();
-unmarshal(receipt_change, [2, [<<"failed">>, Failure]]) ->
+unmarshal(receipt_change, [1, [<<"failed">>, Failure]]) ->
     ?receipt_failed(unmarshal(failure, Failure));
 
 %% Adjustment
