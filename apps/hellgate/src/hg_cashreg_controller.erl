@@ -59,8 +59,9 @@ handle_function_('CreateReceipt', [ReceiptInfo, ProxyOptions], _Opts) ->
     construct_receipt(ReceiptID, ReceiptInfo);
 handle_function_('GetReceiptEvents', [ReceiptID, Range], _Opts) ->
     ok = set_meta(ReceiptID),
-    get_public_history(ReceiptID, Range).
-
+    get_public_history(ReceiptID, Range);
+handle_function_('ProcessReceiptCallback', [Tag, Callback], _) ->
+    map_error(process_callback(Tag, {provider, Callback})).
 %%
 
 set_meta(ID) ->
@@ -93,6 +94,11 @@ map_history_error({ok, Result}) ->
     Result;
 map_history_error({error, notfound}) ->
     throw({error, notfound}).
+
+map_error({ok, Response}) ->
+    Response;
+map_error({error, Reason}) ->
+    error(Reason).
 
 -include("cashreg_events.hrl").
 

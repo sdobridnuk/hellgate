@@ -166,7 +166,13 @@ receipt_registration_failed(C) ->
     PaymentID = process_payment(InvoiceID, PaymentParams, Client),
     PaymentID = await_receipt_created(InvoiceID, PaymentID, Client),
     PaymentID = await_receipt_failed(InvoiceID, PaymentID, Client),
-    PaymentID = await_payment_process_failure(InvoiceID, PaymentID, Client).
+    [
+        ?payment_ev(PaymentID, ?session_ev(?cancelled_with_reason(Reason), ?session_started()))
+    ] = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?session_ev(?cancelled_with_reason(Reason), ?session_finished(?session_succeeded()))),
+        ?payment_ev(PaymentID, ?payment_status_changed(?failed(_)))
+    ] = next_event(InvoiceID, Client).
 
 -spec receipt_registration_success_suspend(config()) -> test_return().
 
@@ -381,12 +387,6 @@ await_payment_capture_finish(InvoiceID, PaymentID, Reason, Client) ->
         ?payment_ev(PaymentID, ?session_ev(?captured_with_reason(Reason), ?session_finished(?session_succeeded()))),
         ?payment_ev(PaymentID, ?payment_status_changed(?captured_with_reason(Reason))),
         ?invoice_status_changed(?invoice_paid())
-    ] = next_event(InvoiceID, Client),
-    PaymentID.
-
-await_payment_process_failure(InvoiceID, PaymentID, Client) ->
-    [
-        ?payment_ev(PaymentID, ?payment_status_changed(?failed(_)))
     ] = next_event(InvoiceID, Client),
     PaymentID.
 

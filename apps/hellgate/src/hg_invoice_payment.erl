@@ -841,23 +841,21 @@ process_signal(timeout, St, Options) ->
     ).
 
 process_timeout(#st{activity = {receipt, ID}} = St0) ->
-    case St0#st.receipt of
-        #receipt{status = registered} ->
+    case get_receipt_status(St0) of
+        registered ->
             process_finished_session(St0);
-        #receipt{status = {failed, _}} ->
+        {failed, _} ->
             process_finished_session(St0);
         _ ->
             Changes = get_receipt_changes(ID, undefined),
             St1 = collapse_changes(Changes, St0),
-            Result = case St1#st.receipt of
-                undefined ->
+            Result = case get_receipt_status(St1) of
+                Status when Status =:= undefined; Status =:= created ->
                     {[], hg_machine_action:set_timeout(?SYNC_INTERVAL)};
-                #receipt{status = created} ->
-                    {[], hg_machine_action:set_timeout(?SYNC_INTERVAL)};
-                #receipt{status = registered} ->
+                registered ->
                     [_|Other] = Changes,
                     {Other, hg_machine_action:instant()};
-                #receipt{status = {failed, _}} ->
+                {failed, _} ->
                     [_|Other] = Changes,
                     {Other, hg_machine_action:instant()}
             end,
@@ -915,46 +913,37 @@ process(Action, St) ->
     finish_processing(Result, St).
 
 process_finished_session(St) ->
-    case get_payment_flow(get_payment(St)) of
+    {ok, Result} = case get_payment_flow(get_payment(St)) of
         ?invoice_payment_flow_instant() ->
-            case get_receipt_status(St#st.receipt) of
+            case get_receipt_status(St) of
                 registered ->
-                    {ok, Result} = start_session(?captured()),
-                    {done, Result};
-                {failed, Failure} ->
-                    Changes = [?payment_status_changed(?failed(Failure))],
-                    {done, {Changes, hg_machine_action:new()}};
+                    start_session(?captured());
+                {failed, _} ->
+                    start_session(?cancelled());
                 _ ->
                     process_receipt_registration(St)
             end;
         ?invoice_payment_flow_hold(OnHoldExpiration, _) ->
-            Target = case OnHoldExpiration of
+            case OnHoldExpiration of
                 cancel ->
-                    ?cancelled();
+                    start_session(?cancelled());
                 capture ->
-                    ?captured()
-            end,
-            {ok, Result} = start_session(Target),
-            {done, Result}
-    end.
-
-get_receipt_status(undefined) ->
-    undefined;
-get_receipt_status(#receipt{status = Status}) ->
-    Status.
+                    start_session(?captured())
+            end
+    end,
+    {done, Result}.
 
 process_receipt_registration(St) ->
     Opts = get_opts(St),
     Shop = get_shop(Opts),
     case Shop#domain_Shop.cash_register of
         undefined ->
-            {ok, Result} = start_session(?captured()),
-            {done, Result};
+            start_session(?captured());
         _CashRegister ->
             ReceiptID = register_receipt(St),
             Changes = [?receipt_ev(ReceiptID, ?receipt_created())],
             Action = hg_machine_action:set_timeout(?SYNC_INTERVAL),
-            {done, {Changes, Action}}
+            {ok, {Changes, Action}}
     end.
 
 register_receipt(St) ->
@@ -962,7 +951,7 @@ register_receipt(St) ->
     Party = get_party(Opts),
     Invoice = get_invoice(Opts),
     Payment = get_payment(St),
-    hg_cashreg_gateway:register_receipt(Party, Invoice, Payment).
+    hg_payment_cashreg:register_receipt(Party, Invoice, Payment).
 
 handle_callback(Payload, Action, St) ->
     ProxyContext = construct_proxy_context(St),
@@ -987,7 +976,7 @@ finish_processing(payment, {Events, Action}, St) ->
                     undefined
             end,
             NewAction = get_action(Target, Action, St),
-            {done, {Events ++ [?payment_status_changed(Target)], NewAction}};
+            {done, {Events ++ get_changes(Target, St), NewAction}};
         #{status := finished, result := ?session_failed(Failure)} ->
             % TODO is it always rollback?
             _AffectedAccounts = rollback_payment_cashflow(St),
@@ -1016,6 +1005,18 @@ finish_processing({refund, ID}, {Events, Action}, St) ->
             {done, {Events1 ++ Events2, Action}};
         #{} ->
             {next, {Events1, Action}}
+    end.
+
+get_changes(?captured() = Target, _) ->
+    [?payment_status_changed(Target)];
+get_changes(?processed() = Target, _) ->
+    [?payment_status_changed(Target)];
+get_changes(?cancelled() = Target, St) ->
+    case get_receipt_status(St) of
+        {failed, Failure} ->
+            [?payment_status_changed(?failed(Failure))];
+        undefined ->
+            [?payment_status_changed(Target)]
     end.
 
 get_action({processed, _}, Action, St) ->
@@ -1417,7 +1418,12 @@ merge_receipt_change(?receipt_failed(Failure)) ->
 
 get_receipt_changes(ReceiptID, LastEventID) ->
     EventRange = construct_event_range(LastEventID),
-    hg_cashreg_gateway:get_changes(ReceiptID, EventRange).
+    hg_payment_cashreg:get_changes(ReceiptID, EventRange).
+
+get_receipt_status(#st{receipt = undefined}) ->
+    undefined;
+get_receipt_status(#st{receipt = Receipt}) ->
+    Receipt#receipt.status.
 
 construct_event_range(LastEventID) ->
     #payproc_EventRange{'after' = LastEventID, limit = ?RECEIPT_EVENTS_LIMIT}.

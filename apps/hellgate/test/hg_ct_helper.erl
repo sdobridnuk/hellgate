@@ -312,9 +312,7 @@ create_battle_ready_shop_with_cashreg(Category, TemplateRef, Client, ShopCashReg
             }}
         }}
     ],
-    #payproc_Claim{id = ClaimID, revision = ClaimRevision} =
-        hg_client_party:create_claim(Changeset, Client),
-    ok = hg_client_party:accept_claim(ClaimID, ClaimRevision, Client),
+    #payproc_Claim{} = hg_client_party:create_claim(Changeset, Client),
     ShopID.
 
 -spec create_customer_w_binding(Client :: pid()) -> ok.

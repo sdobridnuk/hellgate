@@ -1,4 +1,4 @@
--module(hg_cashreg_gateway).
+-module(hg_payment_cashreg).
 
 -include_lib("include/cashreg_events.hrl").
 -include_lib("include/payment_events.hrl").
@@ -220,7 +220,9 @@ construct_proxy(#domain_Shop{
     CashRegister = hg_domain:get(Revision, {cash_register, CashRegisterRef}),
     Proxy = CashRegister#domain_CashRegister.proxy,
     ProxyDef = hg_domain:get(Revision, {proxy, Proxy#domain_Proxy.ref}),
+    URL = ProxyDef#domain_ProxyDefinition.url,
+    ProxyOptions = ProxyDef#domain_ProxyDefinition.options,
     #cashreg_prxprv_Proxy{
-        url = ProxyDef#domain_ProxyDefinition.url,
-        options = CashRegOptions % ProxyDef#domain_ProxyDefinition.options translate to msgpack and added here
+        url = URL,
+        options = maps:merge(ProxyOptions, CashRegOptions)
     }.

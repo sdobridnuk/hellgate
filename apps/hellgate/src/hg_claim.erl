@@ -192,6 +192,8 @@ is_shop_modification_need_acceptance({proxy_modification, _}) ->
     false;
 is_shop_modification_need_acceptance({shop_account_creation, _}) ->
     false;
+is_shop_modification_need_acceptance(?cashreg_modification(_)) ->
+    false;
 is_shop_modification_need_acceptance(_) ->
     true.
 
