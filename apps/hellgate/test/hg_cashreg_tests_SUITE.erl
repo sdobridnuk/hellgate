@@ -357,19 +357,19 @@ await_payment_process_finish(InvoiceID, PaymentID, Client) ->
 
 await_receipt_created(InvoiceID, PaymentID, Client) ->
     [
-        ?payment_ev(PaymentID, ?receipt_ev(_, ?receipt_created()))
+        ?payment_ev(PaymentID, ?receipt_ev(_, ?receipt_created(), _))
     ] = next_event(InvoiceID, Client),
     PaymentID.
 
 await_receipt_registered(InvoiceID, PaymentID, Client) ->
     [
-        ?payment_ev(PaymentID, ?receipt_ev(_, ?receipt_registered()))
+        ?payment_ev(PaymentID, ?receipt_ev(_, ?receipt_registered(), _))
     ] = next_event(InvoiceID, Client),
     PaymentID.
 
 await_receipt_failed(InvoiceID, PaymentID, Client) ->
     [
-        ?payment_ev(PaymentID, ?receipt_ev(_, ?receipt_failed(_)))
+        ?payment_ev(PaymentID, ?receipt_ev(_, ?receipt_failed(_), _))
     ] = next_event(InvoiceID, Client),
     PaymentID.
 

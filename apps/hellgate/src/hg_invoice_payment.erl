@@ -97,7 +97,8 @@
 -type refund_state() :: #refund_st{}.
 
 -record(receipt, {
-    status           :: created | registered | {failed, failure()}
+    status           :: created | registered | {failed, failure()},
+    last_event_id    :: undefined | integer()
 }).
 
 -type receipt() :: #receipt{}.
@@ -840,39 +841,13 @@ process_signal(timeout, St, Options) ->
         fun() -> process_timeout(St#st{opts = Options}) end
     ).
 
-process_timeout(#st{activity = {receipt, ID}} = St0) ->
-    case get_receipt_status(St0) of
-        registered ->
-            process_finished_session(St0);
-        {failed, _} ->
-            process_finished_session(St0);
-        _ ->
-            Changes = get_receipt_changes(ID, undefined),
-            St1 = collapse_changes(Changes, St0),
-            Result = case get_receipt_status(St1) of
-                Status when Status =:= undefined; Status =:= created ->
-                    {[], hg_machine_action:set_timeout(?SYNC_INTERVAL)};
-                registered ->
-                    [_|Other] = Changes,
-                    {Other, hg_machine_action:instant()};
-                {failed, _} ->
-                    [_|Other] = Changes,
-                    {Other, hg_machine_action:instant()}
-            end,
-            {done, Result}
-    end;
 process_timeout(St) ->
-    Action = hg_machine_action:new(),
-    case get_active_session(St) of
-        Session when Session /= undefined ->
-            case get_session_status(Session) of
-                active ->
-                    process(Action, St);
-                suspended ->
-                    process_callback_timeout(Action, St)
-            end;
-        undefined ->
-            process_finished_session(St)
+    case get_activity(St) of
+        {receipt, _} ->
+            Status = get_receipt_status(St),
+            process_timeout_receipt(Status, St);
+        _ ->
+            process_timeout_payment(St)
     end.
 
 -spec process_call({callback, tag(), _}, st(), opts()) ->
@@ -901,6 +876,39 @@ process_callback(Tag, Payload, Action, Session, St) when Session /= undefined ->
 process_callback(_Tag, _Payload, _Action, undefined, _St) ->
     throw(invalid_callback).
 
+process_timeout_payment(St) ->
+    Action = hg_machine_action:new(),
+    case get_active_session(St) of
+        Session when Session /= undefined ->
+            case get_session_status(Session) of
+                active ->
+                    process(Action, St);
+                suspended ->
+                    process_callback_timeout(Action, St)
+            end;
+        undefined ->
+            process_finished_session(St)
+    end.
+
+process_timeout_receipt(created, St0) ->
+    LastEventID = get_receipt_last_event_id(St0),
+    ID = get_receipt_id(St0),
+    Changes = get_receipt_changes(ID, LastEventID),
+    St1 = collapse_changes(Changes, St0),
+    Result = case get_receipt_status(St1) of
+        created ->
+            {[], hg_machine_action:set_timeout(?SYNC_INTERVAL)};
+        registered ->
+            {Changes, hg_machine_action:instant()};
+        {failed, _} ->
+            {Changes, hg_machine_action:instant()}
+    end,
+    {done, Result};
+process_timeout_receipt(registered, St) ->
+    process_finished_session(St);
+process_timeout_receipt({failed, _}, St) ->
+    process_finished_session(St).
+
 process_callback_timeout(Action, St) ->
     Session = get_active_session(St),
     Result = handle_proxy_callback_timeout(Action, Session),
@@ -913,38 +921,39 @@ process(Action, St) ->
     finish_processing(Result, St).
 
 process_finished_session(St) ->
-    {ok, Result} = case get_payment_flow(get_payment(St)) of
+    case get_payment_flow(get_payment(St)) of
         ?invoice_payment_flow_instant() ->
-            case get_receipt_status(St) of
-                registered ->
-                    start_session(?captured());
-                {failed, _} ->
-                    start_session(?cancelled());
-                _ ->
-                    process_receipt_registration(St)
-            end;
+            Status = get_receipt_status(St),
+            process_receipt_registration(Status, St);
         ?invoice_payment_flow_hold(OnHoldExpiration, _) ->
-            case OnHoldExpiration of
+            Target = case OnHoldExpiration of
                 cancel ->
-                    start_session(?cancelled());
+                    ?cancelled();
                 capture ->
-                    start_session(?captured())
-            end
-    end,
-    {done, Result}.
+                    ?captured()
+            end,
+            {ok, Result} = start_session(Target),
+            {done, Result}
+    end.
 
-process_receipt_registration(St) ->
-    Opts = get_opts(St),
-    Shop = get_shop(Opts),
+process_receipt_registration(undefined, St) ->
+    Shop = get_shop(get_opts(St)),
     case Shop#domain_Shop.cash_register of
         undefined ->
-            start_session(?captured());
+            {ok, Result} = start_session(?captured()),
+            {done, Result};
         _CashRegister ->
             ReceiptID = register_receipt(St),
-            Changes = [?receipt_ev(ReceiptID, ?receipt_created())],
+            Changes = get_receipt_changes(ReceiptID, undefined),
             Action = hg_machine_action:set_timeout(?SYNC_INTERVAL),
-            {ok, {Changes, Action}}
-    end.
+            {done, {Changes, Action}}
+    end;
+process_receipt_registration(registered, _) ->
+    {ok, Result} = start_session(?captured()),
+    {done, Result};
+process_receipt_registration({failed, _}, _) ->
+    {ok, Result} = start_session(?cancelled()),
+    {done, Result}.
 
 register_receipt(St) ->
     Opts = get_opts(St),
@@ -1373,9 +1382,9 @@ merge_change(?adjustment_ev(ID, Event), St) ->
         _ ->
             St1
     end;
-merge_change(?receipt_ev(ID, Event), St) ->
+merge_change(?receipt_ev(ID, Event, EventID), St) ->
     St1 = St#st{activity = {receipt, ID}},
-    Receipt = merge_receipt_change(Event),
+    Receipt = make_receipt_state(Event, EventID),
     St1#st{receipt = Receipt};
 merge_change(?session_ev(Target, ?session_started()), St) ->
     % FIXME why the hell dedicated handling
@@ -1409,11 +1418,11 @@ merge_adjustment_change(?adjustment_created(Adjustment), undefined) ->
 merge_adjustment_change(?adjustment_status_changed(Status), Adjustment) ->
     Adjustment#domain_InvoicePaymentAdjustment{status = Status}.
 
-merge_receipt_change(?receipt_created()) ->
-    #receipt{status = created};
-merge_receipt_change(?receipt_registered()) ->
+make_receipt_state(?receipt_created(), EventID) ->
+    #receipt{status = created, last_event_id = EventID};
+make_receipt_state(?receipt_registered(), _) ->
     #receipt{status = registered};
-merge_receipt_change(?receipt_failed(Failure)) ->
+make_receipt_state(?receipt_failed(Failure), _) ->
     #receipt{status = {failed, Failure}}.
 
 get_receipt_changes(ReceiptID, LastEventID) ->
@@ -1424,6 +1433,16 @@ get_receipt_status(#st{receipt = undefined}) ->
     undefined;
 get_receipt_status(#st{receipt = Receipt}) ->
     Receipt#receipt.status.
+
+get_receipt_last_event_id(#st{receipt = undefined}) ->
+    undefined;
+get_receipt_last_event_id(#st{receipt = Receipt}) ->
+    Receipt#receipt.last_event_id.
+
+get_receipt_id(#st{activity = {receipt, ID}}) ->
+    ID;
+get_receipt_id(#st{activity = _}) ->
+    undefined.
 
 construct_event_range(LastEventID) ->
     #payproc_EventRange{'after' = LastEventID, limit = ?RECEIPT_EVENTS_LIMIT}.
@@ -1727,11 +1746,12 @@ marshal(change, ?refund_ev(RefundID, Payload)) ->
         <<"id">>            => marshal(str, RefundID),
         <<"payload">>       => marshal(refund_change, Payload)
     }];
-marshal(change, ?receipt_ev(ReceiptID, Payload)) ->
+marshal(change, ?receipt_ev(ReceiptID, Payload, EventID)) ->
     [2, #{
         <<"change">>        => <<"receipt">>,
         <<"id">>            => marshal(str, ReceiptID),
-        <<"payload">>       => marshal(receipt_change, Payload)
+        <<"payload">>       => marshal(receipt_change, Payload),
+        <<"event_id">>      => marshal(int, EventID)
     }];
 
 %% Payment
@@ -2018,9 +2038,10 @@ unmarshal(change, [2, #{
 unmarshal(change, [2, #{
     <<"change">>    := <<"receipt">>,
     <<"id">>        := ReceiptID,
-    <<"payload">>   := Payload
+    <<"payload">>   := Payload,
+    <<"event_id">>  := EventID
 }]) ->
-    ?receipt_ev(unmarshal(str, ReceiptID), unmarshal(receipt_change, Payload));
+    ?receipt_ev(unmarshal(str, ReceiptID), unmarshal(receipt_change, Payload), unmarshal(int, EventID));
 
 unmarshal(change, [1, ?legacy_payment_started(Payment, RiskScore, Route, Cashflow)]) ->
     ?payment_started(

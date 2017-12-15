@@ -151,10 +151,11 @@
 
 %% Receipt
 
--define(receipt_ev(ReceiptID, Payload),
+-define(receipt_ev(ReceiptID, Payload, EventID),
     {invoice_payment_receipt_change, #payproc_InvoicePaymentReceiptChange{
         id = ReceiptID,
-        payload = Payload
+        payload = Payload,
+        event_id = EventID
     }}
 ).
 

@@ -161,10 +161,10 @@ construct_event_range(#payproc_EventRange{
 
 construct_payment_changes(ReceiptEvents) ->
     lists:flatmap(
-        fun(#cashreg_proc_ReceiptEvent{source = ReceiptID, payload = Changes}) ->
+        fun(#cashreg_proc_ReceiptEvent{id = ID, source = ReceiptID, payload = Changes}) ->
             lists:foldl(
                 fun(Change, Acc) ->
-                Acc ++ construct_payment_change(ReceiptID, Change)
+                Acc ++ construct_payment_change(ID, ReceiptID, Change)
             end,
             [],
             Changes
@@ -173,18 +173,18 @@ construct_payment_changes(ReceiptEvents) ->
         ReceiptEvents
     ).
 
-construct_payment_change(ReceiptID, ?cashreg_receipt_created(_, _)) ->
-    [?receipt_ev(ReceiptID, ?receipt_created())];
-construct_payment_change(ReceiptID, ?cashreg_receipt_registered(_)) ->
-    [?receipt_ev(ReceiptID, ?receipt_registered())];
-construct_payment_change(ReceiptID, ?cashreg_receipt_failed(
+construct_payment_change(EventID, ReceiptID, ?cashreg_receipt_created(_, _)) ->
+    [?receipt_ev(ReceiptID, ?receipt_created(), EventID)];
+construct_payment_change(EventID, ReceiptID, ?cashreg_receipt_registered(_)) ->
+    [?receipt_ev(ReceiptID, ?receipt_registered(), EventID)];
+construct_payment_change(EventID, ReceiptID, ?cashreg_receipt_failed(
     {receipt_registration_failed, #cashreg_main_ReceiptRegistrationFailed{
         reason = #cashreg_main_ExternalFailure{code = Code, description = Description}
     }}
 )) ->
     Failure = {external_failure, #domain_ExternalFailure{code = Code, description = Description}},
-    [?receipt_ev(ReceiptID, ?receipt_failed(Failure))];
-construct_payment_change(_, ?cashreg_receipt_session_changed(_)) ->
+    [?receipt_ev(ReceiptID, ?receipt_failed(Failure), EventID)];
+construct_payment_change(_, _, ?cashreg_receipt_session_changed(_)) ->
     [].
 
 create_receipt(ReceiptParams, Proxy) ->
