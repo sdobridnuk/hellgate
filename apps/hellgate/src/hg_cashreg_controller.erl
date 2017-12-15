@@ -24,7 +24,8 @@
 -record(st, {
     receipt_params  :: undefined | receipt_params(),
     proxy           :: undefined | proxy(),
-    session         :: undefined | session()
+    session         :: undefined | session(),
+    receipt_status  :: undefined | receipt_status()
 }).
 % -type st() :: #st{}.
 
@@ -36,6 +37,7 @@
 
 -type receipt_params()      :: cashreg_proto_main_thrift:'ReceiptParams'().
 -type receipt_id()          :: cashreg_proto_main_thrift:'ReceiptID'().
+-type receipt_status()      :: cashreg_proto_main_thrift:'ReceiptStatus'().
 -type session_result()      :: cashreg_proto_processing_thrift:'SessionResult'().
 -type proxy()               :: cashreg_proto_proxy_provider_thrift:'Proxy'().
 -type proxy_state()         :: cashreg_proto_proxy_provider_thrift:'ProxyState'().
@@ -52,11 +54,15 @@ handle_function(Func, Args, Opts) ->
     scoper:scope(cashreg,
         fun() -> handle_function_(Func, Args, Opts) end
     ).
-handle_function_('CreateReceipt', [ReceiptInfo, ProxyOptions], _Opts) ->
+handle_function_('CreateReceipt', [ReceiptParams, ProxyOptions], _Opts) ->
     ReceiptID = hg_utils:unique_id(),
     ok = set_meta(ReceiptID),
-    ok = start(ReceiptID, [ReceiptInfo, ProxyOptions]),
-    construct_receipt(ReceiptID, ReceiptInfo);
+    ok = start(ReceiptID, [ReceiptParams, ProxyOptions]),
+    Status = {created, #cashreg_main_ReceiptCreated{}},
+    construct_receipt(ReceiptID, Status, ReceiptParams);
+handle_function_('GetReceipt', [ReceiptID], _Opts) ->
+    ok = set_meta(ReceiptID),
+    get_receipt(ReceiptID);
 handle_function_('GetReceiptEvents', [ReceiptID, Range], _Opts) ->
     ok = set_meta(ReceiptID),
     get_public_history(ReceiptID, Range);
@@ -85,6 +91,16 @@ publish_receipt_event(ReceiptID, {ID, Dt, Payload}) ->
         source = ReceiptID,
         payload = Payload
     }.
+
+get_receipt(ReceiptID) ->
+    St = collapse_history(get_history(ReceiptID)),
+    Status = St#st.receipt_status,
+    ReceiptParams = St#st.receipt_params,
+    construct_receipt(ReceiptID, Status, ReceiptParams).
+
+get_history(Ref) ->
+    History = hg_machine:get_history(?NS, Ref),
+    unmarshal(map_history_error(History)).
 
 get_history(Ref, AfterID, Limit) ->
     History = hg_machine:get_history(?NS, Ref, AfterID, Limit),
@@ -250,12 +266,21 @@ apply_change(?cashreg_receipt_created(ReceiptParams, Proxy), St) ->
     St#st{
         receipt_params = ReceiptParams,
         proxy = Proxy,
-        session = #{status => undefined}
+        session = #{status => undefined},
+        receipt_status = {created, #cashreg_main_ReceiptCreated{}}
     };
-apply_change(?cashreg_receipt_registered(_Receipt), St) ->
-    St;
-apply_change(?cashreg_receipt_failed(_Failure), St) ->
-    St;
+apply_change(?cashreg_receipt_registered(Receipt), St) ->
+    St#st{
+        receipt_status = {registered, #cashreg_main_ReceiptRegistered{
+            receipt_reg_entry = Receipt
+        }}
+    };
+apply_change(?cashreg_receipt_failed(Failure), St) ->
+    St#st{
+        receipt_status = {failed, #cashreg_main_ReceiptFailed{
+            reason = Failure
+        }}
+    };
 
 apply_change(?cashreg_receipt_session_changed(Event), #st{session = Session0} = St) ->
     Session1 = merge_session_change(Event, Session0),
@@ -366,6 +391,7 @@ finish_processing({Changes, Action, Receipt}, St) ->
 
 construct_receipt(
     ReceiptID,
+    Status,
     #cashreg_main_ReceiptParams{
         party = Party,
         operation = Opeartion,
@@ -376,7 +402,7 @@ construct_receipt(
 ) ->
     #cashreg_main_Receipt{
         id = ReceiptID,
-        status = {created, #cashreg_main_ReceiptCreated{}},
+        status = Status,
         party = Party,
         operation = Opeartion,
         purchase = Purchase,
