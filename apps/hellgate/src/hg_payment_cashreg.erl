@@ -8,7 +8,7 @@
 -include_lib("cashreg_proto/include/cashreg_proto_proxy_provider_thrift.hrl").
 -include_lib("cashreg_proto/include/cashreg_proto_processing_thrift.hrl").
 
--export([register_receipt/3]).
+-export([register_receipt/4]).
 -export([get_changes/2]).
 
 -type party()             :: dmsl_domain_thrift:'Party'().
@@ -17,12 +17,13 @@
 -type change()            :: dmsl_payment_processing_thrift:'InvoicePaymentReceiptChange'().
 -type event_range()       :: dmsl_payment_processing_thrift:'EventRange'().
 -type receipt_id()        :: cashreg_proto_main_thrift:'ReceiptID'().
+-type revision()          :: pos_integer().
 
--spec register_receipt(party(), invoice(), payment()) ->
+-spec register_receipt(party(), invoice(), payment(), revision()) ->
     receipt_id().
-register_receipt(Party, Invoice, Payment) ->
-    ReceiptParams = construct_receipt_params(Party, Invoice, Payment),
-    Proxy = construct_proxy(Party, Invoice),
+register_receipt(Party, Invoice, Payment, Revision) ->
+    ReceiptParams = construct_receipt_params(Party, Invoice, Payment, Revision),
+    Proxy = construct_proxy(Party, Invoice, Revision),
     create_receipt(ReceiptParams, Proxy).
 
 -spec get_changes(receipt_id(), event_range()) ->
@@ -32,12 +33,12 @@ get_changes(ReceiptID, EventRange) ->
     Events = get_receipt_events(ReceiptID, CashregEventRange),
     construct_payment_changes(Events).
 
-construct_receipt_params(Party, Invoice, Payment) ->
+construct_receipt_params(Party, Invoice, Payment, Revision) ->
     #cashreg_main_ReceiptParams{
         party = construct_party(Party, Invoice),
         operation = construct_operation(Payment),
-        purchase = construct_purchase(Invoice),
-        payment = construct_payment(Payment)
+        purchase = construct_purchase(Invoice, Revision),
+        payment = construct_payment(Payment, Revision)
     }.
 
 construct_party(Party, Invoice) ->
@@ -84,9 +85,9 @@ construct_purchase(#domain_Invoice{
             lines = Lines
         }
     }
-}) ->
+}, Revision) ->
     #cashreg_main_Purchase{
-        lines = [construct_purchase_line(Line) || Line <- Lines]
+        lines = [construct_purchase_line(Line, Revision) || Line <- Lines]
     }.
 
 construct_purchase_line(#domain_InvoiceLine{
@@ -94,19 +95,18 @@ construct_purchase_line(#domain_InvoiceLine{
     quantity = Quantity,
     price = Price,
     tax = Tax
-}) ->
+}, Revision) ->
     #cashreg_main_PurchaseLine{
         product = Product,
         quantity = Quantity,
-        price = construct_cash(Price),
+        price = construct_cash(Price, Revision),
         tax = Tax
     }.
 
 construct_cash(#domain_Cash{
     amount = Amount,
     currency = CurrencyRef
-}) ->
-    Revision = hg_domain:head(),
+}, Revision) ->
     Currency = hg_domain:get(Revision, {currency, CurrencyRef}),
     #cashreg_main_Cash{
         amount = Amount,
@@ -129,10 +129,10 @@ construct_currency(#domain_Currency{
 construct_payment(#domain_InvoicePayment{
     payer = Payer,
     cost = Cash
-}) ->
+}, Revision) ->
     #cashreg_main_Payment{
         payment_method = construct_payment_method(Payer),
-        cash = construct_cash(Cash)
+        cash = construct_cash(Cash, Revision)
     }.
 
 construct_payment_method(
@@ -177,15 +177,17 @@ construct_payment_change(EventID, ReceiptID, ?cashreg_receipt_created(_, _)) ->
     [?receipt_ev(ReceiptID, ?receipt_created(), EventID)];
 construct_payment_change(EventID, ReceiptID, ?cashreg_receipt_registered(_)) ->
     [?receipt_ev(ReceiptID, ?receipt_registered(), EventID)];
-construct_payment_change(EventID, ReceiptID, ?cashreg_receipt_failed(
-    {receipt_registration_failed, #cashreg_main_ReceiptRegistrationFailed{
-        reason = #cashreg_main_ExternalFailure{code = Code, description = Description}
-    }}
-)) ->
-    Failure = {external_failure, #domain_ExternalFailure{code = Code, description = Description}},
+construct_payment_change(EventID, ReceiptID, ?cashreg_receipt_failed(Error)) ->
+    Failure = make_external_failure(Error),
     [?receipt_ev(ReceiptID, ?receipt_failed(Failure), EventID)];
 construct_payment_change(_, _, ?cashreg_receipt_session_changed(_)) ->
     [].
+
+make_external_failure({receipt_registration_failed, #cashreg_main_ReceiptRegistrationFailed{
+    reason = #cashreg_main_ExternalFailure{description = Description}
+}}) ->
+    Code = <<"receipt_registration_failed">>,
+    {external_failure, #domain_ExternalFailure{code = Code, description = Description}}.
 
 create_receipt(ReceiptParams, Proxy) ->
     case issue_receipt_call('CreateReceipt', [ReceiptParams, Proxy]) of
@@ -206,17 +208,16 @@ get_receipt_events(ReceiptID, EventRange) ->
 issue_receipt_call(Function, Args) ->
     hg_woody_wrapper:call(cashreg, Function, Args).
 
-construct_proxy(Party, Invoice) ->
+construct_proxy(Party, Invoice, Revision) ->
     Shop = hg_party:get_shop(Invoice#domain_Invoice.shop_id, Party),
-    construct_proxy(Shop).
+    construct_proxy(Shop, Revision).
 
 construct_proxy(#domain_Shop{
     cash_register = #domain_ShopCashRegister{
         ref = CashRegisterRef,
         options = CashRegOptions
     }
-}) ->
-    Revision = hg_domain:head(),
+}, Revision) ->
     CashRegister = hg_domain:get(Revision, {cash_register, CashRegisterRef}),
     Proxy = CashRegister#domain_CashRegister.proxy,
     ProxyDef = hg_domain:get(Revision, {proxy, Proxy#domain_Proxy.ref}),

@@ -97,8 +97,8 @@
 -type refund_state() :: #refund_st{}.
 
 -record(receipt, {
-    status           :: created | registered | {failed, failure()},
-    last_event_id    :: undefined | integer()
+    status           :: undefined | created | registered | {failed, failure()},
+    last_event_id    :: integer()
 }).
 
 -type receipt() :: #receipt{}.
@@ -904,10 +904,8 @@ process_timeout_receipt(created, St0) ->
             {Changes, hg_machine_action:instant()}
     end,
     {done, Result};
-process_timeout_receipt(registered, St) ->
-    process_finished_session(St);
-process_timeout_receipt({failed, _}, St) ->
-    process_finished_session(St).
+process_timeout_receipt(Status, _) ->
+    finish_receipt_registration(Status).
 
 process_callback_timeout(Action, St) ->
     Session = get_active_session(St),
@@ -923,20 +921,18 @@ process(Action, St) ->
 process_finished_session(St) ->
     case get_payment_flow(get_payment(St)) of
         ?invoice_payment_flow_instant() ->
-            Status = get_receipt_status(St),
-            process_receipt_registration(Status, St);
+            start_receipt_registration(St);
         ?invoice_payment_flow_hold(OnHoldExpiration, _) ->
-            Target = case OnHoldExpiration of
+            case OnHoldExpiration of
                 cancel ->
-                    ?cancelled();
+                    {ok, Result} = start_session(?cancelled()),
+                    {done, Result};
                 capture ->
-                    ?captured()
-            end,
-            {ok, Result} = start_session(Target),
-            {done, Result}
+                    start_receipt_registration(St)
+            end
     end.
 
-process_receipt_registration(undefined, St) ->
+start_receipt_registration(St) ->
     Shop = get_shop(get_opts(St)),
     case Shop#domain_Shop.cash_register of
         undefined ->
@@ -947,12 +943,16 @@ process_receipt_registration(undefined, St) ->
             Changes = get_receipt_changes(ReceiptID, undefined),
             Action = hg_machine_action:set_timeout(?SYNC_INTERVAL),
             {done, {Changes, Action}}
-    end;
-process_receipt_registration(registered, _) ->
-    {ok, Result} = start_session(?captured()),
-    {done, Result};
-process_receipt_registration({failed, _}, _) ->
-    {ok, Result} = start_session(?cancelled()),
+    end.
+
+finish_receipt_registration(Status) ->
+    Target = case Status of
+        registered ->
+            ?captured();
+        {failed, _} ->
+            ?cancelled()
+    end,
+    {ok, Result} = start_session(Target),
     {done, Result}.
 
 register_receipt(St) ->
@@ -960,7 +960,8 @@ register_receipt(St) ->
     Party = get_party(Opts),
     Invoice = get_invoice(Opts),
     Payment = get_payment(St),
-    hg_payment_cashreg:register_receipt(Party, Invoice, Payment).
+    Revision = hg_domain:head(),
+    hg_payment_cashreg:register_receipt(Party, Invoice, Payment, Revision).
 
 handle_callback(Payload, Action, St) ->
     ProxyContext = construct_proxy_context(St),
@@ -1383,9 +1384,8 @@ merge_change(?adjustment_ev(ID, Event), St) ->
             St1
     end;
 merge_change(?receipt_ev(ID, Event, EventID), St) ->
-    St1 = St#st{activity = {receipt, ID}},
-    Receipt = make_receipt_state(Event, EventID),
-    St1#st{receipt = Receipt};
+    Receipt = merge_receipt_change(Event, #receipt{last_event_id = EventID}),
+    St#st{receipt = Receipt, activity = {receipt, ID}};
 merge_change(?session_ev(Target, ?session_started()), St) ->
     % FIXME why the hell dedicated handling
     set_session(Target, create_session(Target, get_trx(St)), St#st{activity = payment, target = Target});
@@ -1393,7 +1393,7 @@ merge_change(?session_ev(Target, Event), St) ->
     Session = merge_session_change(Event, get_session(Target, St)),
     St1 = set_session(Target, Session, St),
     % FIXME leaky transactions
-    St2 = set_trx(get_session_trx(Session), St1#st{activity = payment}),
+    St2 = set_trx(get_session_trx(Session), St1),
     case get_session_status(Session) of
         finished ->
             St2#st{target = undefined};
@@ -1418,12 +1418,12 @@ merge_adjustment_change(?adjustment_created(Adjustment), undefined) ->
 merge_adjustment_change(?adjustment_status_changed(Status), Adjustment) ->
     Adjustment#domain_InvoicePaymentAdjustment{status = Status}.
 
-make_receipt_state(?receipt_created(), EventID) ->
-    #receipt{status = created, last_event_id = EventID};
-make_receipt_state(?receipt_registered(), _) ->
-    #receipt{status = registered};
-make_receipt_state(?receipt_failed(Failure), _) ->
-    #receipt{status = {failed, Failure}}.
+merge_receipt_change(?receipt_created(), Receipt) ->
+    Receipt#receipt{status = created};
+merge_receipt_change(?receipt_registered(), Receipt) ->
+    Receipt#receipt{status = registered};
+merge_receipt_change(?receipt_failed(Failure), Receipt) ->
+    Receipt#receipt{status = {failed, Failure}}.
 
 get_receipt_changes(ReceiptID, LastEventID) ->
     EventRange = construct_event_range(LastEventID),

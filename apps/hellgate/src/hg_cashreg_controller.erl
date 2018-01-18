@@ -50,10 +50,25 @@
 -spec handle_function(woody:func(), woody:args(), hg_woody_wrapper:handler_opts()) ->
     term() | no_return().
 
+handle_function('GetEvents', [#cashreg_proc_EventRange{'after' = After, limit = Limit}], _Opts) ->
+    case hg_event_sink:get_events(?NS, After, Limit) of
+        {ok, Events} ->
+            publish_events(Events);
+        {error, event_not_found} ->
+            throw(#cashreg_proc_EventNotFound{})
+    end;
+handle_function('GetLastEventID', [], _Opts) ->
+    case hg_event_sink:get_last_event_id(?NS) of
+        {ok, ID} ->
+            ID;
+        {error, no_last_event} ->
+            throw(#cashreg_proc_NoLastEvent{})
+    end;
 handle_function(Func, Args, Opts) ->
     scoper:scope(cashreg,
         fun() -> handle_function_(Func, Args, Opts) end
     ).
+
 handle_function_('CreateReceipt', [ReceiptParams, ProxyOptions], _Opts) ->
     ReceiptID = hg_utils:unique_id(),
     ok = set_meta(ReceiptID),
@@ -68,6 +83,15 @@ handle_function_('GetReceiptEvents', [ReceiptID, Range], _Opts) ->
     get_public_history(ReceiptID, Range);
 handle_function_('ProcessReceiptCallback', [Tag, Callback], _) ->
     map_error(process_callback(Tag, {provider, Callback})).
+
+%% Event sink
+
+publish_events(Events) ->
+    [publish_event(Event) || Event <- Events].
+
+publish_event({ID, Ns, SourceID, {EventID, Dt, Payload}}) ->
+    hg_event_provider:publish_event(Ns, ID, SourceID, {EventID, Dt, hg_msgpack_marshalling:unmarshal(Payload)}).
+
 %%
 
 set_meta(ID) ->
@@ -180,6 +204,7 @@ handle_proxy_callback_timeout(Action) ->
     Changes = [
         ?cashreg_receipt_session_finished(?cashreg_receipt_session_failed({
             receipt_registration_failed, #cashreg_main_ReceiptRegistrationFailed{
+                % TODO temporary solution with code 0, should be fixed.
                 reason = #cashreg_main_ExternalFailure{code = <<"0">>}
             }
         }))

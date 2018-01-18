@@ -70,7 +70,8 @@ get_api_child_spec(MachineHandlers) ->
                 construct_service_handler(proxy_host_provider          , hg_proxy_host_provider),
                 construct_service_handler(payment_processing_eventsink , hg_event_sink_handler ),
                 construct_service_handler(cashreg                      , hg_cashreg_controller ),
-                construct_service_handler(cashreg_host_provider        , hg_cashreg_controller )
+                construct_service_handler(cashreg_host_provider        , hg_cashreg_controller ),
+                construct_service_handler(cashreg_eventsink            , hg_cashreg_controller )
             ]
         }
     ).
