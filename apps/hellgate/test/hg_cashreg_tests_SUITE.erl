@@ -129,7 +129,7 @@ receipt_registration_success(C) ->
     ShopCashRegister = #domain_ShopCashRegister{
         ref = ?cashreg(1),
         tax_system = osn,
-        options = #{<<"proxy_state">> => <<"sleeping">>}
+        options = #{<<"adapter_state">> => <<"sleeping">>}
     },
     ShopID = hg_ct_helper:create_battle_ready_shop_with_cashreg(?cat(2), ?tmpl(2), PartyClient, ShopCashRegister),
     InvoiceParams = make_invoice_params(PartyID, ShopID),
@@ -155,7 +155,7 @@ receipt_registration_failed(C) ->
     ShopCashRegister = #domain_ShopCashRegister{
         ref = ?cashreg(1),
         tax_system = osn,
-        options = #{<<"proxy_state">> => <<"finishing_failure">>}
+        options = #{<<"adapter_state">> => <<"finishing_failure">>}
     },
     ShopID = hg_ct_helper:create_battle_ready_shop_with_cashreg(?cat(2), ?tmpl(2), PartyClient, ShopCashRegister),
     InvoiceParams = make_invoice_params(PartyID, ShopID),
@@ -184,7 +184,7 @@ receipt_registration_success_suspend(C) ->
     ShopCashRegister = #domain_ShopCashRegister{
         ref = ?cashreg(1),
         tax_system = osn,
-        options = #{<<"proxy_state">> => <<"suspending">>, <<"tag">> => Tag, <<"callback">> => <<"ok">>}
+        options = #{<<"adapter_state">> => <<"suspending">>, <<"tag">> => Tag, <<"callback">> => <<"ok">>}
     },
     ShopID = hg_ct_helper:create_battle_ready_shop_with_cashreg(?cat(2), ?tmpl(2), PartyClient, ShopCashRegister),
     InvoiceParams = make_invoice_params(PartyID, ShopID),

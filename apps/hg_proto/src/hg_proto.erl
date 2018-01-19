@@ -50,9 +50,9 @@ get_service(cashreg) ->
 get_service(cashreg_eventsink) ->
     {cashreg_proto_processing_thrift, 'EventSink'};
 get_service(cashreg_provider) ->
-    {cashreg_proto_proxy_provider_thrift, 'ProviderProxy'};
+    {cashreg_proto_adapter_provider_thrift, 'ProviderAdapter'};
 get_service(cashreg_host_provider) ->
-    {cashreg_proto_proxy_provider_thrift, 'ProviderProxyHost'}.
+    {cashreg_proto_adapter_provider_thrift, 'ProviderAdapterHost'}.
 
 -spec get_service_spec(Name :: atom()) -> service_spec().
 

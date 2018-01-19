@@ -5,7 +5,7 @@
 -include_lib("dmsl/include/dmsl_domain_thrift.hrl").
 -include_lib("dmsl/include/dmsl_payment_processing_thrift.hrl").
 -include_lib("cashreg_proto/include/cashreg_proto_main_thrift.hrl").
--include_lib("cashreg_proto/include/cashreg_proto_proxy_provider_thrift.hrl").
+-include_lib("cashreg_proto/include/cashreg_proto_adapter_provider_thrift.hrl").
 -include_lib("cashreg_proto/include/cashreg_proto_processing_thrift.hrl").
 
 -export([register_receipt/4]).
@@ -23,8 +23,8 @@
     receipt_id().
 register_receipt(Party, Invoice, Payment, Revision) ->
     ReceiptParams = construct_receipt_params(Party, Invoice, Payment, Revision),
-    Proxy = construct_proxy(Party, Invoice, Revision),
-    create_receipt(ReceiptParams, Proxy).
+    Adapter = construct_adapter(Party, Invoice, Revision),
+    create_receipt(ReceiptParams, Adapter).
 
 -spec get_changes(receipt_id(), event_range()) ->
     [change()].
@@ -189,8 +189,8 @@ make_external_failure({receipt_registration_failed, #cashreg_main_ReceiptRegistr
     Code = <<"receipt_registration_failed">>,
     {external_failure, #domain_ExternalFailure{code = Code, description = Description}}.
 
-create_receipt(ReceiptParams, Proxy) ->
-    case issue_receipt_call('CreateReceipt', [ReceiptParams, Proxy]) of
+create_receipt(ReceiptParams, Adapter) ->
+    case issue_receipt_call('CreateReceipt', [ReceiptParams, Adapter]) of
         {ok, Receipt} ->
             Receipt#cashreg_main_Receipt.id;
         Error ->
@@ -208,11 +208,11 @@ get_receipt_events(ReceiptID, EventRange) ->
 issue_receipt_call(Function, Args) ->
     hg_woody_wrapper:call(cashreg, Function, Args).
 
-construct_proxy(Party, Invoice, Revision) ->
+construct_adapter(Party, Invoice, Revision) ->
     Shop = hg_party:get_shop(Invoice#domain_Invoice.shop_id, Party),
-    construct_proxy(Shop, Revision).
+    construct_adapter(Shop, Revision).
 
-construct_proxy(#domain_Shop{
+construct_adapter(#domain_Shop{
     cash_register = #domain_ShopCashRegister{
         ref = CashRegisterRef,
         options = CashRegOptions
@@ -223,7 +223,7 @@ construct_proxy(#domain_Shop{
     ProxyDef = hg_domain:get(Revision, {proxy, Proxy#domain_Proxy.ref}),
     URL = ProxyDef#domain_ProxyDefinition.url,
     ProxyOptions = ProxyDef#domain_ProxyDefinition.options,
-    #cashreg_prxprv_Proxy{
+    #cashreg_adptprv_Adapter{
         url = URL,
         options = maps:merge(ProxyOptions, CashRegOptions)
     }.

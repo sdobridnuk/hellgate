@@ -3,10 +3,10 @@
 
 % Events
 
--define(cashreg_receipt_created(ReceiptParams, Proxy),
+-define(cashreg_receipt_created(ReceiptParams, Adapter),
     {receipt_created, #cashreg_proc_ReceiptCreated{
         receipt_params = ReceiptParams,
-        proxy = Proxy
+        adapter = Adapter
     }}
 ).
 
@@ -39,9 +39,9 @@
         #cashreg_proc_SessionSuspended{tag = Tag}
     }
 ).
--define(cashreg_receipt_proxy_st_changed(ProxySt),
-    {session_proxy_state_changed,
-        #cashreg_proc_SessionProxyStateChanged{proxy_state = ProxySt}
+-define(cashreg_receipt_adapter_st_changed(AdapterSt),
+    {session_adapter_state_changed,
+        #cashreg_proc_SessionAdapterStateChanged{adapter_state = AdapterSt}
     }
 ).
 

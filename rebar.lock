@@ -1,7 +1,7 @@
 {"1.1.0",
 [{<<"cashreg_proto">>,
   {git,"git@github.com:rbkmoney/cashreg-proto.git",
-       {ref,"03abfe6f3566f963bbd27d0e4a3843b1ac5d4c6e"}},
+       {ref,"9a5d374f9682c8e4ad6a1656cb52193d102a2d7e"}},
   0},
  {<<"certifi">>,{pkg,<<"certifi">>,<<"0.7.0">>},2},
  {<<"cowboy">>,{pkg,<<"cowboy">>,<<"1.0.4">>},1},

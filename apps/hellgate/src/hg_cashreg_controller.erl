@@ -1,6 +1,6 @@
 -module(hg_cashreg_controller).
 
--include_lib("cashreg_proto/include/cashreg_proto_proxy_provider_thrift.hrl").
+-include_lib("cashreg_proto/include/cashreg_proto_adapter_provider_thrift.hrl").
 -include_lib("cashreg_proto/include/cashreg_proto_processing_thrift.hrl").
 
 -define(NS, <<"cashreg">>).
@@ -23,26 +23,26 @@
 % Types
 -record(st, {
     receipt_params  :: undefined | receipt_params(),
-    proxy           :: undefined | proxy(),
+    adapter         :: undefined | adapter(),
     session         :: undefined | session(),
     receipt_status  :: undefined | receipt_status()
 }).
 % -type st() :: #st{}.
 
 -type session() :: #{
-    status      := undefined | suspended | finished,
-    result      => session_result(),
-    proxy_state => proxy_state()
+    status          := undefined | suspended | finished,
+    result          => session_result(),
+    adapter_state   => adapter_state()
 }.
 
 -type receipt_params()      :: cashreg_proto_main_thrift:'ReceiptParams'().
 -type receipt_id()          :: cashreg_proto_main_thrift:'ReceiptID'().
 -type receipt_status()      :: cashreg_proto_main_thrift:'ReceiptStatus'().
 -type session_result()      :: cashreg_proto_processing_thrift:'SessionResult'().
--type proxy()               :: cashreg_proto_proxy_provider_thrift:'Proxy'().
--type proxy_state()         :: cashreg_proto_proxy_provider_thrift:'ProxyState'().
--type tag()                 :: cashreg_proto_proxy_provider_thrift:'Tag'().
--type callback()            :: cashreg_proto_proxy_provider_thrift:'Callback'().
+-type adapter()             :: cashreg_proto_adapter_provider_thrift:'Adapter'().
+-type adapter_state()       :: cashreg_proto_adapter_provider_thrift:'AdapterState'().
+-type tag()                 :: cashreg_proto_adapter_provider_thrift:'Tag'().
+-type callback()            :: cashreg_proto_adapter_provider_thrift:'Callback'().
 -type callback_response()   :: _.
 
 %% Woody handler
@@ -69,10 +69,10 @@ handle_function(Func, Args, Opts) ->
         fun() -> handle_function_(Func, Args, Opts) end
     ).
 
-handle_function_('CreateReceipt', [ReceiptParams, ProxyOptions], _Opts) ->
+handle_function_('CreateReceipt', [ReceiptParams, AdapterOptions], _Opts) ->
     ReceiptID = hg_utils:unique_id(),
     ok = set_meta(ReceiptID),
-    ok = start(ReceiptID, [ReceiptParams, ProxyOptions]),
+    ok = start(ReceiptID, [ReceiptParams, AdapterOptions]),
     Status = {created, #cashreg_main_ReceiptCreated{}},
     construct_receipt(ReceiptID, Status, ReceiptParams);
 handle_function_('GetReceipt', [ReceiptID], _Opts) ->
@@ -149,10 +149,10 @@ map_error({error, Reason}) ->
 namespace() ->
     ?NS.
 
--spec init(receipt_id(), [receipt_params() | proxy()]) ->
+-spec init(receipt_id(), [receipt_params() | adapter()]) ->
     hg_machine:result().
-init(_ReceiptID, [ReceiptParams, Proxy]) ->
-    Changes = [?cashreg_receipt_created(ReceiptParams, Proxy)],
+init(_ReceiptID, [ReceiptParams, Adapter]) ->
+    Changes = [?cashreg_receipt_created(ReceiptParams, Adapter)],
     Action = hg_machine_action:instant(),
     Result = #{
         changes => Changes,
@@ -181,26 +181,26 @@ process(
     Action,
     #st{
         receipt_params = ReceiptParams,
-        proxy = Proxy,
+        adapter = Adapter,
         session = Session
     } = St
 ) ->
-    ProxyState = maps:get(proxy_state, Session, undefined),
-    ReceiptProxyResult = register_receipt(ReceiptParams, Proxy, ProxyState),
-    Result = handle_proxy_result(ReceiptProxyResult, Action),
+    AdapterState = maps:get(adapter_state, Session, undefined),
+    ReceiptAdapterResult = register_receipt(ReceiptParams, Adapter, AdapterState),
+    Result = handle_adapter_result(ReceiptAdapterResult, Action),
     finish_processing(Result, St).
 
-register_receipt(ReceiptParams, Proxy, ProxyState) ->
-    ReceiptContext = construct_receipt_context(ReceiptParams, Proxy),
-    Session = construct_session(ProxyState),
-    {ok, ReceiptProxyResult} = hg_cashreg_provider:register_receipt(ReceiptContext, Session, Proxy),
-    ReceiptProxyResult.
+register_receipt(ReceiptParams, Adapter, AdapterState) ->
+    ReceiptContext = construct_receipt_context(ReceiptParams, Adapter),
+    Session = construct_session(AdapterState),
+    {ok, ReceiptAdapterResult} = hg_cashreg_provider:register_receipt(ReceiptContext, Session, Adapter),
+    ReceiptAdapterResult.
 
 process_callback_timeout(Action, St) ->
-    Result = handle_proxy_callback_timeout(Action),
+    Result = handle_adapter_callback_timeout(Action),
     finish_processing(Result, St).
 
-handle_proxy_callback_timeout(Action) ->
+handle_adapter_callback_timeout(Action) ->
     Changes = [
         ?cashreg_receipt_session_finished(?cashreg_receipt_session_failed({
             receipt_registration_failed, #cashreg_main_ReceiptRegistrationFailed{
@@ -209,12 +209,12 @@ handle_proxy_callback_timeout(Action) ->
             }
         }))
     ],
-    make_proxy_result(Changes, Action).
+    make_adapter_result(Changes, Action).
 
-make_proxy_result(Changes, Action) ->
-    make_proxy_result(Changes, Action, undefined).
+make_adapter_result(Changes, Action) ->
+    make_adapter_result(Changes, Action, undefined).
 
-make_proxy_result(Changes, Action, Receipt) ->
+make_adapter_result(Changes, Action, Receipt) ->
     {wrap_session_events(Changes), Action, Receipt}.
 
 wrap_session_events(SessionEvents) ->
@@ -236,17 +236,17 @@ dispatch_callback(
     {provider, Callback},
     #st{
         receipt_params = ReceiptParams,
-        proxy = Proxy,
-        session = #{status := suspended, proxy_state := ProxyState}
+        adapter = Adapter,
+        session = #{status := suspended, adapter_state := AdapterState}
     } = St
 ) ->
     Action = hg_machine_action:new(),
-    ReceiptContext = construct_receipt_context(ReceiptParams, Proxy),
+    ReceiptContext = construct_receipt_context(ReceiptParams, Adapter),
     {ok, CallbackResult} = hg_cashreg_provider:handle_receipt_callback(
         Callback,
         ReceiptContext,
-        construct_session(ProxyState),
-        Proxy
+        construct_session(AdapterState),
+        Adapter
     ),
     {Response, Result} = handle_callback_result(CallbackResult, Action),
     maps:merge(#{response => Response}, finish_processing(Result, St));
@@ -287,10 +287,10 @@ apply_changes(Changes, St) ->
 apply_change(Event, undefined) ->
     apply_change(Event, #st{});
 
-apply_change(?cashreg_receipt_created(ReceiptParams, Proxy), St) ->
+apply_change(?cashreg_receipt_created(ReceiptParams, Adapter), St) ->
     St#st{
         receipt_params = ReceiptParams,
-        proxy = Proxy,
+        adapter = Adapter,
         session = #{status => undefined},
         receipt_status = {created, #cashreg_main_ReceiptCreated{}}
     };
@@ -317,8 +317,8 @@ merge_session_change(?cashreg_receipt_session_finished(Result), Session) ->
     Session#{status := finished, result => Result};
 merge_session_change(?cashreg_receipt_session_suspended(_Tag), Session) ->
     Session#{status := suspended};
-merge_session_change(?cashreg_receipt_proxy_st_changed(ProxyState), Session) ->
-    Session#{proxy_state => ProxyState}.
+merge_session_change(?cashreg_receipt_adapter_st_changed(AdapterState), Session) ->
+    Session#{adapter_state => AdapterState}.
 
 -spec process_callback(tag(), {provider, callback()}) ->
     {ok, callback_response()} | {error, invalid_callback | notfound | failed} | no_return().
@@ -333,65 +333,65 @@ process_callback(Tag, Callback) ->
             Error
     end.
 
-update_proxy_state(undefined) ->
+update_adapter_state(undefined) ->
     [];
-update_proxy_state(ProxyState) ->
-    [?cashreg_receipt_proxy_st_changed(ProxyState)].
+update_adapter_state(AdapterState) ->
+    [?cashreg_receipt_adapter_st_changed(AdapterState)].
 
-handle_proxy_intent(#'cashreg_prxprv_FinishIntent'{status = {success, _}}, Action) ->
+handle_adapter_intent(#'cashreg_adptprv_FinishIntent'{status = {success, _}}, Action) ->
     Events = [?cashreg_receipt_session_finished(?cashreg_receipt_session_succeeded())],
     {Events, Action};
-handle_proxy_intent(
-    #'cashreg_prxprv_FinishIntent'{status = {failure, #cashreg_prxprv_Failure{error = Error}}},
+handle_adapter_intent(
+    #'cashreg_adptprv_FinishIntent'{status = {failure, #cashreg_adptprv_Failure{error = Error}}},
     Action
 ) ->
     Events = [?cashreg_receipt_session_finished(?cashreg_receipt_session_failed(Error))],
     {Events, Action};
-handle_proxy_intent(#'cashreg_prxprv_SleepIntent'{timer = Timer}, Action0) ->
+handle_adapter_intent(#'cashreg_adptprv_SleepIntent'{timer = Timer}, Action0) ->
     Action = hg_machine_action:set_timer(Timer, Action0),
     Events = [],
     {Events, Action};
-handle_proxy_intent(#'cashreg_prxprv_SuspendIntent'{tag = Tag, timeout = Timer}, Action0) ->
+handle_adapter_intent(#'cashreg_adptprv_SuspendIntent'{tag = Tag, timeout = Timer}, Action0) ->
     Action = hg_machine_action:set_timer(Timer, hg_machine_action:set_tag(Tag, Action0)),
     Events = [?cashreg_receipt_session_suspended(Tag)],
     {Events, Action}.
 
 handle_callback_result(
-    #cashreg_prxprv_ReceiptCallbackResult{result = ProxyResult, response = Response},
+    #cashreg_adptprv_ReceiptCallbackResult{result = AdapterResult, response = Response},
     Action
 ) ->
-    {Response, handle_proxy_callback_result(ProxyResult, hg_machine_action:unset_timer(Action))}.
+    {Response, handle_adapter_callback_result(AdapterResult, hg_machine_action:unset_timer(Action))}.
 
-handle_proxy_result(
-    #cashreg_prxprv_ReceiptProxyResult{
+handle_adapter_result(
+    #cashreg_adptprv_ReceiptAdapterResult{
         intent = {_Type, Intent},
-        next_state = ProxyState
+        next_state = AdapterState
     },
     Action0
 ) ->
-    Changes1 = update_proxy_state(ProxyState),
-    {Changes2, Action} = handle_proxy_intent(Intent, Action0),
+    Changes1 = update_adapter_state(AdapterState),
+    {Changes2, Action} = handle_adapter_intent(Intent, Action0),
     handle_intent(Intent, Changes1 ++ Changes2, Action).
 
-handle_proxy_callback_result(
-    #cashreg_prxprv_ReceiptCallbackProxyResult{
+handle_adapter_callback_result(
+    #cashreg_adptprv_ReceiptCallbackAdapterResult{
         intent = {_Type, Intent},
-        next_state = ProxyState
+        next_state = AdapterState
     },
     Action0
 ) ->
-    Changes1 = update_proxy_state(ProxyState),
-    {Changes2, Action} = handle_proxy_intent(Intent, hg_machine_action:unset_timer(Action0)),
+    Changes1 = update_adapter_state(AdapterState),
+    {Changes2, Action} = handle_adapter_intent(Intent, hg_machine_action:unset_timer(Action0)),
     handle_intent(Intent, Changes1 ++ Changes2, Action).
 
 handle_intent(Intent, Changes, Action) ->
     case Intent of
-        #cashreg_prxprv_FinishIntent{
-            status = {'success', #cashreg_prxprv_Success{receipt_reg_entry = ReceiptRegEntry}}
+        #cashreg_adptprv_FinishIntent{
+            status = {'success', #cashreg_adptprv_Success{receipt_reg_entry = ReceiptRegEntry}}
         } ->
-            make_proxy_result(Changes, Action, ReceiptRegEntry);
+            make_adapter_result(Changes, Action, ReceiptRegEntry);
         _ ->
-            make_proxy_result(Changes, Action)
+            make_adapter_result(Changes, Action)
     end.
 
 finish_processing({Changes, Action, Receipt}, St) ->
@@ -436,14 +436,14 @@ construct_receipt(
     }.
 
 
-construct_receipt_context(ReceiptParams, Proxy) ->
-    #cashreg_prxprv_ReceiptContext{
+construct_receipt_context(ReceiptParams, Adapter) ->
+    #cashreg_adptprv_ReceiptContext{
         receipt_params = ReceiptParams,
-        options = Proxy#cashreg_prxprv_Proxy.options
+        options = Adapter#cashreg_adptprv_Adapter.options
     }.
 
 construct_session(State) ->
-    #cashreg_prxprv_Session{
+    #cashreg_adptprv_Session{
         state = State
     }.
 
@@ -454,11 +454,11 @@ marshal(Changes) when is_list(Changes) ->
 
 %% Changes
 
-marshal(change, ?cashreg_receipt_created(ReceiptParams, Proxy)) ->
+marshal(change, ?cashreg_receipt_created(ReceiptParams, Adapter)) ->
     [1, #{
         <<"change">>            => <<"created">>,
         <<"receipt_params">>    => marshal(receipt_params, ReceiptParams),
-        <<"proxy">>             => marshal(proxy, Proxy)
+        <<"adapter">>           => marshal(adapter, Adapter)
     }];
 marshal(change, ?cashreg_receipt_registered(ReceiptRegEntry)) ->
     [1, #{
@@ -576,10 +576,10 @@ marshal(msgpack_value, undefined) ->
 marshal(msgpack_value, MsgpackValue) ->
     hg_cashreg_msgpack_marshalling:unmarshal(MsgpackValue);
 
-marshal(proxy, #cashreg_prxprv_Proxy{} = Proxy) ->
+marshal(adapter, #cashreg_adptprv_Adapter{} = Adapter) ->
     #{
-        <<"url">> => marshal(str, Proxy#cashreg_prxprv_Proxy.url),
-        <<"options">> => marshal(map_str, Proxy#cashreg_prxprv_Proxy.options)
+        <<"url">> => marshal(str, Adapter#cashreg_adptprv_Adapter.url),
+        <<"options">> => marshal(map_str, Adapter#cashreg_adptprv_Adapter.options)
     };
 
 marshal(receipt_reg_entry, #cashreg_main_ReceiptRegistrationEntry{} = ReceiptRegEntry) ->
@@ -607,10 +607,10 @@ marshal(session_change, ?cashreg_receipt_session_suspended(Tag)) ->
         <<"suspended">>,
         marshal(str, Tag)
     ]];
-marshal(session_change, ?cashreg_receipt_proxy_st_changed(ProxySt)) ->
+marshal(session_change, ?cashreg_receipt_adapter_st_changed(AdapterSt)) ->
     [1, [
         <<"changed">>,
-        marshal(msgpack_value, ProxySt)
+        marshal(msgpack_value, AdapterSt)
     ]];
 
 marshal(session_status, ?cashreg_receipt_session_succeeded()) ->
@@ -638,11 +638,11 @@ unmarshal({list, changes}, Changes) when is_list(Changes) ->
 unmarshal(change, [1, #{
     <<"change">>            := <<"created">>,
     <<"receipt_params">>    := ReceiptParams,
-    <<"proxy">>             := Proxy
+    <<"adapter">>           := Adapter
 }]) ->
     ?cashreg_receipt_created(
         unmarshal(receipt_params, ReceiptParams),
-        unmarshal(proxy, Proxy)
+        unmarshal(adapter, Adapter)
     );
 unmarshal(change, [1, #{
     <<"change">>            := <<"registered">>,
@@ -796,11 +796,11 @@ unmarshal(msgpack_value, undefined) ->
 unmarshal(msgpack_value, MsgpackValue) ->
     hg_cashreg_msgpack_marshalling:marshal(MsgpackValue);
 
-unmarshal(proxy, #{
+unmarshal(adapter, #{
     <<"url">> := Url,
     <<"options">> := Options
 }) ->
-    #cashreg_prxprv_Proxy{
+    #cashreg_adptprv_Adapter{
         url = unmarshal(str, Url),
         options = unmarshal(map_str, Options)
     };
@@ -829,8 +829,8 @@ unmarshal(session_change, [1, [<<"finished">>, Result]]) ->
     ?cashreg_receipt_session_finished(unmarshal(session_status, Result));
 unmarshal(session_change, [1, [<<"suspended">>, Tag]]) ->
     ?cashreg_receipt_session_suspended(unmarshal(str, Tag));
-unmarshal(session_change, [1, [<<"changed">>, ProxySt]]) ->
-    ?cashreg_receipt_proxy_st_changed(unmarshal(msgpack_value, ProxySt));
+unmarshal(session_change, [1, [<<"changed">>, AdapterSt]]) ->
+    ?cashreg_receipt_adapter_st_changed(unmarshal(msgpack_value, AdapterSt));
 
 unmarshal(session_status, <<"succeeded">>) ->
     ?cashreg_receipt_session_succeeded();
