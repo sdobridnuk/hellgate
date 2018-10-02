@@ -139,7 +139,8 @@ start_app(hellgate = AppName) ->
             processed => {intervals, [1, 1, 1]},
             captured => {intervals, [1, 1, 1]},
             refunded => {intervals, [1, 1, 1]}
-        }}
+        }},
+        {inspect_timeout, 3000}
     ]), #{
         hellgate_root_url => get_hellgate_url()
     }};
