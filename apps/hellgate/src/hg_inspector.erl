@@ -26,7 +26,7 @@ inspect(
         additional = ProxyAdditional
     }}
 ) ->
-    DeadLine = genlib_app:env(hellgate, inspect_deadline, undefined),
+    DeadLine = woody_deadline:from_timeout(genlib_app:env(hellgate, inspect_timeout, infinity)),
     ProxyDef = get_proxy_def(ProxyRef, Revision),
     Context = #proxy_inspector_Context{
         payment = get_payment_info(Shop, Invoice, Payment),

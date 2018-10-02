@@ -82,13 +82,11 @@ call(ServiceName, Function, Args, Opts, Deadline) ->
     ).
 
 -spec attach_deadline(woody_deadline:deadline(), woody_context:ctx()) -> woody_context:ctx().
+
+attach_deadline(undefined, Context) ->
+    Context;
 attach_deadline(Deadline, Context) ->
-    case Deadline of
-        undefined ->
-            Context;
-        Deadline ->
-            woody_context:set_deadline(Deadline, Context)
-    end.
+    woody_context:set_deadline(Deadline, Context).
 
 -spec raise(term()) ->
     no_return().

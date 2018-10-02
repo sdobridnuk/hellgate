@@ -829,50 +829,12 @@ payment_risk_score_check(C) ->
 -spec payment_risk_score_check_fail(config()) -> test_return().
 
 payment_risk_score_check_fail(C) ->
-    Client = cfg(client, C),
-    PartyClient = cfg(party_client, C),
-    ShopID = hg_ct_helper:create_battle_ready_shop(?cat(4), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
-    InvoiceID1 = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
-    % Invoice
-    PaymentParams = make_payment_params(),
-    ?payment_state(?payment(PaymentID1)) = hg_client_invoicing:start_payment(InvoiceID1, PaymentParams, Client),
-    [
-        ?payment_ev(PaymentID1, ?payment_started(?payment_w_status(?pending())))
-    ] = next_event(InvoiceID1, Client),
-    [
-        ?payment_ev(PaymentID1, ?risk_score_changed(low)), % default low risk score...
-        ?payment_ev(PaymentID1, ?route_changed(?route(?prv(2), ?trm(7)))),
-        ?payment_ev(PaymentID1, ?cash_flow_changed(_))
-    ] = next_event(InvoiceID1, Client),
-    [
-        ?payment_ev(PaymentID1, ?session_ev(?processed(), ?session_started()))
-    ] = next_event(InvoiceID1, Client),
-    PaymentID1 = await_payment_process_finish(InvoiceID1, PaymentID1, Client),
-    PaymentID1 = await_payment_capture(InvoiceID1, PaymentID1, Client).
+    payment_risk_score_check(4, C).
 
 -spec payment_risk_score_check_timeout(config()) -> test_return().
 
 payment_risk_score_check_timeout(C) ->
-    Client = cfg(client, C),
-    PartyClient = cfg(party_client, C),
-    ShopID = hg_ct_helper:create_battle_ready_shop(?cat(5), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
-    InvoiceID1 = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
-    % Invoice
-    PaymentParams = make_payment_params(),
-    ?payment_state(?payment(PaymentID1)) = hg_client_invoicing:start_payment(InvoiceID1, PaymentParams, Client),
-    [
-        ?payment_ev(PaymentID1, ?payment_started(?payment_w_status(?pending())))
-    ] = next_event(InvoiceID1, Client),
-    [
-        ?payment_ev(PaymentID1, ?risk_score_changed(low)), % default low risk score...
-        ?payment_ev(PaymentID1, ?route_changed(?route(?prv(2), ?trm(7)))),
-        ?payment_ev(PaymentID1, ?cash_flow_changed(_))
-    ] = next_event(InvoiceID1, Client),
-    [
-        ?payment_ev(PaymentID1, ?session_ev(?processed(), ?session_started()))
-    ] = next_event(InvoiceID1, Client),
-    PaymentID1 = await_payment_process_finish(InvoiceID1, PaymentID1, Client),
-    PaymentID1 = await_payment_capture(InvoiceID1, PaymentID1, Client).
+    payment_risk_score_check(5, C).
 
 -spec party_revision_check(config()) -> test_return().
 
@@ -2298,6 +2260,28 @@ party_revision_increment(ShopID, PartyClient) ->
     Shop = hg_client_party:get_shop(ShopID, PartyClient),
     ok = hg_ct_helper:adjust_contract(Shop#domain_Shop.contract_id, ?tmpl(1), PartyClient).
 
+payment_risk_score_check(Cat, C) ->
+    Client = cfg(client, C),
+    PartyClient = cfg(party_client, C),
+    ShopID = hg_ct_helper:create_battle_ready_shop(?cat(Cat), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
+    InvoiceID1 = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+    % Invoice
+    PaymentParams = make_payment_params(),
+    ?payment_state(?payment(PaymentID1)) = hg_client_invoicing:start_payment(InvoiceID1, PaymentParams, Client),
+    [
+        ?payment_ev(PaymentID1, ?payment_started(?payment_w_status(?pending())))
+    ] = next_event(InvoiceID1, Client),
+    [
+        ?payment_ev(PaymentID1, ?risk_score_changed(low)), % default low risk score...
+        ?payment_ev(PaymentID1, ?route_changed(?route(?prv(2), ?trm(7)))),
+        ?payment_ev(PaymentID1, ?cash_flow_changed(_))
+    ] = next_event(InvoiceID1, Client),
+    [
+        ?payment_ev(PaymentID1, ?session_ev(?processed(), ?session_started()))
+    ] = next_event(InvoiceID1, Client),
+    PaymentID1 = await_payment_process_finish(InvoiceID1, PaymentID1, Client),
+    PaymentID1 = await_payment_capture(InvoiceID1, PaymentID1, Client).
+
 -spec construct_domain_fixture() -> [hg_domain:object()].
 
 construct_domain_fixture() ->
@@ -2499,8 +2483,10 @@ construct_domain_fixture() ->
         hg_ct_fixture:construct_inspector(?insp(1), <<"Rejector">>, ?prx(2), #{<<"risk_score">> => <<"low">>}),
         hg_ct_fixture:construct_inspector(?insp(2), <<"Skipper">>, ?prx(2), #{<<"risk_score">> => <<"high">>}),
         hg_ct_fixture:construct_inspector(?insp(3), <<"Fatalist">>, ?prx(2), #{<<"risk_score">> => <<"fatal">>}),
-        hg_ct_fixture:construct_inspector(?insp(4), <<"Offliner">>, ?prx(2), #{<<"link_state">> => <<"unexpected_failure">>}, low),
-        hg_ct_fixture:construct_inspector(?insp(5), <<"Offliner">>, ?prx(2), #{<<"link_state">> => <<"timeout">>}, low),
+        hg_ct_fixture:construct_inspector(?insp(4), <<"Offliner">>, ?prx(2),
+            #{<<"link_state">> => <<"unexpected_failure">>}, low),
+        hg_ct_fixture:construct_inspector(?insp(5), <<"Offliner">>, ?prx(2),
+            #{<<"link_state">> => <<"timeout">>}, low),
 
         hg_ct_fixture:construct_contract_template(?tmpl(1), ?trms(1)),
         hg_ct_fixture:construct_contract_template(?tmpl(2), ?trms(2)),
