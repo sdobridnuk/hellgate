@@ -38,6 +38,7 @@
 -define(STEP, 5).
 -define(SNAPSHOT_STEP, 10).
 -define(CT_ERLANG_BINARY, <<"application/x-erlang-binary">>).
+-define(CT_THRIFT_BINARY, <<"application/x-thrift-binary">>).
 
 -record(st, {
     party                :: undefined | party(),
@@ -1085,7 +1086,7 @@ try_attach_snapshot(Changes, AuxSt, _) ->
 -define(TOP_VERSION, 6).
 
 wrap_event_payload(Event) ->
-    ContentType = ?CT_ERLANG_BINARY,
+    ContentType = ?CT_THRIFT_BINARY,
     Meta = #{
         <<"vsn">> => ?TOP_VERSION,
         <<"ct">>  => ContentType
@@ -1094,7 +1095,7 @@ wrap_event_payload(Event) ->
     [Meta, Data].
 
 wrap_event_payload_w_snapshot(Event, St) ->
-    ContentType = ?CT_ERLANG_BINARY,
+    ContentType = ?CT_THRIFT_BINARY,
     Meta = #{
         <<"vsn">> => ?TOP_VERSION,
         <<"ct">>  => ContentType,
@@ -1136,16 +1137,29 @@ unwrap_state(_) ->
     undefined.
 
 encode_state(?CT_ERLANG_BINARY, St) ->
+    {bin, term_to_binary(St)};
+encode_state(?CT_THRIFT_BINARY, St) ->
+    % this thing can't be saved in valid thrift
     {bin, term_to_binary(St)}.
 
 decode_state(?CT_ERLANG_BINARY, {bin, EncodedSt}) ->
+    binary_to_term(EncodedSt);
+decode_state(?CT_THRIFT_BINARY, {bin, EncodedSt}) ->
     binary_to_term(EncodedSt).
 
 encode_event(?CT_ERLANG_BINARY, Event) ->
-    {bin, term_to_binary(Event)}.
+    {bin, term_to_binary(Event)};
+encode_event(?CT_THRIFT_BINARY, Event) ->
+    Type = {struct, union, {dmsl_payment_processing_thrift, 'EventPayload'}},
+    {ok, {ok, Bin}} = hg_proto_utils:serialize(Type, Event),
+    {bin, Bin}.
 
 decode_event(?CT_ERLANG_BINARY, {bin, EncodedEvent}) ->
-    binary_to_term(EncodedEvent).
+    binary_to_term(EncodedEvent);
+decode_event(?CT_THRIFT_BINARY, {bin, EncodedEvent}) ->
+    Type = {struct, union, {dmsl_payment_processing_thrift, 'EventPayload'}},
+    {ok, Bin} = hg_proto_utils:deserialize(Type, EncodedEvent),
+    Bin.
 
 -spec wrap_aux_state(party_aux_st()) -> hg_msgpack_marshalling:msgpack_value().
 
