@@ -84,7 +84,8 @@
 -type content_type()    :: binary().
 -type party_aux_st()    :: #{
     snapshot_index := snapshot_index(),
-    party_revision_index := party_revision_index()
+    party_revision_index := party_revision_index(),
+    last_event_id => event_id()
 }.
 -type snapshot_index()  :: [event_id()].
 -type party_revision_index() :: #{
@@ -380,11 +381,26 @@ checkout(PartyID, RevisionParam) ->
     party_revision() | no_return().
 
 get_last_revision(PartyID) ->
-    case get_party_revision_index(get_aux_state(PartyID)) of
-        #{} ->
-            get_last_revision_old_way(PartyID);
-        PartyRevisionIndex ->
-            lists:max(maps:keys(PartyRevisionIndex))
+    AuxState = get_aux_state(PartyID),
+    LastEventID = maps:get(last_event_id, AuxState),
+    case get_party_revision_index(AuxState) of
+        RevisionIndex when map_size(RevisionIndex) > 0 ->
+            MaxRevision = lists:max(maps:keys(RevisionIndex)),
+            % we should check if this is the last revision for real
+            {_, ToEventID} = get_party_revision_range(MaxRevision, RevisionIndex),
+            case ToEventID < LastEventID of
+                true ->
+                    % there are events after MaxRevision, so it can be a bug
+                    _ = lager:warning(
+                        "Max revision EventID (~p) and LastEventID (~p) missmatch",
+                        [ToEventID, LastEventID]
+                    ),
+                    get_last_revision_old_way(PartyID);
+                false ->
+                    MaxRevision
+            end;
+        _ ->
+            get_last_revision_old_way(PartyID)
     end.
 
 -spec get_last_revision_old_way(party_id()) ->
@@ -458,15 +474,24 @@ get_history(PartyID, AfterID, Limit) ->
 get_history(PartyID, AfterID, Limit, Direction) ->
     map_history_error(hg_machine:get_history(?NS, PartyID, AfterID, Limit, Direction)).
 
+-spec get_aux_state(party_id()) ->
+    party_aux_st().
+
 get_aux_state(PartyID) ->
-    #{aux_state := AuxSt} = map_history_error(hg_machine:get_machine(
+    #{aux_state := AuxSt, history := History} = map_history_error(hg_machine:get_machine(
         ?NS,
         PartyID,
         undefined,
-        0,
+        1,
         backward
     )),
-    unwrap_aux_state(AuxSt).
+    AuxState = unwrap_aux_state(AuxSt),
+    case History of
+        [] ->
+            AuxState#{last_event_id => 0};
+        [{EventID, _, _}] ->
+            AuxState#{last_event_id => EventID}
+    end.
 
 get_revision_of_part(PartyID, History, Last, Step) ->
     case find_revision_in_history(History) of
@@ -648,7 +673,7 @@ apply_accepted_claim(Claim, St) ->
     end.
 
 respond(Response, Changes, AuxSt0, St) ->
-    AuxSt1 = append_party_revision_index(St, AuxSt0),
+    AuxSt1 = append_party_revision_index(Changes, St, AuxSt0),
     {Events, AuxSt2} = try_attach_snapshot(Changes, AuxSt1, St),
     {
         {ok, Response},
@@ -661,9 +686,12 @@ respond(Response, Changes, AuxSt0, St) ->
 respond_w_exception(Exception) ->
     {{exception, Exception}, #{}}.
 
-append_party_revision_index(St, AuxSt) ->
+append_party_revision_index(Changes, St0, AuxSt) ->
     PartyRevisionIndex0 = get_party_revision_index(AuxSt),
-    PartyRevisionIndex1 = update_party_revision_index(St, PartyRevisionIndex0),
+    LastEventID = St0#st.last_event,
+    % Brave prediction of next EventID ))
+    St1 = merge_party_changes(Changes, St0#st{last_event = LastEventID + 1}),
+    PartyRevisionIndex1 = update_party_revision_index(St1, PartyRevisionIndex0),
     set_party_revision_index(PartyRevisionIndex1, AuxSt).
 
 update_party_revision_index(St, PartyRevisionIndex) ->
@@ -777,7 +805,10 @@ merge_events(Events, St) ->
 merge_event({ID, _Dt, ?party_ev(PartyChanges)}, #st{last_event = LastEventID} = St)
     when is_list(PartyChanges) andalso ID =:= LastEventID + 1
 ->
-     lists:foldl(fun merge_party_change/2, St#st{last_event = ID}, PartyChanges).
+    merge_party_changes(PartyChanges, St#st{last_event = ID}).
+
+merge_party_changes(Changes, St) ->
+     lists:foldl(fun merge_party_change/2, St, Changes).
 
 merge_party_change(?party_created(PartyID, ContactInfo, Timestamp), St) ->
     St#st{
