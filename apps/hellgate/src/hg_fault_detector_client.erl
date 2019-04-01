@@ -82,23 +82,23 @@ register_operation(ServiceId, Operation, SlidingWindow, OpTimeLimit, PreAggrSize
 
 do_init_service(ServiceId, ServiceConfig) ->
     woody_client:call(
-        {fd_proto_fault_detector_thrift, 'FaultDetector'},
-        'InitService',
-        [ServiceId, ServiceConfig],
+        {{fd_proto_fault_detector_thrift, 'FaultDetector'},
+         'InitService',
+         [ServiceId, ServiceConfig]},
         #{url => fd_url(), event_handler => woody_event_handler_default}).
 
 do_get_statistics(ServiceIds) ->
     woody_client:call(
-        {fd_proto_fault_detector_thrift, 'FaultDetector'},
-        'ServiceStatistics',
-        ServiceIds,
+        {{fd_proto_fault_detector_thrift, 'FaultDetector'},
+         'ServiceStatistics',
+         [ServiceIds]},
         #{url => fd_url(), event_handler => woody_event_handler_default}).
 
 do_register_operation(ServiceId, Operation, ServiceConfig) ->
     woody_client:call(
-        {fd_proto_fault_detector_thrift, 'FaultDetector'},
-        'RegisterOperation',
-        [ServiceId, Operation, ServiceConfig],
+        {{fd_proto_fault_detector_thrift, 'FaultDetector'},
+         'RegisterOperation',
+         [ServiceId, Operation, ServiceConfig]},
         #{url => fd_url(), event_handler => woody_event_handler_default}).
 
 fd_url() ->
