@@ -42,11 +42,12 @@ init_service(ServiceId) ->
     | {exception, woody_error:business_error()}
     | no_return().
 init_service(ServiceId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
-    do_init_service(ServiceId,
-                    #fault_detector_ServiceConfig{
-                        sliding_window = SlidingWindow,
-                        operation_time_limit = OpTimeLimit,
-                        pre_aggregation_size = PreAggrSize}).
+    do_init_service(
+        ServiceId,
+        #fault_detector_ServiceConfig{
+            sliding_window       = SlidingWindow,
+            operation_time_limit = OpTimeLimit,
+            pre_aggregation_size = PreAggrSize}).
 
 -spec get_statistics([service_id()]) ->
     {ok, woody:result()}
@@ -71,12 +72,13 @@ register_operation(ServiceId, Operation) ->
     | {exception, woody_error:business_error()}
     | no_return().
 register_operation(ServiceId, Operation, SlidingWindow, OpTimeLimit, PreAggrSize) ->
-    do_register_operation(ServiceId,
-                          Operation,
-                          #fault_detector_ServiceConfig{
-                             sliding_window = SlidingWindow,
-                             operation_time_limit = OpTimeLimit,
-                             pre_aggregation_size = PreAggrSize}).
+    do_register_operation(
+        ServiceId,
+        Operation,
+        #fault_detector_ServiceConfig{
+            sliding_window       = SlidingWindow,
+            operation_time_limit = OpTimeLimit,
+            pre_aggregation_size = PreAggrSize}).
 
 %% PRIVATE
 
