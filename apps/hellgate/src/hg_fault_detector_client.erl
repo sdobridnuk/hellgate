@@ -4,7 +4,6 @@
 
 -include_lib("fault_detector_proto/include/fd_proto_fault_detector_thrift.hrl").
 
--define(URL, "::").
 -define(DEFAULT_CONFIG, #fault_detector_ServiceConfig{
                          sliding_window = 60000,
                          operation_time_limit = 10000,
@@ -86,18 +85,22 @@ do_init_service(ServiceId, ServiceConfig) ->
         {fd_proto_fault_detector_thrift, 'FaultDetector'},
         'InitService',
         [ServiceId, ServiceConfig],
-        #{url => ?URL, event_handler => woody_event_handler_default}).
+        #{url => fd_url(), event_handler => woody_event_handler_default}).
 
 do_get_statistics(ServiceIds) ->
     woody_client:call(
         {fd_proto_fault_detector_thrift, 'FaultDetector'},
         'ServiceStatistics',
         ServiceIds,
-        #{url => ?URL, event_handler => woody_event_handler_default}).
+        #{url => fd_url(), event_handler => woody_event_handler_default}).
 
 do_register_operation(ServiceId, Operation, ServiceConfig) ->
     woody_client:call(
         {fd_proto_fault_detector_thrift, 'FaultDetector'},
         'RegisterOperation',
         [ServiceId, Operation, ServiceConfig],
-        #{url => ?URL, event_handler => woody_event_handler_default}).
+        #{url => fd_url(), event_handler => woody_event_handler_default}).
+
+fd_url() ->
+    #{fault_detector := Url} = genlib_app:env(hellgate, services),
+    Url.
