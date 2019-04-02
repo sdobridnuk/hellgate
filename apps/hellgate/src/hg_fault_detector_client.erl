@@ -14,11 +14,12 @@
 
 -export([get_statistics/1]).
 
--export([register_operation/2]).
--export([register_operation/5]).
+-export([register_operation/3]).
+-export([register_operation/6]).
 
 -type service_id()              :: binary().
--type operation()               :: binary().
+-type operation_id()            :: binary().
+-type operation_status()        :: binary().
 -type sliding_window()          :: non_neg_integer().
 -type operation_time_limit()    :: non_neg_integer().
 -type pre_aggregation_size()    :: non_neg_integer() | undefined.
@@ -56,25 +57,27 @@ init_service(ServiceId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
 get_statistics(ServiceIds) when is_list(ServiceIds) ->
     do_get_statistics(ServiceIds).
 
--spec register_operation(service_id(), operation()) ->
+-spec register_operation(service_id(), operation_id(), operation_status()) ->
     {ok, woody:result()}
     | {exception, woody_error:business_error()}
     | no_return().
-register_operation(ServiceId, Operation) ->
-    do_register_operation(ServiceId, Operation, ?DEFAULT_CONFIG).
+register_operation(ServiceId, OperationId, OperationStatus) ->
+    do_register_operation(ServiceId, OperationId, OperationStatus, ?DEFAULT_CONFIG).
 
 -spec register_operation(service_id(),
-                         operation(),
+                         operation_id(),
+                         operation_status(),
                          sliding_window(),
                          operation_time_limit(),
                          pre_aggregation_size()) ->
     {ok, woody:result()}
     | {exception, woody_error:business_error()}
     | no_return().
-register_operation(ServiceId, Operation, SlidingWindow, OpTimeLimit, PreAggrSize) ->
+register_operation(ServiceId, OperationId, OperationStatus, SlidingWindow, OpTimeLimit, PreAggrSize) ->
     do_register_operation(
         ServiceId,
-        Operation,
+        OperationId,
+        OperationStatus,
         #fault_detector_ServiceConfig{
             sliding_window       = SlidingWindow,
             operation_time_limit = OpTimeLimit,
@@ -96,7 +99,8 @@ do_get_statistics(ServiceIds) ->
          [ServiceIds]},
         #{url => fd_url(), event_handler => woody_event_handler_default}).
 
-do_register_operation(ServiceId, Operation, ServiceConfig) ->
+do_register_operation(ServiceId, OperationId, OperationStatus, ServiceConfig) ->
+    Operation = #fault_detector_Operation{operation_id = OperationId, state = OperationStatus},
     woody_client:call(
         {{fd_proto_fault_detector_thrift, 'FaultDetector'},
          'RegisterOperation',

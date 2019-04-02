@@ -48,7 +48,9 @@ choose(Predestination, PaymentInstitution, VS, Revision) ->
     RejectContext0 = #{ varset => VS },
     {Providers, RejectContext1} = collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContext0),
     {Choices, RejectContext2} = collect_routes(Predestination, Providers, VS, Revision, RejectContext1),
+
     % TODO: get fault_detector data at this point, perhaps?
+
     choose_route(Choices, VS, RejectContext2).
 
 collect_routes(Predestination, Providers, VS, Revision, RejectContext) ->

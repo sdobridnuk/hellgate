@@ -578,12 +578,17 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
             Predestination = choose_routing_predestination(Payment),
             case hg_routing:choose(Predestination, PaymentInstitution, VS, Revision) of
                 {ok, _Route} = Result ->
+                    % case hg_fault_detector_client:register_operation(ProviderName, Operation) of
+                    %     {ok, _} -> ok
+                    %     {exception, _} -> hg_fault_detector_client:init_service(ProviderName)
+                    % end,
                     Result;
                 {error, {no_route_found, RejectContext}} = Error ->
                     _ = log_reject_context(RejectContext),
                     Error
             end
     end.
+
 
 -spec choose_routing_predestination(payment()) -> hg_routing:route_predestination().
 choose_routing_predestination(#domain_InvoicePayment{make_recurrent = true}) ->
