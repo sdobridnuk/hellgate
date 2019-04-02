@@ -579,8 +579,11 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
             case hg_routing:choose(Predestination, PaymentInstitution, VS, Revision) of
                 {ok, _Route} = Result ->
                     % case hg_fault_detector_client:register_operation(ProviderName, Operation) of
-                    %     {ok, _} -> ok
-                    %     {exception, _} -> hg_fault_detector_client:init_service(ProviderName)
+                    %     {ok, _} ->
+                    %         ok
+                    %     {exception, _} ->
+                    %         hg_fault_detector_client:init_service(ProviderName)
+                    %         hg_fault_detector_client:register_operation(ProviderName, "some operation_id", start)
                     % end,
                     Result;
                 {error, {no_route_found, RejectContext}} = Error ->
