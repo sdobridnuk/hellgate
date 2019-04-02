@@ -19,7 +19,7 @@
 
 -type service_id()              :: binary().
 -type operation_id()            :: binary().
--type operation_status()        :: binary().
+-type operation_status()        :: start | finish | error.
 -type sliding_window()          :: non_neg_integer().
 -type operation_time_limit()    :: non_neg_integer().
 -type pre_aggregation_size()    :: non_neg_integer() | undefined.
@@ -100,7 +100,16 @@ do_get_statistics(ServiceIds) ->
         #{url => fd_url(), event_handler => woody_event_handler_default}).
 
 do_register_operation(ServiceId, OperationId, OperationStatus, ServiceConfig) ->
-    Operation = #fault_detector_Operation{operation_id = OperationId, state = OperationStatus},
+    OperationState =
+        case OperationStatus of
+            start ->
+                {OperationStatus, #fault_detector_Start{time_start = hg_datetime:format_now()}};
+            finish ->
+                {OperationStatus, #fault_detector_Finish{time_end = hg_datetime:format_now()}};
+            error ->
+                {OperationStatus, #fault_detector_Error{time_end = hg_datetime:format_now()}}
+        end,
+    Operation = #fault_detector_Operation{operation_id = OperationId, state = OperationState},
     woody_client:call(
         {{fd_proto_fault_detector_thrift, 'FaultDetector'},
          'RegisterOperation',
