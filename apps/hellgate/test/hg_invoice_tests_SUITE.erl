@@ -72,6 +72,7 @@
 -export([payment_temporary_unavailability_retry_success/1]).
 -export([payment_temporary_unavailability_too_many_retries/1]).
 -export([invalid_amount_payment_partial_refund/1]).
+-export([invalid_amount_partial_capture_and_refund/1]).
 -export([invalid_time_payment_partial_refund/1]).
 -export([invalid_currency_payment_partial_refund/1]).
 -export([cant_start_simultaneous_partial_refunds/1]).
@@ -211,6 +212,7 @@ groups() ->
             payment_refund_success,
             payment_partial_refunds_success,
             invalid_amount_payment_partial_refund,
+            invalid_amount_partial_capture_and_refund,
             invalid_currency_payment_partial_refund,
             cant_start_simultaneous_partial_refunds,
             invalid_time_payment_partial_refund
@@ -1618,6 +1620,23 @@ invalid_amount_payment_partial_refund(C) ->
     }} =
         hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams2, Client).
 
+ -spec invalid_amount_partial_capture_and_refund(config()) -> _ | no_return().
+
+invalid_amount_partial_capture_and_refund(C) ->
+    Client = cfg(client, C),
+    InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentParams = make_payment_params({hold, cancel}),
+    PaymentID = process_payment(InvoiceID, PaymentParams, Client),
+    % do a partial capture
+    Cash = ?cash(21000, <<"RUB">>),
+    Reason = <<"ok">>,
+    ok = hg_client_invoicing:capture_payment(InvoiceID, PaymentID, Reason, Cash, Client),
+    PaymentID = await_payment_partial_capture(InvoiceID, PaymentID, Reason, Cash, Client),
+    % try to refund an amount that exceeds capture amount
+    RefundParams = make_refund_params(42000, <<"RUB">>),
+    ?invoice_payment_amount_exceeded(?cash(21000, _)) =
+        hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client).
+
 -spec cant_start_simultaneous_partial_refunds(config()) -> _ | no_return().
 
 cant_start_simultaneous_partial_refunds(C) ->
@@ -2565,6 +2584,16 @@ await_payment_capture(InvoiceID, PaymentID, Reason, Client, Restarts) ->
         ?payment_ev(PaymentID, ?session_ev(?captured_with_reason_and_cost(Reason, Cost), ?session_started()))
     ] = next_event(InvoiceID, Client),
     await_payment_capture_finish(InvoiceID, PaymentID, Reason, Client, Restarts).
+
+await_payment_partial_capture(InvoiceID, PaymentID, Reason, Cash, Client) ->
+    await_payment_partial_capture(InvoiceID, PaymentID, Reason, Cash, Client, 0).
+
+await_payment_partial_capture(InvoiceID, PaymentID, Reason, Cash, Client, Restarts) ->
+    [
+        ?payment_ev(PaymentID, ?cash_flow_changed(_)),
+        ?payment_ev(PaymentID, ?session_ev(?captured_with_reason_and_cost(Reason, Cash), ?session_started()))
+    ] = next_event(InvoiceID, Client),
+    await_payment_capture_finish(InvoiceID, PaymentID, Reason, Client, Restarts, Cash).
 
 await_payment_capture_finish(InvoiceID, PaymentID, Reason, Client, Restarts) ->
     Cost = get_payment_cost(InvoiceID, PaymentID, Client),
