@@ -47,10 +47,8 @@ choose(Predestination, PaymentInstitution, VS, Revision) ->
     % TODO not the optimal strategy
     RejectContext0 = #{ varset => VS },
     {Providers, RejectContext1} = collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContext0),
+
     {Choices, RejectContext2} = collect_routes(Predestination, Providers, VS, Revision, RejectContext1),
-
-    % TODO: get fault_detector data at this point, perhaps?
-
     choose_route(Choices, VS, RejectContext2).
 
 collect_routes(Predestination, Providers, VS, Revision, RejectContext) ->
@@ -112,6 +110,10 @@ score_risk_coverage({_Provider, {_TerminalRef, Terminal}}, VS) ->
 collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContext) ->
     ProviderSelector = PaymentInstitution#domain_PaymentInstitution.providers,
     ProviderRefs = reduce(provider, ProviderSelector, VS, Revision),
+
+    %% TODO: Use data from fault detector here
+    %% see score_providers_with_fault_detector/1
+
     {Providers, RejectReasons} = lists:foldl(
         fun (ProviderRef, {Prvs, Reasons}) ->
             try
@@ -126,6 +128,13 @@ collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContex
         ordsets:to_list(ProviderRefs)
     ),
     {Providers, RejectContext#{rejected_providers => RejectReasons}}.
+
+% score_providers_with_fault_detector([]) -> [];
+% score_providers_with_fault_detector([ProviderRef]) -> [ProviderRef];
+% score_providers_with_fault_detector(ProviderRefs) ->
+%     %% IDs    = [PR#domain_ProviderRef.id || PR <- ProviderRefs],
+%     %% Scores = hg_fault_detector_client:get_statistics(ProviderRefs),
+%     ProviderRefs.
 
 acceptable_provider(payment, ProviderRef, VS, Revision) ->
     Provider = #domain_Provider{
