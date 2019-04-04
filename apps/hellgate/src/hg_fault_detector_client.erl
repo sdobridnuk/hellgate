@@ -4,10 +4,23 @@
 
 -include_lib("fault_detector_proto/include/fd_proto_fault_detector_thrift.hrl").
 
--define(DEFAULT_CONFIG, #fault_detector_ServiceConfig{
-                         sliding_window = 60000,
-                         operation_time_limit = 10000,
-                         pre_aggregation_size = 2}).
+%% TODO move config to a proper place
+-define(DEFAULT_CONFIG,
+        #fault_detector_ServiceConfig{
+           sliding_window       = 60000,
+           operation_time_limit = 10000,
+           pre_aggregation_size = 2}).
+
+-define(service_config(SW, OTL, PAS),
+        #fault_detector_ServiceConfig{
+           sliding_window       = SW,
+           operation_time_limit = OTL,
+           pre_aggregation_size = PAS}).
+
+-define(operation(OpId, State),
+        #fault_detector_Operation{
+           operation_id = OpId,
+           state        = State}).
 
 -export([init_service/1]).
 -export([init_service/4]).
@@ -24,45 +37,51 @@
 -type operation_time_limit()    :: non_neg_integer().
 -type pre_aggregation_size()    :: non_neg_integer() | undefined.
 
-% -type service_stats()   :: fd_proto_fault_detector_thrift:'ServiceStatistics'().
-% -type service_config()  :: fd_proto_fault_detector_thrift:'ServiceConfig'().
-% -type operation()       :: fd_proto_fault_detector_thrift:'Operation'().
+-type woody_result()            :: {ok, woody:result()}
+                                 | {exception, woody_error:business_error()}
+                                 | no_return().
+
+%% API
 
 -spec init_service(service_id()) ->
-    {ok, woody:result()}
-    | {exception, woody_error:business_error()}
-    | no_return().
+    woody_result().
 init_service(ServiceId) ->
-    do_init_service(ServiceId, ?DEFAULT_CONFIG).
+    ServiceConfig = ?DEFAULT_CONFIG,
+    do_init_service(ServiceId, ServiceConfig).
 
 -spec init_service(service_id(),
                    sliding_window(),
                    operation_time_limit(),
                    pre_aggregation_size()) ->
-    {ok, woody:result()}
-    | {exception, woody_error:business_error()}
-    | no_return().
+    woody_result().
 init_service(ServiceId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
-    do_init_service(
-        ServiceId,
-        #fault_detector_ServiceConfig{
-            sliding_window       = SlidingWindow,
-            operation_time_limit = OpTimeLimit,
-            pre_aggregation_size = PreAggrSize}).
+    ServiceConfig = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
+    do_init_service(ServiceId, ServiceConfig).
 
 -spec get_statistics([service_id()]) ->
-    {ok, woody:result()}
-    | {exception, woody_error:business_error()}
-    | no_return().
+    woody_result().
 get_statistics(ServiceIds) when is_list(ServiceIds) ->
     do_get_statistics(ServiceIds).
 
 -spec register_operation(service_id(), operation_id(), operation_status()) ->
-    {ok, woody:result()}
-    | {exception, woody_error:business_error()}
-    | no_return().
-register_operation(ServiceId, OperationId, OperationStatus) ->
-    do_register_operation(ServiceId, OperationId, OperationStatus, ?DEFAULT_CONFIG).
+    woody_result().
+register_operation(ServiceId, OperationId, start) ->
+    OperationState  = {start, #fault_detector_Start{ time_start = hg_datetime:format_now()} },
+    Operation       = ?operation(OperationId, OperationState),
+    ServiceConfig   = ?DEFAULT_CONFIG,
+    do_register_operation(ServiceId, Operation, ServiceConfig);
+
+register_operation(ServiceId, OperationId, finish) ->
+    OperationState  = {finish, #fault_detector_Finish{ time_end = hg_datetime:format_now()} },
+    Operation       = ?operation(OperationId, OperationState),
+    ServiceConfig   = ?DEFAULT_CONFIG,
+    do_register_operation(ServiceId, Operation, ServiceConfig);
+
+register_operation(ServiceId, OperationId, error) ->
+    OperationState  = {error, #fault_detector_Error{ time_end = hg_datetime:format_now()} },
+    Operation       = ?operation(OperationId, OperationState),
+    ServiceConfig   = ?DEFAULT_CONFIG,
+    do_register_operation(ServiceId, Operation, ServiceConfig).
 
 -spec register_operation(service_id(),
                          operation_id(),
@@ -70,52 +89,32 @@ register_operation(ServiceId, OperationId, OperationStatus) ->
                          sliding_window(),
                          operation_time_limit(),
                          pre_aggregation_size()) ->
-    {ok, woody:result()}
-    | {exception, woody_error:business_error()}
-    | no_return().
-register_operation(ServiceId, OperationId, OperationStatus, SlidingWindow, OpTimeLimit, PreAggrSize) ->
-    do_register_operation(
-        ServiceId,
-        OperationId,
-        OperationStatus,
-        #fault_detector_ServiceConfig{
-            sliding_window       = SlidingWindow,
-            operation_time_limit = OpTimeLimit,
-            pre_aggregation_size = PreAggrSize}).
+    woody_result().
+register_operation(ServiceId, OperationId, start, SlidingWindow, OpTimeLimit, PreAggrSize) ->
+    OperationState  = {start, #fault_detector_Start{ time_start = hg_datetime:format_now()} },
+    Operation       = ?operation(OperationId, OperationState),
+    ServiceConfig   = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
+    do_register_operation(ServiceId, Operation, ServiceConfig);
+
+register_operation(ServiceId, OperationId, finish, SlidingWindow, OpTimeLimit, PreAggrSize) ->
+    OperationState  = {finish, #fault_detector_Finish{ time_end = hg_datetime:format_now()} },
+    Operation       = ?operation(OperationId, OperationState),
+    ServiceConfig   = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
+    do_register_operation(ServiceId, Operation, ServiceConfig);
+
+register_operation(ServiceId, OperationId, error, SlidingWindow, OpTimeLimit, PreAggrSize) ->
+    OperationState  = {error, #fault_detector_Error{ time_end = hg_datetime:format_now()} },
+    Operation       = ?operation(OperationId, OperationState),
+    ServiceConfig   = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
+    do_register_operation(ServiceId, Operation, ServiceConfig).
 
 %% PRIVATE
 
 do_init_service(ServiceId, ServiceConfig) ->
-    woody_client:call(
-        {{fd_proto_fault_detector_thrift, 'FaultDetector'},
-         'InitService',
-         [ServiceId, ServiceConfig]},
-        #{url => fd_url(), event_handler => woody_event_handler_default}).
+    hg_woody_wrapper:call(fault_detector, 'InitService', [ServiceId, ServiceConfig]).
 
 do_get_statistics(ServiceIds) ->
-    woody_client:call(
-        {{fd_proto_fault_detector_thrift, 'FaultDetector'},
-         'ServiceStatistics',
-         [ServiceIds]},
-        #{url => fd_url(), event_handler => woody_event_handler_default}).
+    hg_woody_wrapper:call(fault_detector, 'GetStatistics', [ServiceIds]).
 
-do_register_operation(ServiceId, OperationId, OperationStatus, ServiceConfig) ->
-    OperationState =
-        case OperationStatus of
-            start ->
-                {OperationStatus, #fault_detector_Start{time_start = hg_datetime:format_now()}};
-            finish ->
-                {OperationStatus, #fault_detector_Finish{time_end = hg_datetime:format_now()}};
-            error ->
-                {OperationStatus, #fault_detector_Error{time_end = hg_datetime:format_now()}}
-        end,
-    Operation = #fault_detector_Operation{operation_id = OperationId, state = OperationState},
-    woody_client:call(
-        {{fd_proto_fault_detector_thrift, 'FaultDetector'},
-         'RegisterOperation',
-         [ServiceId, Operation, ServiceConfig]},
-        #{url => fd_url(), event_handler => woody_event_handler_default}).
-
-fd_url() ->
-    #{fault_detector := Url} = genlib_app:env(hellgate, services),
-    Url.
+do_register_operation(ServiceId, Operation, ServiceConfig) ->
+    hg_woody_wrapper:call(fault_detector, 'RegisterOperation', [ServiceId, Operation, ServiceConfig]).
