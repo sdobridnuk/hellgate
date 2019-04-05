@@ -5,6 +5,8 @@
 -include_lib("fault_detector_proto/include/fd_proto_fault_detector_thrift.hrl").
 
 %% TODO move config to a proper place
+-define(RETRIES, 5).
+
 -define(DEFAULT_CONFIG,
         #fault_detector_ServiceConfig{
            sliding_window       = 60000,
@@ -30,6 +32,7 @@
 -export([register_operation/3]).
 -export([register_operation/6]).
 
+-type service_stats()           :: fd_proto_fault_detector_thrift:'ServiceStatistics'().
 -type service_id()              :: binary().
 -type operation_id()            :: binary().
 -type operation_status()        :: start | finish | error.
@@ -58,10 +61,9 @@ init_service(ServiceId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
     ServiceConfig = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
     do_init_service(ServiceId, ServiceConfig).
 
--spec get_statistics([service_id()]) ->
-    woody_result().
+-spec get_statistics([service_id()]) -> [service_stats()].
 get_statistics(ServiceIds) when is_list(ServiceIds) ->
-    do_get_statistics(ServiceIds).
+    do_get_statistics(ServiceIds, ?RETRIES).
 
 -spec register_operation(service_id(), operation_id(), operation_status()) ->
     woody_result().
@@ -113,8 +115,18 @@ register_operation(ServiceId, OperationId, error, SlidingWindow, OpTimeLimit, Pr
 do_init_service(ServiceId, ServiceConfig) ->
     hg_woody_wrapper:call(fault_detector, 'InitService', [ServiceId, ServiceConfig]).
 
-do_get_statistics(ServiceIds) ->
-    hg_woody_wrapper:call(fault_detector, 'GetStatistics', [ServiceIds]).
+do_get_statistics(_ServiceIds, 0) -> [];
+do_get_statistics(ServiceIds, Retries) ->
+    try
+        case hg_woody_wrapper:call(fault_detector, 'GetStatistics', [ServiceIds]) of
+            {ok, Stats} -> Stats;
+            _Result     -> []
+        end
+    catch
+        _ ->
+            % timer:sleep(200),
+            do_get_statistics(ServiceIds, Retries - 1)
+    end.
 
 do_register_operation(ServiceId, Operation, ServiceConfig) ->
     hg_woody_wrapper:call(fault_detector, 'RegisterOperation', [ServiceId, Operation, ServiceConfig]).
