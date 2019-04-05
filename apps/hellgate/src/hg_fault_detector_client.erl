@@ -46,12 +46,31 @@
 
 %% API
 
+%%------------------------------------------------------------------------------
+%% @doc
+%% init_service/1 receives a service id and initialises a fault detector
+%% service for it, allowing you to aggregate availability statistics via
+%% register_operation/3 and register_operation/6 and fetch it using the
+%% get_statistics/1 function.
+%% @end
+%%------------------------------------------------------------------------------
 -spec init_service(service_id()) ->
     woody_result().
 init_service(ServiceId) ->
     ServiceConfig = ?DEFAULT_CONFIG,
     do_init_service(ServiceId, ServiceConfig).
 
+%%------------------------------------------------------------------------------
+%% @doc
+%% init_service/4 is analogous to init_service/1 but also receives
+%% configuration for the fault detector service.
+%%
+%% Config
+%% SlidingWindow: pick operations from SlidingWindow milliseconds
+%% OpTimeLimit: expected operation execution time
+%% PreAggrSize: time interval for data preaggregation
+%% @end
+%%------------------------------------------------------------------------------
 -spec init_service(service_id(),
                    sliding_window(),
                    operation_time_limit(),
@@ -61,10 +80,27 @@ init_service(ServiceId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
     ServiceConfig = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
     do_init_service(ServiceId, ServiceConfig).
 
+%%------------------------------------------------------------------------------
+%% @doc
+%% get_statistics/1 receives a list of service ids and returns a
+%% list of statistics on the services' reliability.
+%%
+%% Returns an empty list if the fault detector itself is unavailable.
+%% @end
+%%------------------------------------------------------------------------------
 -spec get_statistics([service_id()]) -> [service_stats()].
 get_statistics(ServiceIds) when is_list(ServiceIds) ->
     do_get_statistics(ServiceIds, ?RETRIES).
 
+%%------------------------------------------------------------------------------
+%% @doc
+%% register_operation/3 receives a service id, an operation id and an
+%% operation status which is one of the following atoms: start, finish, error,
+%% respectively for registering a start and either a successful or an erroneous
+%% end of an operation. The data is then used to aggregate statistics on a
+%% service's availability that is available via get_statistics/1
+%% @end
+%%------------------------------------------------------------------------------
 -spec register_operation(service_id(), operation_id(), operation_status()) ->
     woody_result().
 register_operation(ServiceId, OperationId, start) ->
@@ -85,6 +121,17 @@ register_operation(ServiceId, OperationId, error) ->
     ServiceConfig   = ?DEFAULT_CONFIG,
     do_register_operation(ServiceId, Operation, ServiceConfig).
 
+%%------------------------------------------------------------------------------
+%% @doc
+%% register_operation/6 is analogous to register_operation/3 but also receives
+%% configuration for the fault detector service.
+%%
+%% Config
+%% SlidingWindow: pick operations from SlidingWindow milliseconds
+%% OpTimeLimit: expected operation execution time
+%% PreAggrSize: time interval for data preaggregation
+%% @end
+%%------------------------------------------------------------------------------
 -spec register_operation(service_id(),
                          operation_id(),
                          operation_status(),
@@ -112,20 +159,18 @@ register_operation(ServiceId, OperationId, error, SlidingWindow, OpTimeLimit, Pr
 
 %% PRIVATE
 
+%% TODO: maybe log fd unavailability?
 do_init_service(ServiceId, ServiceConfig) ->
     hg_woody_wrapper:call(fault_detector, 'InitService', [ServiceId, ServiceConfig]).
 
+%% @doc
 do_get_statistics(_ServiceIds, 0) -> [];
 do_get_statistics(ServiceIds, Retries) ->
-    try
-        case hg_woody_wrapper:call(fault_detector, 'GetStatistics', [ServiceIds]) of
-            {ok, Stats} -> Stats;
-            _Result     -> []
-        end
+    try hg_woody_wrapper:call(fault_detector, 'GetStatistics', [ServiceIds]) of
+        {ok, Stats} -> Stats;
+        _Result     -> []
     catch
-        _ ->
-            % timer:sleep(200),
-            do_get_statistics(ServiceIds, Retries - 1)
+        _:_ -> do_get_statistics(ServiceIds, Retries - 1)
     end.
 
 do_register_operation(ServiceId, Operation, ServiceConfig) ->
