@@ -48,10 +48,10 @@
 
 %%------------------------------------------------------------------------------
 %% @doc
-%% init_service/1 receives a service id and initialises a fault detector
+%% `init_service/1` receives a service id and initialises a fault detector
 %% service for it, allowing you to aggregate availability statistics via
-%% register_operation/3 and register_operation/6 and fetch it using the
-%% get_statistics/1 function.
+%% `register_operation/3` and `register_operation/6` and fetch it using the
+%% `get_statistics/1` function.
 %% @end
 %%------------------------------------------------------------------------------
 -spec init_service(service_id()) ->
@@ -62,13 +62,13 @@ init_service(ServiceId) ->
 
 %%------------------------------------------------------------------------------
 %% @doc
-%% init_service/4 is analogous to init_service/1 but also receives
+%% `init_service/4` is analogous to `init_service/1` but also receives
 %% configuration for the fault detector service.
 %%
 %% Config
-%% SlidingWindow: pick operations from SlidingWindow milliseconds
-%% OpTimeLimit: expected operation execution time
-%% PreAggrSize: time interval for data preaggregation
+%% `SlidingWindow`: pick operations from SlidingWindow milliseconds
+%% `OpTimeLimit`: expected operation execution time
+%% `PreAggrSize`: time interval for data preaggregation
 %% @end
 %%------------------------------------------------------------------------------
 -spec init_service(service_id(),
@@ -82,7 +82,7 @@ init_service(ServiceId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
 
 %%------------------------------------------------------------------------------
 %% @doc
-%% get_statistics/1 receives a list of service ids and returns a
+%% `get_statistics/1` receives a list of service ids and returns a
 %% list of statistics on the services' reliability.
 %%
 %% Returns an empty list if the fault detector itself is unavailable.
@@ -94,11 +94,11 @@ get_statistics(ServiceIds) when is_list(ServiceIds) ->
 
 %%------------------------------------------------------------------------------
 %% @doc
-%% register_operation/3 receives a service id, an operation id and an
-%% operation status which is one of the following atoms: start, finish, error,
+%% `register_operation/3` receives a service id, an operation id and an
+%% operation status which is one of the following atoms: `start`, `finish`, `error`,
 %% respectively for registering a start and either a successful or an erroneous
 %% end of an operation. The data is then used to aggregate statistics on a
-%% service's availability that is available via get_statistics/1
+%% service's availability that is available via `get_statistics/1`.
 %% @end
 %%------------------------------------------------------------------------------
 -spec register_operation(service_id(), operation_id(), operation_status()) ->
@@ -123,13 +123,13 @@ register_operation(ServiceId, OperationId, error) ->
 
 %%------------------------------------------------------------------------------
 %% @doc
-%% register_operation/6 is analogous to register_operation/3 but also receives
+%% `register_operation/6` is analogous to `register_operation/3` but also receives
 %% configuration for the fault detector service.
 %%
 %% Config
-%% SlidingWindow: pick operations from SlidingWindow milliseconds
-%% OpTimeLimit: expected operation execution time
-%% PreAggrSize: time interval for data preaggregation
+%% `SlidingWindow`: pick operations from SlidingWindow milliseconds
+%% `OpTimeLimit`: expected operation execution time
+%% `PreAggrSize`: time interval for data preaggregation
 %% @end
 %%------------------------------------------------------------------------------
 -spec register_operation(service_id(),
@@ -159,7 +159,7 @@ register_operation(ServiceId, OperationId, error, SlidingWindow, OpTimeLimit, Pr
 
 %% PRIVATE
 
-%% TODO: maybe log fd unavailability?
+%% TODO: log fd unavailability?
 do_init_service(ServiceId, ServiceConfig) ->
     hg_woody_wrapper:call(fault_detector, 'InitService', [ServiceId, ServiceConfig]).
 
