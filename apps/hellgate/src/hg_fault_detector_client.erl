@@ -32,13 +32,14 @@
 -export([register_operation/3]).
 -export([register_operation/6]).
 
--type service_stats()           :: fd_proto_fault_detector_thrift:'ServiceStatistics'().
--type service_id()              :: binary().
--type operation_id()            :: binary().
 -type operation_status()        :: start | finish | error.
--type sliding_window()          :: non_neg_integer().
--type operation_time_limit()    :: non_neg_integer().
--type pre_aggregation_size()    :: non_neg_integer() | undefined.
+
+-type service_stats()           :: fd_proto_fault_detector_thrift:'ServiceStatistics'().
+-type service_id()              :: fd_proto_fault_detector_thrift:'ServiceId'().
+-type operation_id()            :: fd_proto_fault_detector_thrift:'OperationId'().
+-type sliding_window()          :: fd_proto_fault_detector_thrift:'Milliseconds'().
+-type operation_time_limit()    :: fd_proto_fault_detector_thrift:'Milliseconds'().
+-type pre_aggregation_size()    :: fd_proto_fault_detector_thrift:'Seconds'() | undefined.
 
 -type woody_result()            :: {ok, woody:result()}
                                  | {exception, woody_error:business_error()}

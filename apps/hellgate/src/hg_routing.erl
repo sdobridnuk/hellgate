@@ -112,7 +112,7 @@ collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContex
     ProviderSelector = PaymentInstitution#domain_PaymentInstitution.providers,
     ProviderRefs0    = reduce(provider, ProviderSelector, VS, Revision),
     ProviderRefs1    = ordsets:to_list(ProviderRefs0),
-    _ScoredProviders  = score_providers_with_fault_detector(ProviderRefs1),
+    _ScoredProviders = score_providers_with_fault_detector(ProviderRefs1),
 
     %% TODO: use failure rate in some meaningful way
     %% failure rate ranges from 0.0 to 1.0, 1.0 being a service that is completely unavailable
@@ -135,16 +135,18 @@ collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContex
 score_providers_with_fault_detector([]) -> [];
 score_providers_with_fault_detector([ProviderRef]) -> [{ProviderRef, 0.0}];
 score_providers_with_fault_detector(ProviderRefs) ->
-    IDs     = [PR#domain_ProviderRef.id || PR <- ProviderRefs],
-    FDStats = hg_fault_detector_client:get_statistics(IDs),
-    % io:write(FDStats),
+    ProviderIDs     = [integer_to_binary(PR#domain_ProviderRef.id) || PR <- ProviderRefs],
+    FDStats         = hg_fault_detector_client:get_statistics(ProviderIDs),
     ScoredProviders = [get_provider_score_fail_rate(PR, FDStats) || PR <- ProviderRefs],
     ScoredProviders.
 
 get_provider_score_fail_rate(ProviderRef, FDStats) ->
-    case lists:keysearch(ProviderRef#domain_ProviderRef.id, 2, FDStats) of
-         {value, Stats} -> {ProviderRef, Stats#fault_detector_ServiceStatistics.failure_rate};
-         _              -> {ProviderRef, 0.0}
+    ID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
+    case lists:keyfind(ID, #fault_detector_ServiceStatistics.service_id, FDStats) of
+        {Stats} ->
+            {ProviderRef, Stats#fault_detector_ServiceStatistics.failure_rate}
+        false ->
+            {ProviderRef, 0.0};
     end.
 
 acceptable_provider(payment, ProviderRef, VS, Revision) ->
