@@ -33,17 +33,12 @@
 -export([register_operation/6]).
 
 -type operation_status()        :: start | finish | error.
-
 -type service_stats()           :: fd_proto_fault_detector_thrift:'ServiceStatistics'().
 -type service_id()              :: fd_proto_fault_detector_thrift:'ServiceId'().
 -type operation_id()            :: fd_proto_fault_detector_thrift:'OperationId'().
 -type sliding_window()          :: fd_proto_fault_detector_thrift:'Milliseconds'().
 -type operation_time_limit()    :: fd_proto_fault_detector_thrift:'Milliseconds'().
 -type pre_aggregation_size()    :: fd_proto_fault_detector_thrift:'Seconds'() | undefined.
-
--type woody_result()            :: {ok, woody:result()}
-                                 | {exception, woody_error:business_error()}
-                                 | no_return().
 
 %% API
 
@@ -56,10 +51,10 @@
 %% @end
 %%------------------------------------------------------------------------------
 -spec init_service(service_id()) ->
-    woody_result().
+    ok.
 init_service(ServiceId) ->
     ServiceConfig = ?DEFAULT_CONFIG,
-    do_init_service(ServiceId, ServiceConfig).
+    do_init_service(ServiceId, ServiceConfig, ?RETRIES).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -76,10 +71,10 @@ init_service(ServiceId) ->
                    sliding_window(),
                    operation_time_limit(),
                    pre_aggregation_size()) ->
-    woody_result().
+    ok.
 init_service(ServiceId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
     ServiceConfig = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
-    do_init_service(ServiceId, ServiceConfig).
+    do_init_service(ServiceId, ServiceConfig, ?RETRIES).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -103,7 +98,7 @@ get_statistics(ServiceIds) when is_list(ServiceIds) ->
 %% @end
 %%------------------------------------------------------------------------------
 -spec register_operation(service_id(), operation_id(), operation_status()) ->
-    woody_result().
+    term().
 register_operation(ServiceId, OperationId, start) ->
     OperationState  = {start, #fault_detector_Start{ time_start = hg_datetime:format_now()} },
     Operation       = ?operation(OperationId, OperationState),
@@ -139,7 +134,7 @@ register_operation(ServiceId, OperationId, error) ->
                          sliding_window(),
                          operation_time_limit(),
                          pre_aggregation_size()) ->
-    woody_result().
+    term().
 register_operation(ServiceId, OperationId, start, SlidingWindow, OpTimeLimit, PreAggrSize) ->
     OperationState  = {start, #fault_detector_Start{ time_start = hg_datetime:format_now()} },
     Operation       = ?operation(OperationId, OperationState),
@@ -161,8 +156,15 @@ register_operation(ServiceId, OperationId, error, SlidingWindow, OpTimeLimit, Pr
 %% PRIVATE
 
 %% TODO: log fd unavailability?
-do_init_service(ServiceId, ServiceConfig) ->
-    hg_woody_wrapper:call(fault_detector, 'InitService', [ServiceId, ServiceConfig]).
+do_init_service(_ServiceId, _ServiceConfig, 0) -> ok;
+do_init_service(ServiceId, ServiceConfig, Retries) ->
+    try hg_woody_wrapper:call(fault_detector, 'InitService', [ServiceId, ServiceConfig]) of
+        _Result -> ok
+    catch
+        _:_ ->
+            timer:sleep(200),
+            do_init_service(ServiceId, ServiceConfig, Retries - 1)
+    end.
 
 %% @doc
 do_get_statistics(_ServiceIds, 0) -> [];
@@ -171,7 +173,9 @@ do_get_statistics(ServiceIds, Retries) ->
         {ok, Stats} -> Stats;
         _Result     -> []
     catch
-        _:_ -> do_get_statistics(ServiceIds, Retries - 1)
+        _:_ ->
+            timer:sleep(200),
+            do_get_statistics(ServiceIds, Retries - 1)
     end.
 
 do_register_operation(ServiceId, Operation, ServiceConfig) ->

@@ -20,6 +20,8 @@
 -include_lib("dmsl/include/dmsl_payment_processing_errors_thrift.hrl").
 -include_lib("dmsl/include/dmsl_msgpack_thrift.hrl").
 
+-include_lib("fault_detector_proto/include/fd_proto_fault_detector_thrift.hrl").
+
 %% API
 
 %% St accessors
@@ -578,13 +580,6 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
             Predestination = choose_routing_predestination(Payment),
             case hg_routing:choose(Predestination, PaymentInstitution, VS, Revision) of
                 {ok, _Route} = Result ->
-                    % case hg_fault_detector_client:register_operation(ProviderName, Operation) of
-                    %     {ok, _} ->
-                    %         ok
-                    %     {exception, _} ->
-                    %         hg_fault_detector_client:init_service(ProviderName)
-                    %         hg_fault_detector_client:register_operation(ProviderName, "some operation_id", start)
-                    % end,
                     Result;
                 {error, {no_route_found, RejectContext}} = Error ->
                     _ = log_reject_context(RejectContext),
@@ -592,6 +587,15 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
             end
     end.
 
+notify_fault_detector({_, ProviderRef, _}, OperationId, start) ->
+    ProviderID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
+    case hg_fault_detector_client:register_operation(ProviderID, OperationId, start) of
+        {ok, _} ->
+            ok;
+        {exception, #fault_detector_ServiceNotFoundException{}} ->
+            hg_fault_detector_client:init_service(ProviderID),
+            hg_fault_detector_client:register_operation(ProviderID, OperationId, start)
+    end.
 
 -spec choose_routing_predestination(payment()) -> hg_routing:route_predestination().
 choose_routing_predestination(#domain_InvoicePayment{make_recurrent = true}) ->
@@ -1422,6 +1426,13 @@ process_routing(Action, St) ->
     VS1 = VS0#{risk_score => RiskScore},
     case choose_route(PaymentInstitution, VS1, Revision, St) of
         {ok, Route} ->
+            OperationId =
+            hg_utils:construct_complex_id([
+                get_invoice_id(get_invoice(Opts)),
+                get_payment_id(get_payment(St))
+            ]),
+            % notify_fault_detector(Route, OperationId, start),
+            spawn(fun () -> notify_fault_detector(Route, OperationId, start) end),
             process_cash_flow_building(Route, VS1, Payment, PaymentInstitution, Revision, Opts, Events0, Action);
         {error, {no_route_found, _Details}} ->
             Failure = {failure, payproc_errors:construct('PaymentFailure',
@@ -1485,6 +1496,7 @@ repair_session(St = #st{repair_scenario = Scenario}) ->
             issue_process_call(ProxyContext, St)
     end.
 
+%% TODO: notify fault detector here?
 -spec finalize_payment(action(), st()) -> machine_result().
 finalize_payment(Action, St) ->
     Target = case get_payment_flow(get_payment(St)) of
@@ -1515,6 +1527,7 @@ handle_callback(Payload, Action, St) ->
     {Response, Result} = handle_callback_result(CallbackResult, Action, get_activity_session(St)),
     {Response, finish_session_processing(Result, St)}.
 
+%% TODO: notify fault detector here?
 -spec finish_session_processing(result(), st()) -> machine_result().
 finish_session_processing(Result, St) ->
     finish_session_processing(get_activity(St), Result, St).
@@ -1597,6 +1610,7 @@ process_failure({payment, Step}, Events, Action, Failure, St, _RefundSt) when
     Step =:= processing_session orelse
     Step =:= finalizing_session
 ->
+    %% TODO: notify fault detector here?
     Target = get_target(St),
     case check_retry_possibility(Target, Failure, St) of
         {retry, Timeout} ->
