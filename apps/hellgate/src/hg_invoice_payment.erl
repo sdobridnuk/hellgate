@@ -1441,7 +1441,6 @@ process_routing(Action, St) ->
                 get_invoice_id(get_invoice(Opts)),
                 get_payment_id(get_payment(St))
             ]),
-            % notify_fault_detector(Route, OperationId, start),
             spawn(fun () -> notify_fault_detector(Route, OperationId, start) end),
             process_cash_flow_building(Route, VS1, Payment, PaymentInstitution, Revision, Opts, Events0, Action);
         {error, {no_route_found, _Details}} ->
@@ -1506,7 +1505,6 @@ repair_session(St = #st{repair_scenario = Scenario}) ->
             issue_process_call(ProxyContext, St)
     end.
 
-%% TODO: notify fault detector here?
 -spec finalize_payment(action(), st()) -> machine_result().
 finalize_payment(Action, St) ->
     Target = case get_payment_flow(get_payment(St)) of
@@ -1537,7 +1535,6 @@ handle_callback(Payload, Action, St) ->
     {Response, Result} = handle_callback_result(CallbackResult, Action, get_activity_session(St)),
     {Response, finish_session_processing(Result, St)}.
 
-%% TODO: notify fault detector here?
 -spec finish_session_processing(result(), st()) -> machine_result().
 finish_session_processing(Result, St) ->
     finish_session_processing(get_activity(St), Result, St).
@@ -1625,7 +1622,6 @@ process_failure({payment, Step}, Events, Action, Failure, St, _RefundSt) when
     Step =:= processing_session orelse
     Step =:= finalizing_session
 ->
-    %% TODO: notify fault detector here?
     Target = get_target(St),
     case check_retry_possibility(Target, Failure, St) of
         {retry, Timeout} ->
