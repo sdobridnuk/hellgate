@@ -163,7 +163,7 @@ do_init_service(ServiceId, ServiceConfig, Retries) ->
     catch
         _:_ ->
             timer:sleep(200),
-            lager:warning("Unable to reach Fault Detector, trying again..."),
+            _ = lager:warning("Unable to reach Fault Detector, trying again..."),
             do_init_service(ServiceId, ServiceConfig, Retries - 1)
     end.
 
@@ -175,7 +175,7 @@ do_get_statistics(ServiceIds, Retries) ->
     catch
         _:_ ->
             timer:sleep(200),
-            lager:warning("Unable to reach Fault Detector, trying again..."),
+            _ = lager:warning("Unable to reach Fault Detector, trying again..."),
             do_get_statistics(ServiceIds, Retries - 1)
     end.
 
@@ -187,7 +187,7 @@ do_register_operation(ServiceId, Operation, ServiceConfig, Retries) ->
     catch
         _:_ ->
             timer:sleep(200),
-            lager:warning("Unable to reach Fault Detector, trying again..."),
+            _ = lager:warning("Unable to reach Fault Detector, trying again..."),
             do_register_operation(ServiceId, Operation, ServiceConfig, Retries - 1)
     end.
 
