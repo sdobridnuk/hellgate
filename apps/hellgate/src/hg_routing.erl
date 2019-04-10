@@ -48,8 +48,8 @@ choose(Predestination, PaymentInstitution, VS, Revision) ->
     % TODO not the optimal strategy
     RejectContext0 = #{ varset => VS },
     {Providers, RejectContext1} = collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContext0),
-
-    {Choices, RejectContext2} = collect_routes(Predestination, Providers, VS, Revision, RejectContext1),
+    ScoredProviders = score_providers_with_fault_detector(Providers),
+    {Choices,   RejectContext2} = collect_routes(Predestination, ScoredProviders, VS, Revision, RejectContext1),
     choose_route(Choices, VS, RejectContext2).
 
 collect_routes(Predestination, Providers, VS, Revision, RejectContext) ->
@@ -72,7 +72,7 @@ choose_route(Routes, VS, RejectContext) ->
     end.
 
 score_routes(Routes, VS) ->
-    [{score_route(R, VS), R} || R <- Routes].
+    [{score_route(R, VS), {Provider, Terminal}} || {Provider, Terminal, _FailRate} = R <- Routes].
 
 export_route({ProviderRef, {TerminalRef, _Terminal}}) ->
     % TODO shouldn't we provide something along the lines of `get_provider_ref/1`,
@@ -101,10 +101,10 @@ get_rec_paytools_terms(?route(ProviderRef, _), Revision) ->
 score_route(Route, VS) ->
     score_risk_coverage(Route, VS).
 
-score_risk_coverage({_Provider, {_TerminalRef, Terminal}}, VS) ->
+score_risk_coverage({_Provider, {_TerminalRef, Terminal}, FailRate}, VS) ->
     RiskScore = getv(risk_score, VS),
     RiskCoverage = Terminal#domain_Terminal.risk_coverage,
-    math:exp(-hg_inspector:compare_risk_score(RiskCoverage, RiskScore)).
+    math:exp(-hg_inspector:compare_risk_score(RiskCoverage, RiskScore)) * (1.0 - FailRate).
 
 %%
 
@@ -112,7 +112,6 @@ collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContex
     ProviderSelector = PaymentInstitution#domain_PaymentInstitution.providers,
     ProviderRefs0    = reduce(provider, ProviderSelector, VS, Revision),
     ProviderRefs1    = ordsets:to_list(ProviderRefs0),
-    _ScoredProviders = score_providers_with_fault_detector(ProviderRefs1),
 
     %% TODO: use failure rate in some meaningful way
     %% failure rate ranges from 0.0 to 1.0, 1.0 being a service that is completely unavailable
@@ -133,20 +132,20 @@ collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContex
     {Providers, RejectContext#{rejected_providers => RejectReasons}}.
 
 score_providers_with_fault_detector([]) -> [];
-score_providers_with_fault_detector([ProviderRef]) -> [{ProviderRef, 0.0}];
-score_providers_with_fault_detector(ProviderRefs) ->
-    ProviderIDs     = [integer_to_binary(PR#domain_ProviderRef.id) || PR <- ProviderRefs],
+score_providers_with_fault_detector([{ProviderRef, Provider}]) -> [{ProviderRef, Provider, 0.0}];
+score_providers_with_fault_detector(Providers) ->
+    ProviderIDs     = [integer_to_binary(PR#domain_ProviderRef.id) || {PR, _P} <- Providers],
     FDStats         = hg_fault_detector_client:get_statistics(ProviderIDs),
-    ScoredProviders = [get_provider_score_fail_rate(PR, FDStats) || PR <- ProviderRefs],
+    ScoredProviders = [{PR, P, get_provider_fail_rate(PR, FDStats)} || {PR, P} <- Providers],
     ScoredProviders.
 
-get_provider_score_fail_rate(ProviderRef, FDStats) ->
-    ID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
-    case lists:keyfind(ID, #fault_detector_ServiceStatistics.service_id, FDStats) of
+get_provider_fail_rate(#domain_ProviderRef{id = ID}, FDStats) ->
+    case lists:keyfind(integer_to_binary(ID), #fault_detector_ServiceStatistics.service_id, FDStats) of
         false ->
-            {ProviderRef, 0.0};
+            0.0;
+
         Stats ->
-            {ProviderRef, Stats#fault_detector_ServiceStatistics.failure_rate}
+            Stats#fault_detector_ServiceStatistics.failure_rate
     end.
 
 acceptable_provider(payment, ProviderRef, VS, Revision) ->
@@ -173,14 +172,14 @@ acceptable_provider(recurrent_payment, ProviderRef, VS, Revision) ->
 
 %%
 
-collect_routes_for_provider(Predestination, {ProviderRef, Provider}, VS, Revision) ->
+collect_routes_for_provider(Predestination, {ProviderRef, Provider, FailRate}, VS, Revision) ->
     TerminalSelector = Provider#domain_Provider.terminal,
     TerminalRefs = reduce(terminal, TerminalSelector, VS, Revision),
     lists:foldl(
         fun (TerminalRef, {Accepted, Rejected}) ->
             try
                 Terminal = acceptable_terminal(Predestination, TerminalRef, Provider, VS, Revision),
-                {[{ProviderRef, Terminal} | Accepted], Rejected}
+                {[{ProviderRef, Terminal, FailRate} | Accepted], Rejected}
             catch
                 ?rejected(Reason) ->
                     {Accepted, [{ProviderRef, TerminalRef, Reason} | Rejected]}
