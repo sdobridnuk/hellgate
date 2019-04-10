@@ -17,6 +17,7 @@
 
 -define(NS, <<"invoice">>).
 
+
 -export([process_callback/2]).
 
 %% Public interface
@@ -47,15 +48,18 @@
 
 -export([publish_event/2]).
 
-%%
+%% Internal types
 
 -record(st, {
     activity          :: undefined | invoice | {payment, payment_id()},
     invoice           :: undefined | invoice(),
     payments = []     :: [{payment_id(), payment_st()}]
 }).
-
 -type st() :: #st{}.
+
+-type invoice_change()  :: dmsl_payment_processing_thrift:'InvoiceChange'().
+
+%% API
 
 -spec get(hg_machine:ref()) ->
     {ok, st()} | {error, notfound}.
@@ -63,7 +67,7 @@
 get(Ref) ->
     case hg_machine:get_history(?NS, Ref) of
         {ok, History} ->
-            {ok, collapse_history(unmarshal(History))};
+            {ok, collapse_history(unmarshal_history(History))};
         Error ->
             Error
     end.
@@ -126,7 +130,7 @@ handle_function(Func, Args, Opts) ->
     term() | no_return().
 
 handle_function_('Create', [UserInfo, InvoiceParams], _Opts) ->
-    InvoiceID = hg_utils:unique_id(),
+    InvoiceID = hg_utils:uid(InvoiceParams#payproc_InvoiceParams.id),
     ok = assume_user_identity(UserInfo),
     _ = set_invoicing_meta(InvoiceID),
     PartyID = InvoiceParams#payproc_InvoiceParams.party_id,
@@ -136,16 +140,16 @@ handle_function_('Create', [UserInfo, InvoiceParams], _Opts) ->
     Shop = assert_shop_exists(hg_party:get_shop(ShopID, Party)),
     _ = assert_party_shop_operable(Shop, Party),
     ok = validate_invoice_params(InvoiceParams, Shop),
-    ok = start(InvoiceID, [undefined, Party#domain_Party.revision, InvoiceParams]),
+    ok = ensure_started(InvoiceID, [undefined, Party#domain_Party.revision, InvoiceParams]),
     get_invoice_state(get_state(InvoiceID));
 
 handle_function_('CreateWithTemplate', [UserInfo, Params], _Opts) ->
-    InvoiceID = hg_utils:unique_id(),
+    InvoiceID = hg_utils:uid(Params#payproc_InvoiceWithTemplateParams.id),
     ok = assume_user_identity(UserInfo),
     _ = set_invoicing_meta(InvoiceID),
     TplID = Params#payproc_InvoiceWithTemplateParams.template_id,
     InvoiceParams = make_invoice_params(Params),
-    ok = start(InvoiceID, [TplID | InvoiceParams]),
+    ok = ensure_started(InvoiceID, [TplID | InvoiceParams]),
     get_invoice_state(get_state(InvoiceID));
 
 handle_function_('Get', [UserInfo, InvoiceID], _Opts) ->
@@ -314,11 +318,11 @@ process_callback(Tag, Callback) ->
 
 get_history(Ref) ->
     History = hg_machine:get_history(?NS, Ref),
-    unmarshal(map_history_error(History)).
+    unmarshal_history(map_history_error(History)).
 
 get_history(Ref, AfterID, Limit) ->
     History = hg_machine:get_history(?NS, Ref, AfterID, Limit),
-    unmarshal(map_history_error(History)).
+    unmarshal_history(map_history_error(History)).
 
 get_state(Ref) ->
     collapse_history(get_history(Ref)).
@@ -337,8 +341,11 @@ publish_invoice_event(InvoiceID, {ID, Dt, Event}) ->
         payload = ?invoice_ev(Event)
     }.
 
-start(ID, Args) ->
-    map_start_error(hg_machine:start(?NS, ID, Args)).
+ensure_started(ID, Args) ->
+    map_start_error(do_start(ID, Args)).
+
+do_start(ID, Args) ->
+    hg_machine:start(?NS, ID, Args).
 
 call(ID, Args) ->
     map_error(hg_machine:call(?NS, ID, Args)).
@@ -364,6 +371,8 @@ map_history_error({error, notfound}) ->
     throw(#payproc_InvoiceNotFound{}).
 
 map_start_error({ok, _}) ->
+    ok;
+map_start_error({error, exists}) ->
     ok;
 map_start_error({error, Reason}) ->
     error(Reason).
@@ -392,18 +401,15 @@ map_repair_error({error, Reason}) ->
 -type refund_params() :: dmsl_payment_processing_thrift:'InvoicePaymentRefundParams'().
 -type payment_st() :: hg_invoice_payment:st().
 
--type msgpack_ev() :: hg_msgpack_marshalling:value().
-
 -define(invalid_invoice_status(Status),
     #payproc_InvalidInvoiceStatus{status = Status}).
 -define(payment_pending(PaymentID),
     #payproc_InvoicePaymentPending{id = PaymentID}).
 
--spec publish_event(invoice_id(), msgpack_ev()) ->
+-spec publish_event(invoice_id(), hg_machine:event_payload()) ->
     hg_event_provider:public_event().
-
-publish_event(InvoiceID, Changes) ->
-    {{invoice_id, InvoiceID}, ?invoice_ev(unmarshal({list, changes}, Changes))}.
+publish_event(InvoiceID, Payload) ->
+    {{invoice_id, InvoiceID}, ?invoice_ev(unmarshal_event_payload(Payload))}.
 
 %%
 
@@ -431,7 +437,7 @@ init([InvoiceTplID, PartyRevision, InvoiceParams], #{id := ID}) ->
     hg_machine:result().
 
 process_signal(Signal, #{history := History}) ->
-    handle_result(handle_signal(Signal, collapse_history(unmarshal(History)))).
+    handle_result(handle_signal(Signal, collapse_history(unmarshal_history(History)))).
 
 handle_signal(timeout, St = #st{activity = {payment, PaymentID}}) ->
     % there's a payment pending
@@ -512,7 +518,7 @@ handle_expiration(St) ->
     {hg_machine:response(), hg_machine:result()}.
 
 process_call(Call, #{history := History}) ->
-    St = collapse_history(unmarshal(History)),
+    St = collapse_history(unmarshal_history(History)),
     try handle_result(handle_call(Call, St)) catch
         throw:Exception ->
             {{exception, Exception}, #{}}
@@ -523,7 +529,6 @@ handle_call({start_payment, PaymentParams}, St) ->
     _ = assert_invoice_accessible(St),
     _ = assert_invoice_operable(St),
     _ = assert_invoice_status(unpaid, St),
-    _ = assert_no_pending_payment(St),
     start_payment(PaymentParams, St);
 
 handle_call({capture_payment, PaymentID, Reason}, St) ->
@@ -683,8 +688,22 @@ set_invoice_timer(#st{invoice = #domain_Invoice{due = Due}}) ->
 
 -include("payment_events.hrl").
 
-start_payment(PaymentParams, St) ->
+start_payment(#payproc_InvoicePaymentParams{id = undefined} = PaymentParams, St) ->
     PaymentID = create_payment_id(St),
+    do_start_payment(PaymentID, PaymentParams, St);
+start_payment(#payproc_InvoicePaymentParams{id = PaymentID} = PaymentParams, St) ->
+    case try_get_payment_session(PaymentID, St) of
+        undefined ->
+            do_start_payment(PaymentID, PaymentParams, St);
+        PaymentSession ->
+            #{
+                response => PaymentSession,
+                state    => St
+            }
+    end.
+
+do_start_payment(PaymentID, PaymentParams, St) ->
+    _ = assert_no_pending_payment(St),
     Opts = get_payment_opts(St),
     % TODO make timer reset explicit here
     {PaymentSession, {Changes, Action}} = hg_invoice_payment:init(PaymentID, PaymentParams, Opts),
@@ -776,7 +795,7 @@ handle_result(#{state := St} = Params) ->
     end.
 
 handle_result_changes(#{changes := Changes = [_ | _]}, Acc) ->
-    Acc#{events => [marshal(Changes)]};
+    Acc#{events => [marshal_event_payload(Changes)]};
 handle_result_changes(#{}, Acc) ->
     Acc.
 
@@ -799,7 +818,8 @@ create_invoice(ID, InvoiceTplID, PartyRevision, V = #payproc_InvoiceParams{}) ->
         due             = V#payproc_InvoiceParams.due,
         details         = V#payproc_InvoiceParams.details,
         context         = V#payproc_InvoiceParams.context,
-        template_id     = InvoiceTplID
+        template_id     = InvoiceTplID,
+        external_id     = V#payproc_InvoiceParams.external_id
     }.
 
 create_payment_id(#st{payments = Payments}) ->
@@ -921,7 +941,8 @@ make_invoice_params(Params) ->
     #payproc_InvoiceWithTemplateParams{
         template_id = TplID,
         cost = Cost,
-        context = Context
+        context = Context,
+        external_id = ExternalID
     } = Params,
     #domain_InvoiceTemplate{
         owner_id = PartyID,
@@ -953,7 +974,8 @@ make_invoice_params(Params) ->
             details = InvoiceDetails,
             due = InvoiceDue,
             cost = InvoiceCost,
-            context = InvoiceContext
+            context = InvoiceContext,
+            external_id = ExternalID
         }
     ].
 
@@ -1092,98 +1114,36 @@ get_message(invoice_status_changed) ->
     "Invoice status is changed".
 
 -include("legacy_structures.hrl").
+
 %% Marshalling
 
-marshal(Changes) when is_list(Changes) ->
-    [marshal(change, Change) || Change <- Changes].
-
-%% Changes
-
-marshal(change, ?invoice_created(Invoice)) ->
-    [2, #{
-        <<"change">>    => <<"created">>,
-        <<"invoice">>   => marshal(invoice, Invoice)
-    }];
-marshal(change, ?invoice_status_changed(Status)) ->
-    [2, #{
-        <<"change">>    => <<"status_changed">>,
-        <<"status">>    => marshal(status, Status)
-    }];
-marshal(change, ?payment_ev(PaymentID, Payload)) ->
-    [2, #{
-        <<"change">>    => <<"payment_change">>,
-        <<"id">>        => marshal(str, PaymentID),
-        <<"payload">>   => hg_invoice_payment:marshal(Payload)
-    }];
-
-%% Change components
-
-marshal(invoice, #domain_Invoice{} = Invoice) ->
-    genlib_map:compact(#{
-        <<"id">>            => marshal(str, Invoice#domain_Invoice.id),
-        <<"shop_id">>       => marshal(str, Invoice#domain_Invoice.shop_id),
-        <<"owner_id">>      => marshal(str, Invoice#domain_Invoice.owner_id),
-        <<"party_revision">>=> Invoice#domain_Invoice.party_revision,
-        <<"created_at">>    => marshal(str, Invoice#domain_Invoice.created_at),
-        <<"cost">>          => hg_cash:marshal(Invoice#domain_Invoice.cost),
-        <<"due">>           => marshal(str, Invoice#domain_Invoice.due),
-        <<"details">>       => marshal(details, Invoice#domain_Invoice.details),
-        <<"context">>       => hg_content:marshal(Invoice#domain_Invoice.context),
-        <<"template_id">>   => marshal(str, Invoice#domain_Invoice.template_id)
-    });
-
-marshal(details, #domain_InvoiceDetails{} = Details) ->
-    genlib_map:compact(#{
-        <<"product">> => marshal(str, Details#domain_InvoiceDetails.product),
-        <<"description">> => marshal(str, Details#domain_InvoiceDetails.description),
-        <<"cart">> => marshal(cart, Details#domain_InvoiceDetails.cart)
-    });
-
-marshal(status, ?invoice_paid()) ->
-    <<"paid">>;
-marshal(status, ?invoice_unpaid()) ->
-    <<"unpaid">>;
-marshal(status, ?invoice_cancelled(Reason)) ->
-    [
-        <<"cancelled">>,
-        marshal(str, Reason)
-    ];
-marshal(status, ?invoice_fulfilled(Reason)) ->
-    [
-        <<"fulfilled">>,
-        marshal(str, Reason)
-    ];
-
-marshal(cart, #domain_InvoiceCart{lines = Lines}) ->
-    [marshal(line, Line) || Line <- Lines];
-
-marshal(line, #domain_InvoiceLine{} = InvoiceLine) ->
-    #{
-        <<"product">> => marshal(str, InvoiceLine#domain_InvoiceLine.product),
-        <<"quantity">> => marshal(int, InvoiceLine#domain_InvoiceLine.quantity),
-        <<"price">> => hg_cash:marshal(InvoiceLine#domain_InvoiceLine.price),
-        <<"metadata">> => marshal(metadata, InvoiceLine#domain_InvoiceLine.metadata)
-    };
-
-marshal(metadata, Metadata) ->
-    maps:fold(
-        fun(K, V, Acc) ->
-            maps:put(marshal(str, K), hg_msgpack_marshalling:unmarshal(V), Acc)
-        end,
-        #{},
-        Metadata
-    );
-
-marshal(_, Other) ->
-    Other.
+-spec marshal_event_payload([invoice_change()]) ->
+    hg_machine:event_payload().
+marshal_event_payload(Changes) when is_list(Changes) ->
+    wrap_event_payload({invoice_changes, Changes}).
 
 %% Unmarshalling
 
-unmarshal(Events) when is_list(Events) ->
-    [unmarshal(Event) || Event <- Events];
+-spec unmarshal_history([hg_machine:event()]) ->
+    [hg_machine:event([invoice_change()])].
+unmarshal_history(Events) ->
+    [unmarshal_event(Event) || Event <- Events].
 
-unmarshal({ID, Dt, Payload}) ->
-    {ID, Dt, unmarshal({list, changes}, Payload)}.
+-spec unmarshal_event(hg_machine:event()) ->
+    hg_machine:event([invoice_change()]).
+unmarshal_event({ID, Dt, Payload}) ->
+    {ID, Dt, unmarshal_event_payload(Payload)}.
+
+-spec unmarshal_event_payload(hg_machine:event_payload()) ->
+    [invoice_change()].
+unmarshal_event_payload(#{format_version := 1, data := {bin, Changes}}) ->
+    Type = {struct, union, {dmsl_payment_processing_thrift, 'EventPayload'}},
+    {ok, {invoice_changes, Buf}} = hg_proto_utils:deserialize(Type, Changes),
+    Buf;
+unmarshal_event_payload(#{format_version := undefined, data := Changes}) ->
+    unmarshal({list, changes}, Changes).
+
+%% Legacy formats unmarshal
 
 %% Version > 1
 
@@ -1195,6 +1155,7 @@ unmarshal({list, changes}, Changes) when is_list(Changes) ->
 unmarshal({list, changes}, {bin, Bin}) when is_binary(Bin) ->
     Changes = binary_to_term(Bin),
     lists:flatten([unmarshal(change, [1, Change]) || Change <- Changes]);
+
 
 %% Changes
 
@@ -1237,6 +1198,7 @@ unmarshal(invoice, #{
 } = Invoice) ->
     Context = maps:get(<<"context">>, Invoice, undefined),
     TemplateID = maps:get(<<"template_id">>, Invoice, undefined),
+    ExternalID = maps:get(<<"external_id">>, Invoice, undefined),
     #domain_Invoice{
         id              = unmarshal(str, ID),
         shop_id         = unmarshal(str, ShopID),
@@ -1248,7 +1210,8 @@ unmarshal(invoice, #{
         details         = unmarshal(details, Details),
         status          = ?invoice_unpaid(),
         context         = hg_content:unmarshal(Context),
-        template_id     = unmarshal(str, TemplateID)
+        template_id     = unmarshal(str, TemplateID),
+        external_id     = unmarshal(str, ExternalID)
     };
 
 unmarshal(invoice,
@@ -1334,3 +1297,13 @@ unmarshal(metadata, Metadata) ->
 
 unmarshal(_, Other) ->
     Other.
+
+%% Wrap in thrift binary
+
+wrap_event_payload(Payload) ->
+    Type = {struct, union, {dmsl_payment_processing_thrift, 'EventPayload'}},
+    {ok, Bin} = hg_proto_utils:serialize(Type, Payload),
+    #{
+        format_version => 1,
+        data => {bin, Bin}
+    }.

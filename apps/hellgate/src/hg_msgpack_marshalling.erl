@@ -1,5 +1,6 @@
 -module(hg_msgpack_marshalling).
 -include_lib("dmsl/include/dmsl_msgpack_thrift.hrl").
+-include_lib("mg_proto/include/mg_proto_msgpack_thrift.hrl").
 
 %% API
 -export([marshal/1]).
@@ -52,6 +53,7 @@ marshal(Array) when is_list(Array) ->
 
 -spec unmarshal(dmsl_msgpack_thrift:'Value'()) ->
     msgpack_value().
+
 unmarshal({nl, #msgpack_Nil{}}) ->
     undefined;
 unmarshal({b, Boolean}) ->
@@ -84,6 +86,7 @@ marshal(json, {str, S})               -> S;
 marshal(json, {obj, O})               -> maps:map(fun (_, V) -> marshal(json, V) end, O);
 marshal(json, {arr, A})               -> lists:map(fun (V)   -> marshal(json, V) end, A).
 
+
 -spec unmarshal
     (json, value()) -> dmsl_json_thrift:'Value'().
 
@@ -94,3 +97,4 @@ unmarshal(json, F) when is_float(F)   -> {flt, F};
 unmarshal(json, S) when is_binary(S)  -> {str, S};
 unmarshal(json, O) when is_map(O)     -> {obj, maps:map(fun (_, V) -> unmarshal(json, V) end, O)};
 unmarshal(json, A) when is_list(A)    -> {arr, lists:map(fun (V)   -> unmarshal(json, V) end, A)}.
+

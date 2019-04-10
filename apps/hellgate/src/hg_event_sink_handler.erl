@@ -34,8 +34,12 @@ handle_function('GetLastEventID', [], _Opts) ->
             throw(#payproc_NoLastEvent{})
     end.
 
+-spec publish_events([hg_event_sink:sink_event()]) ->
+    [event()].
 publish_events(Events) ->
     [publish_event(Event) || Event <- Events].
 
+-spec publish_event(hg_event_sink:sink_event()) ->
+    event().
 publish_event({ID, Ns, SourceID, {EventID, Dt, Payload}}) ->
-    hg_event_provider:publish_event(Ns, ID, SourceID, {EventID, Dt, hg_msgpack_marshalling:unmarshal(Payload)}).
+    hg_event_provider:publish_event(Ns, ID, SourceID, {EventID, Dt, Payload}).
