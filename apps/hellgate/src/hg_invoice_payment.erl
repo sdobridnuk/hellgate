@@ -592,25 +592,25 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
             end
     end.
 
-notify_fault_detector({_, ProviderRef, _}, OperationId, finish) ->
-    ProviderID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
-    hg_fault_detector_client:register_operation(ProviderID, OperationId, finish);
+% notify_fault_detector({_, ProviderRef, _}, OperationId, finish) ->
+%     ProviderID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
+%     hg_fault_detector_client:register_operation(ProviderID, OperationId, finish);
 
-notify_fault_detector({_, ProviderRef, _}, OperationId, error) ->
-    ProviderID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
-    hg_fault_detector_client:register_operation(ProviderID, OperationId, error);
+% notify_fault_detector({_, ProviderRef, _}, OperationId, error) ->
+%     ProviderID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
+%     hg_fault_detector_client:register_operation(ProviderID, OperationId, error);
 
-notify_fault_detector({_, ProviderRef, _}, OperationId, start) ->
-    ProviderID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
-    case hg_fault_detector_client:register_operation(ProviderID, OperationId, start) of
-        ok ->
-            ok;
-        not_found ->
-            hg_fault_detector_client:init_service(ProviderID),
-            hg_fault_detector_client:register_operation(ProviderID, OperationId, start);
-        error ->
-            error
-    end.
+% notify_fault_detector({_, ProviderRef, _}, OperationId, start) ->
+%     ProviderID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
+%     case hg_fault_detector_client:register_operation(ProviderID, OperationId, start) of
+%         ok ->
+%             ok;
+%         not_found ->
+%             hg_fault_detector_client:init_service(ProviderID),
+%             hg_fault_detector_client:register_operation(ProviderID, OperationId, start);
+%         error ->
+%             error
+%     end.
 
 -spec choose_routing_predestination(payment()) -> hg_routing:route_predestination().
 choose_routing_predestination(#domain_InvoicePayment{make_recurrent = true}) ->
@@ -1441,12 +1441,12 @@ process_routing(Action, St) ->
     VS1 = VS0#{risk_score => RiskScore},
     case choose_route(PaymentInstitution, VS1, Revision, St) of
         {ok, Route} ->
-            OperationId =
-            hg_utils:construct_complex_id([
-                get_invoice_id(get_invoice(Opts)),
-                get_payment_id(get_payment(St))
-            ]),
-            spawn(fun () -> notify_fault_detector(Route, OperationId, start) end),
+            % OperationId =
+            % hg_utils:construct_complex_id([
+            %     get_invoice_id(get_invoice(Opts)),
+            %     get_payment_id(get_payment(St))
+            % ]),
+            % spawn(fun () -> notify_fault_detector(Route, OperationId, start) end),
             process_cash_flow_building(Route, VS1, Payment, PaymentInstitution, Revision, Opts, Events0, Action);
         {error, {no_route_found, _Details}} ->
             Failure = {failure, payproc_errors:construct('PaymentFailure',
@@ -1591,11 +1591,11 @@ process_result({payment, finalizing_accounter}, Action, St) ->
         ?cancelled() ->
             rollback_payment_cashflow(St)
     end,
-    Route = get_route(St),
-    Opts = get_opts(St),
-    OperationId = hg_utils:construct_complex_id([get_invoice_id(get_invoice(Opts)),
-                                                 get_payment_id(get_payment(St))]),
-    spawn(fun () -> notify_fault_detector(Route, OperationId, finish) end),
+    % Route = get_route(St),
+    % Opts = get_opts(St),
+    % OperationId = hg_utils:construct_complex_id([get_invoice_id(get_invoice(Opts)),
+    %                                              get_payment_id(get_payment(St))]),
+    % spawn(fun () -> notify_fault_detector(Route, OperationId, finish) end),
     NewAction = get_action(Target, Action, St),
     {done, {[?payment_status_changed(Target)], NewAction}};
 
@@ -1655,11 +1655,11 @@ process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
 process_fatal_payment_failure(?captured(), _Events, _Action, Failure, _St) ->
     error({invalid_capture_failure, Failure});
 process_fatal_payment_failure(_Target, Events, Action, Failure, St) ->
-    Route = get_route(St),
-    Opts = get_opts(St),
-    OperationId = hg_utils:construct_complex_id([get_invoice_id(get_invoice(Opts)),
-                                                 get_payment_id(get_payment(St))]),
-    spawn(fun () -> notify_fault_detector(Route, OperationId, error) end),
+    % Route = get_route(St),
+    % Opts = get_opts(St),
+    % OperationId = hg_utils:construct_complex_id([get_invoice_id(get_invoice(Opts)),
+    %                                              get_payment_id(get_payment(St))]),
+    % spawn(fun () -> notify_fault_detector(Route, OperationId, error) end),
     _AffectedAccounts = rollback_payment_cashflow(St),
     {done, {Events ++ [?payment_status_changed(?failed(Failure))], Action}}.
 
