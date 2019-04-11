@@ -129,13 +129,14 @@ collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContex
         {[], []},
         ProviderRefs1
     ),
+
     {Providers, RejectContext#{rejected_providers => RejectReasons}}.
 
 score_providers_with_fault_detector([]) -> [];
 score_providers_with_fault_detector([{ProviderRef, Provider}]) -> [{ProviderRef, Provider, 0.0}];
 score_providers_with_fault_detector(Providers) ->
     ProviderIDs     = [integer_to_binary(PR#domain_ProviderRef.id) || {PR, _P} <- Providers],
-    FDStats         = hg_fault_detector_client:get_statistics(ProviderIDs),
+    FDStats         = hg_fault_detector_client:get_statistics(ordsets:from_list(ProviderIDs)),
     ScoredProviders = [{PR, P, get_provider_fail_rate(PR, FDStats)} || {PR, P} <- Providers],
     ScoredProviders.
 
