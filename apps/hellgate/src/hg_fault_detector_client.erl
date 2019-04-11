@@ -5,8 +5,6 @@
 -include_lib("fault_detector_proto/include/fd_proto_fault_detector_thrift.hrl").
 
 %% TODO move config to a proper place
--define(RETRIES, 5).
-
 -define(DEFAULT_CONFIG,
         #fault_detector_ServiceConfig{
            sliding_window       = 60000,
@@ -54,7 +52,7 @@
     ok | error.
 init_service(ServiceId) ->
     ServiceConfig = ?DEFAULT_CONFIG,
-    do_init_service(ServiceId, ServiceConfig, ?RETRIES).
+    do_init_service(ServiceId, ServiceConfig).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -67,14 +65,16 @@ init_service(ServiceId) ->
 %% `PreAggrSize`: time interval for data preaggregation
 %% @end
 %%------------------------------------------------------------------------------
--spec init_service(service_id(),
-                   sliding_window(),
-                   operation_time_limit(),
-                   pre_aggregation_size()) ->
+-spec init_service(
+        service_id(),
+        sliding_window(),
+        operation_time_limit(),
+        pre_aggregation_size()
+       ) ->
     ok | error.
 init_service(ServiceId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
     ServiceConfig = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
-    do_init_service(ServiceId, ServiceConfig, ?RETRIES).
+    do_init_service(ServiceId, ServiceConfig).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -86,7 +86,7 @@ init_service(ServiceId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
 %%------------------------------------------------------------------------------
 -spec get_statistics([service_id()]) -> [service_stats()].
 get_statistics(ServiceIds) when is_list(ServiceIds) ->
-    do_get_statistics(ServiceIds, ?RETRIES).
+    do_get_statistics(ServiceIds).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -97,25 +97,25 @@ get_statistics(ServiceIds) when is_list(ServiceIds) ->
 %% service's availability that is available via `get_statistics/1`.
 %% @end
 %%------------------------------------------------------------------------------
--spec register_operation(service_id(), operation_id(), operation_status()) ->
+-spec register_operation(operation_status(), service_id(), operation_id()) ->
     ok | not_found | error.
-register_operation(ServiceId, OperationId, start) ->
+register_operation(start, ServiceId, OperationId) ->
     OperationState  = {start, #fault_detector_Start{ time_start = hg_datetime:format_now()} },
     Operation       = ?operation(OperationId, OperationState),
     ServiceConfig   = ?DEFAULT_CONFIG,
-    do_register_operation(ServiceId, Operation, ServiceConfig, ?RETRIES);
+    do_register_operation(ServiceId, Operation, ServiceConfig);
 
-register_operation(ServiceId, OperationId, finish) ->
+register_operation(finish, ServiceId, OperationId) ->
     OperationState  = {finish, #fault_detector_Finish{ time_end = hg_datetime:format_now()} },
     Operation       = ?operation(OperationId, OperationState),
     ServiceConfig   = ?DEFAULT_CONFIG,
-    do_register_operation(ServiceId, Operation, ServiceConfig, ?RETRIES);
+    do_register_operation(ServiceId, Operation, ServiceConfig);
 
-register_operation(ServiceId, OperationId, error) ->
+register_operation(error, ServiceId, OperationId) ->
     OperationState  = {error, #fault_detector_Error{ time_end = hg_datetime:format_now()} },
     Operation       = ?operation(OperationId, OperationState),
     ServiceConfig   = ?DEFAULT_CONFIG,
-    do_register_operation(ServiceId, Operation, ServiceConfig, ?RETRIES).
+    do_register_operation(ServiceId, Operation, ServiceConfig).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -128,66 +128,56 @@ register_operation(ServiceId, OperationId, error) ->
 %% `PreAggrSize`: time interval for data preaggregation
 %% @end
 %%------------------------------------------------------------------------------
--spec register_operation(service_id(),
-                         operation_id(),
-                         operation_status(),
-                         sliding_window(),
-                         operation_time_limit(),
-                         pre_aggregation_size()) ->
+-spec register_operation(
+        operation_status(),
+        service_id(),
+        operation_id(),
+        sliding_window(),
+        operation_time_limit(),
+        pre_aggregation_size()
+       ) ->
     ok | not_found | error.
-register_operation(ServiceId, OperationId, start, SlidingWindow, OpTimeLimit, PreAggrSize) ->
+register_operation(start, ServiceId, OperationId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
     OperationState  = {start, #fault_detector_Start{ time_start = hg_datetime:format_now()}},
     Operation       = ?operation(OperationId, OperationState),
     ServiceConfig   = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
-    do_register_operation(ServiceId, Operation, ServiceConfig, ?RETRIES);
+    do_register_operation(ServiceId, Operation, ServiceConfig);
 
-register_operation(ServiceId, OperationId, finish, SlidingWindow, OpTimeLimit, PreAggrSize) ->
+register_operation(finish, ServiceId, OperationId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
     OperationState  = {finish, #fault_detector_Finish{ time_end = hg_datetime:format_now()}},
     Operation       = ?operation(OperationId, OperationState),
     ServiceConfig   = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
-    do_register_operation(ServiceId, Operation, ServiceConfig, ?RETRIES);
+    do_register_operation(ServiceId, Operation, ServiceConfig);
 
-register_operation(ServiceId, OperationId, error, SlidingWindow, OpTimeLimit, PreAggrSize) ->
+register_operation(error, ServiceId, OperationId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
     OperationState  = {error, #fault_detector_Error{ time_end = hg_datetime:format_now()}},
     Operation       = ?operation(OperationId, OperationState),
     ServiceConfig   = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
-    do_register_operation(ServiceId, Operation, ServiceConfig, ?RETRIES).
+    do_register_operation(ServiceId, Operation, ServiceConfig).
 
 %% PRIVATE
 
-do_init_service(_ServiceId, _ServiceConfig, 0) -> error;
-do_init_service(ServiceId, ServiceConfig, Retries) ->
+do_init_service(ServiceId, ServiceConfig) ->
     try hg_woody_wrapper:call(fault_detector, 'InitService', [ServiceId, ServiceConfig]) of
         {ok, _Result} -> ok;
         _Result       -> error
     catch
-        _:_ ->
-            timer:sleep(200),
-            _ = lager:warning("Unable to reach Fault Detector, trying again..."),
-            do_init_service(ServiceId, ServiceConfig, Retries - 1)
+        _:_ -> error
     end.
 
-do_get_statistics(_ServiceIds, 0) -> [];
-do_get_statistics(ServiceIds, Retries) ->
+do_get_statistics(ServiceIds) ->
     try hg_woody_wrapper:call(fault_detector, 'GetStatistics', [ServiceIds]) of
         {ok, Stats} -> Stats;
         _Result     -> []
     catch
-        _:_ ->
-            timer:sleep(200),
-            _ = lager:warning("Unable to reach Fault Detector, trying again..."),
-            do_get_statistics(ServiceIds, Retries - 1)
+        _:_ -> []
     end.
 
-do_register_operation(_ServiceId, _Operation, _ServiceConfig, 0) -> error;
-do_register_operation(ServiceId, Operation, ServiceConfig, Retries) ->
+do_register_operation(ServiceId, Operation, ServiceConfig) ->
     try hg_woody_wrapper:call(fault_detector, 'RegisterOperation', [ServiceId, Operation, ServiceConfig]) of
         {ok, _Result} -> ok;
         {exception, #fault_detector_ServiceNotFoundException{}} -> not_found
     catch
-        _:_ ->
-            timer:sleep(200),
-            _ = lager:warning("Unable to reach Fault Detector, trying again..."),
-            do_register_operation(ServiceId, Operation, ServiceConfig, Retries - 1)
+        _:_ -> error
     end.
 
