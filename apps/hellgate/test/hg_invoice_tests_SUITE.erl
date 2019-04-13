@@ -271,6 +271,7 @@ init_per_suite(C) ->
     % _ = dbg:p(all, c),
     % _ = dbg:tpl({'hg_invoice_payment', 'merge_change', '_'}, x),
     CowboySpec = hg_dummy_provider:get_http_cowboy_spec(),
+
     {Apps, Ret} = hg_ct_helper:start_apps([
         lager, woody, scoper, dmt_client, party_client, hellgate, {cowboy, CowboySpec}
     ]),
@@ -285,6 +286,7 @@ init_per_suite(C) ->
     ShopID = hg_ct_helper:create_party_and_shop(?cat(1), <<"RUB">>, ?tmpl(1), ?pinst(1), PartyClient),
     AnotherShopID = hg_ct_helper:create_party_and_shop(?cat(1), <<"RUB">>, ?tmpl(1), ?pinst(1), AnotherPartyClient),
     {ok, SupPid} = supervisor:start_link(?MODULE, []),
+    {ok, FD} = supervisor:start_child(SupPid, hg_dummy_fault_detector:child_spec()),
     _ = unlink(SupPid),
     ok = start_kv_store(SupPid),
     NewC = [
@@ -298,16 +300,19 @@ init_per_suite(C) ->
         {another_customer_client, AnotherCustomerClient},
         {root_url, RootUrl},
         {apps, Apps},
+        {fault_detector_dummy, FD},
         {test_sup, SupPid}
         | C
     ],
-    ok = start_proxies([{hg_dummy_provider, 1, NewC}, {hg_dummy_inspector, 2, NewC}, {hg_dummy_fault_detector, 3, NewC}]),
+
+    ok = start_proxies([ {hg_dummy_provider, 1, NewC}, {hg_dummy_inspector, 2, NewC} ]),
     NewC.
 
 -spec end_per_suite(config()) -> _.
 
-end_per_suite(C) ->
+end_per_suite(#{test_sup := SupId, fault_detector_dummy := FD} = C) ->
     ok = hg_domain:cleanup(),
+    supervisor:terminate_child(SupId, FD),
     [application:stop(App) || App <- cfg(apps, C)],
     exit(cfg(test_sup, C), shutdown).
 
@@ -760,8 +765,8 @@ no_route_found_for_payment(_C) ->
 -spec routing_depends_on_fault_detector(config()) -> test_return().
 
 routing_depends_on_fault_detector(_C) ->
-    % TODO: maybe explicitly setup dummy fd here?
     Revision = hg_domain:head(),
+
     PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
     VS = #{
         category        => ?cat(1),
@@ -773,12 +778,10 @@ routing_depends_on_fault_detector(_C) ->
         flow            => instant
     },
 
-    % will always choose provider 201 unless fault detector comes into play
-    Result = hg_routing:choose(payment, PaymentInstitution, VS, Revision),
-    {ok, #domain_PaymentRoute{
-        provider = ?prv(200),
-        terminal = ?trm(111)
-    }} = Result.
+    ok = hg_context:save(hg_context:create()),
+    Result0 = hg_routing:choose(payment, PaymentInstitution, VS, Revision),
+    ok = hg_context:cleanup(),
+    {ok, #domain_PaymentRoute{ provider = ?prv(201) }} = Result0.
 
 routing_depends_on_fault_detector_fixture(Revision) ->
     PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
@@ -893,7 +896,7 @@ routing_depends_on_fault_detector_fixture(Revision) ->
             data = #domain_Terminal{
                 name = <<"Payment Terminal Terminal">>,
                 description = <<"Euroset">>,
-                risk_coverage = low
+                risk_coverage = high
             }
         }}
     ].

@@ -180,4 +180,3 @@ do_register_operation(ServiceId, Operation, ServiceConfig) ->
     catch
         _:_ -> error
     end.
-

@@ -113,9 +113,6 @@ collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContex
     ProviderRefs0    = reduce(provider, ProviderSelector, VS, Revision),
     ProviderRefs1    = ordsets:to_list(ProviderRefs0),
 
-    %% TODO: use failure rate in some meaningful way
-    %% failure rate ranges from 0.0 to 1.0, 1.0 being a service that is completely unavailable
-
     {Providers, RejectReasons} = lists:foldl(
         fun (ProviderRef, {Prvs, Reasons}) ->
             try
