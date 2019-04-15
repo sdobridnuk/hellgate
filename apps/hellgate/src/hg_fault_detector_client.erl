@@ -30,7 +30,7 @@
 -export([build_config/3]).
 
 -export([init_service/1]).
--export([init_service/4]).
+-export([init_service/2]).
 
 -export([get_statistics/1]).
 
@@ -168,7 +168,11 @@ register_operation(error, ServiceId, OperationId, SlidingWindow, OpTimeLimit, Pr
 %% PRIVATE
 
 do_init_service(ServiceId, ServiceConfig) ->
-    try hg_woody_wrapper:call(fault_detector, 'InitService', [ServiceId, ServiceConfig]) of
+    try hg_woody_wrapper:call(
+          fault_detector,
+          'InitService',
+          [ServiceId, ServiceConfig]
+         ) of
         {ok, _Result} -> ok;
         _Result       -> error
     catch
@@ -176,7 +180,11 @@ do_init_service(ServiceId, ServiceConfig) ->
     end.
 
 do_get_statistics(ServiceIds) ->
-    try hg_woody_wrapper:call(fault_detector, 'GetStatistics', [ServiceIds]) of
+    try hg_woody_wrapper:call(
+          fault_detector,
+          'GetStatistics',
+          [ServiceIds]
+         ) of
         {ok, Stats} -> Stats;
         _Result     -> []
     catch
@@ -184,7 +192,11 @@ do_get_statistics(ServiceIds) ->
     end.
 
 do_register_operation(ServiceId, Operation, ServiceConfig) ->
-    try hg_woody_wrapper:call(fault_detector, 'RegisterOperation', [ServiceId, Operation, ServiceConfig]) of
+    try hg_woody_wrapper:call(
+          fault_detector,
+          'RegisterOperation',
+          [ServiceId, Operation, ServiceConfig]
+         ) of
         {ok, _Result} -> ok;
         {exception, #fault_detector_ServiceNotFoundException{}} -> not_found
     catch
