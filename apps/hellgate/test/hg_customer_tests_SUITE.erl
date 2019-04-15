@@ -75,7 +75,11 @@ init_per_suite(C) ->
         {test_sup, SupPid}
         | C
     ],
-    ok = start_proxies([{hg_dummy_provider, 1, C1}, {hg_dummy_inspector, 2, C1}, {hg_dummy_fault_detector, 3, C1}]),
+    ok = start_proxies([
+                        {hg_dummy_provider, 1, C1},
+                        {hg_dummy_inspector, 2, C1}
+                        % {hg_dummy_fault_detector, 3, C1}
+                       ]),
     C1.
 
 -spec end_per_suite(config()) -> _.
