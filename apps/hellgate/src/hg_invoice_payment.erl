@@ -592,22 +592,6 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
             end
     end.
 
-notify_fault_detector(finish, {_, ProviderRef, _}, St) ->
-    Route = get_route(St),
-    Opts = get_opts(St),
-    OperationId = hg_utils:construct_complex_id([get_invoice_id(get_invoice(Opts)),
-                                                 get_payment_id(get_payment(St))]),
-    ProviderID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
-    hg_fault_detector_client:register_operation(finish, ProviderID, OperationId);
-
-notify_fault_detector(error, {_, ProviderRef, _}, St) ->
-    Route = get_route(St),
-    Opts = get_opts(St),
-    OperationId = hg_utils:construct_complex_id([get_invoice_id(get_invoice(Opts)),
-                                                 get_payment_id(get_payment(St))]),
-    ProviderID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
-    hg_fault_detector_client:register_operation(error, ProviderID, OperationId);
-
 notify_fault_detector(start, {_, ProviderRef, _}, St) ->
     Route = get_route(St),
     Opts = get_opts(St),
@@ -620,7 +604,15 @@ notify_fault_detector(start, {_, ProviderRef, _}, St) ->
             hg_fault_detector_client:register_operation(start, ProviderID, OperationId);
         Result ->
             Result
-    end.
+    end;
+
+notify_fault_detector(Status, {_, ProviderRef, _}, St) ->
+    Route = get_route(St),
+    Opts = get_opts(St),
+    OperationId = hg_utils:construct_complex_id([get_invoice_id(get_invoice(Opts)),
+                                                 get_payment_id(get_payment(St))]),
+    ProviderID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
+    hg_fault_detector_client:register_operation(Status, ProviderID, OperationId).
 
 -spec choose_routing_predestination(payment()) -> hg_routing:route_predestination().
 choose_routing_predestination(#domain_InvoicePayment{make_recurrent = true}) ->
