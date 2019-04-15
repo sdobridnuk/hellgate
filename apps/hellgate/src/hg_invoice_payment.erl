@@ -593,7 +593,6 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
     end.
 
 notify_fault_detector(start, {_, ProviderRef, _}, St) ->
-    Route = get_route(St),
     Opts = get_opts(St),
     OperationId = hg_utils:construct_complex_id([get_invoice_id(get_invoice(Opts)),
                                                  get_payment_id(get_payment(St))]),
@@ -607,7 +606,6 @@ notify_fault_detector(start, {_, ProviderRef, _}, St) ->
     end;
 
 notify_fault_detector(Status, {_, ProviderRef, _}, St) ->
-    Route = get_route(St),
     Opts = get_opts(St),
     OperationId = hg_utils:construct_complex_id([get_invoice_id(get_invoice(Opts)),
                                                  get_payment_id(get_payment(St))]),
@@ -1588,6 +1586,7 @@ process_result({payment, finalizing_accounter}, Action, St) ->
         ?cancelled() ->
             rollback_payment_cashflow(St)
     end,
+    Route = get_route(St),
     notify_fault_detector(finish, Route, St),
     NewAction = get_action(Target, Action, St),
     {done, {[?payment_status_changed(Target)], NewAction}};
@@ -1606,6 +1605,7 @@ process_result({refund_accounter, ID}, Action, St) ->
             ?cash(Amount, _) when Amount > 0 ->
                 []
         end,
+    Route = get_route(St),
     notify_fault_detector(finish, Route, St),
     {done, {Events2 ++ Events3, Action}}.
 
@@ -1643,6 +1643,7 @@ process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
             Events1 = [
                 ?refund_ev(ID, ?refund_status_changed(?refund_failed(Failure)))
             ],
+            Route = get_route(St),
             notify_fault_detector(error, Route, St),
             {done, {Events ++ Events1, Action}}
     end.
@@ -1650,6 +1651,7 @@ process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
 process_fatal_payment_failure(?captured(), _Events, _Action, Failure, _St) ->
     error({invalid_capture_failure, Failure});
 process_fatal_payment_failure(_Target, Events, Action, Failure, St) ->
+    Route = get_route(St),
     notify_fault_detector(error, Route, St),
     _AffectedAccounts = rollback_payment_cashflow(St),
     {done, {Events ++ [?payment_status_changed(?failed(Failure))], Action}}.

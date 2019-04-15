@@ -138,12 +138,13 @@ score_providers_with_fault_detector(Providers) ->
     ScoredProviders.
 
 get_provider_fail_rate(#domain_ProviderRef{id = ID}, FDStats) ->
-    case lists:keyfind(integer_to_binary(ID), #fault_detector_ServiceStatistics.service_id, FDStats) of
-        false ->
-            0.0;
+    ProviderID = integer_to_binary(ID),
+    case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FDStats) of
+        {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
+            FailRate;
 
-        Stats ->
-            Stats#fault_detector_ServiceStatistics.failure_rate
+        false ->
+            0.0
     end.
 
 acceptable_provider(payment, ProviderRef, VS, Revision) ->
