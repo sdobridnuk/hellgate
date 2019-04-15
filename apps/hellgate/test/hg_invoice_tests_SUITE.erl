@@ -316,7 +316,7 @@ end_per_suite(C) ->
     SupPid = cfg(test_sup, C),
     supervisor:terminate_child(
         SupPid,
-        {ranch_listener_sup, {woody_server_thrift_http_handler,hg_dummy_fault_detector}}
+        {ranch_listener_sup, {woody_server_thrift_http_handler, hg_dummy_fault_detector}}
     ),
     ok = hg_domain:cleanup(),
     [application:stop(App) || App <- cfg(apps, C)],
@@ -786,10 +786,16 @@ routing_depends_on_fault_detector(C) ->
     },
 
     ok = hg_context:save(hg_context:create()),
-    supervisor:terminate_child(SupPid, {ranch_listener_sup, {woody_server_thrift_http_handler,hg_dummy_fault_detector}}),
+    supervisor:terminate_child(
+        SupPid,
+        {ranch_listener_sup, {woody_server_thrift_http_handler, hg_dummy_fault_detector}}
+    ),
     Result0 = hg_routing:choose(payment, PaymentInstitution, VS, Revision),
 
-    supervisor:restart_child(SupPid, {ranch_listener_sup, {woody_server_thrift_http_handler,hg_dummy_fault_detector}}),
+    supervisor:restart_child(
+        SupPid,
+        {ranch_listener_sup, {woody_server_thrift_http_handler, hg_dummy_fault_detector}}
+    ),
     Result1 = hg_routing:choose(payment, PaymentInstitution, VS, Revision),
 
     ok = hg_context:cleanup(),

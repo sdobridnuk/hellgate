@@ -16,7 +16,7 @@ child_spec() ->
       #{
          handlers => [{"/", {{fd_proto_fault_detector_thrift, 'FaultDetector'}, ?MODULE}}],
          event_handler => scoper_woody_event_handler,
-         ip => {127,0,0,1},
+         ip => {127, 0, 0, 1},
          port => 20001
         }
      ).
