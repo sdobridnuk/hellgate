@@ -22,6 +22,13 @@
            operation_id = OpId,
            state        = State}).
 
+-define(state_start(TimeStamp), #fault_detector_Start{ time_start = TimeStamp }).
+-define(state_error(TimeStamp), #fault_detector_Error{ time_end   = TimeStamp }).
+-define(state_finish(TimeStamp), #fault_detector_Finish{ time_end = TimeStamp }).
+
+-export([build_config/2]).
+-export([build_config/3]).
+
 -export([init_service/1]).
 -export([init_service/4]).
 
@@ -34,6 +41,7 @@
 -type service_stats()           :: fd_proto_fault_detector_thrift:'ServiceStatistics'().
 -type service_id()              :: fd_proto_fault_detector_thrift:'ServiceId'().
 -type operation_id()            :: fd_proto_fault_detector_thrift:'OperationId'().
+-type service_config()          :: fd_proto_fault_detector_thrift:'ServiceConfig'().
 -type sliding_window()          :: fd_proto_fault_detector_thrift:'Milliseconds'().
 -type operation_time_limit()    :: fd_proto_fault_detector_thrift:'Milliseconds'().
 -type pre_aggregation_size()    :: fd_proto_fault_detector_thrift:'Seconds'() | undefined.
@@ -42,9 +50,36 @@
 
 %%------------------------------------------------------------------------------
 %% @doc
+%% `build_config/2` receives the length of the sliding windown and the operation
+%% time limit as arguments. The config can then be used with `init_service/2`
+%% and `register_operation/4`.
+%%
+%% Config
+%% `SlidingWindow`: pick operations from SlidingWindow milliseconds.
+%% `OpTimeLimit`: expected operation execution time, in milliseconds.
+%% `PreAggrSize`: time interval for data preaggregation, in seconds.
+%% @end
+%%------------------------------------------------------------------------------
+-spec build_config(sliding_window(), operation_time_limit()) ->
+    service_config().
+build_config(SlidingWindow, OpTimeLimit) ->
+    ?service_config(SlidingWindow, OpTimeLimit, undefined).
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% `build_config/3` is analogous to `build_config/2` but also receives
+%% the optional pre-aggregation size argument.
+%% @end
+%%------------------------------------------------------------------------------
+-spec build_config(sliding_window(), operation_time_limit(), pre_aggregation_size())
+-> service_config().
+build_config(SlidingWindow, OpTimeLimit, PreAggrSize) ->
+    ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize).
+%%------------------------------------------------------------------------------
+%% @doc
 %% `init_service/1` receives a service id and initialises a fault detector
 %% service for it, allowing you to aggregate availability statistics via
-%% `register_operation/3` and `register_operation/6` and fetch it using the
+%% `register_operation/3` and `register_operation/4` and fetch it using the
 %% `get_statistics/1` function.
 %% @end
 %%------------------------------------------------------------------------------
@@ -56,24 +91,13 @@ init_service(ServiceId) ->
 
 %%------------------------------------------------------------------------------
 %% @doc
-%% `init_service/4` is analogous to `init_service/1` but also receives
-%% configuration for the fault detector service.
-%%
-%% Config
-%% `SlidingWindow`: pick operations from SlidingWindow milliseconds
-%% `OpTimeLimit`: expected operation execution time
-%% `PreAggrSize`: time interval for data preaggregation
+%% `init_service/2` is analogous to `init_service/1` but also receives
+%% configuration for the fault detector service created by `build_config/3`.
 %% @end
 %%------------------------------------------------------------------------------
--spec init_service(
-        service_id(),
-        sliding_window(),
-        operation_time_limit(),
-        pre_aggregation_size()
-       ) ->
+-spec init_service(service_id(), service_config()) ->
     ok | error.
-init_service(ServiceId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
-    ServiceConfig = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
+init_service(ServiceId, ServiceConfig) ->
     do_init_service(ServiceId, ServiceConfig).
 
 %%------------------------------------------------------------------------------
@@ -81,7 +105,8 @@ init_service(ServiceId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
 %% `get_statistics/1` receives a list of service ids and returns a
 %% list of statistics on the services' reliability.
 %%
-%% Returns an empty list if the fault detector itself is unavailable.
+%% Returns an empty list if the fault detector itself is unavailable. Services
+%% not initialised inthe fault detector will not be in the list.
 %% @end
 %%------------------------------------------------------------------------------
 -spec get_statistics([service_id()]) -> [service_stats()].
@@ -100,59 +125,44 @@ get_statistics(ServiceIds) when is_list(ServiceIds) ->
 -spec register_operation(operation_status(), service_id(), operation_id()) ->
     ok | not_found | error.
 register_operation(start, ServiceId, OperationId) ->
-    OperationState  = {start, #fault_detector_Start{ time_start = hg_datetime:format_now()} },
+    OperationState  = {start, ?state_start(hg_datetime:format_now()}),
     Operation       = ?operation(OperationId, OperationState),
     ServiceConfig   = ?DEFAULT_CONFIG,
     do_register_operation(ServiceId, Operation, ServiceConfig);
 
 register_operation(finish, ServiceId, OperationId) ->
-    OperationState  = {finish, #fault_detector_Finish{ time_end = hg_datetime:format_now()} },
+    OperationState  = {finish, ?state_finish(hg_datetime:format_now()}),
     Operation       = ?operation(OperationId, OperationState),
     ServiceConfig   = ?DEFAULT_CONFIG,
     do_register_operation(ServiceId, Operation, ServiceConfig);
 
 register_operation(error, ServiceId, OperationId) ->
-    OperationState  = {error, #fault_detector_Error{ time_end = hg_datetime:format_now()} },
+    OperationState  = {error, ?state_error(hg_datetime:format_now()}),
     Operation       = ?operation(OperationId, OperationState),
     ServiceConfig   = ?DEFAULT_CONFIG,
     do_register_operation(ServiceId, Operation, ServiceConfig).
 
 %%------------------------------------------------------------------------------
 %% @doc
-%% `register_operation/6` is analogous to `register_operation/3` but also receives
-%% configuration for the fault detector service.
-%%
-%% Config
-%% `SlidingWindow`: pick operations from SlidingWindow milliseconds
-%% `OpTimeLimit`: expected operation execution time
-%% `PreAggrSize`: time interval for data preaggregation
+%% `register_operation/4` is analogous to `register_operation/3` but also receives
+%% configuration for the fault detector service created by `build_config/3`.
 %% @end
 %%------------------------------------------------------------------------------
--spec register_operation(
-        operation_status(),
-        service_id(),
-        operation_id(),
-        sliding_window(),
-        operation_time_limit(),
-        pre_aggregation_size()
-       ) ->
+-spec register_operation(operation_status(), service_id(), operation_id(), service_config()) ->
     ok | not_found | error.
 register_operation(start, ServiceId, OperationId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
-    OperationState  = {start, #fault_detector_Start{ time_start = hg_datetime:format_now()}},
+    OperationState  = {start, ?state_start(hg_datetime:format_now()}),
     Operation       = ?operation(OperationId, OperationState),
-    ServiceConfig   = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
     do_register_operation(ServiceId, Operation, ServiceConfig);
 
 register_operation(finish, ServiceId, OperationId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
-    OperationState  = {finish, #fault_detector_Finish{ time_end = hg_datetime:format_now()}},
+    OperationState  = {finish, ?state_finish(hg_datetime:format_now()}),
     Operation       = ?operation(OperationId, OperationState),
-    ServiceConfig   = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
     do_register_operation(ServiceId, Operation, ServiceConfig);
 
 register_operation(error, ServiceId, OperationId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
-    OperationState  = {error, #fault_detector_Error{ time_end = hg_datetime:format_now()}},
+    OperationState  = {error, ?state_error(hg_datetime:format_now()}),
     Operation       = ?operation(OperationId, OperationState),
-    ServiceConfig   = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
     do_register_operation(ServiceId, Operation, ServiceConfig).
 
 %% PRIVATE
