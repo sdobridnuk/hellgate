@@ -173,8 +173,11 @@ groups() ->
             {group, repair_scenarios}
         ]},
 
+        {routing, [], [
+            routing_depends_on_fault_detector
+        ]},
+
         {base_payments, [parallel], [
-            routing_depends_on_fault_detector,
             invoice_creation_idempotency,
             invalid_invoice_shop,
             invalid_invoice_amount,
@@ -286,7 +289,7 @@ init_per_suite(C) ->
     ShopID = hg_ct_helper:create_party_and_shop(?cat(1), <<"RUB">>, ?tmpl(1), ?pinst(1), PartyClient),
     AnotherShopID = hg_ct_helper:create_party_and_shop(?cat(1), <<"RUB">>, ?tmpl(1), ?pinst(1), AnotherPartyClient),
     {ok, SupPid} = supervisor:start_link(?MODULE, []),
-    {ok, FD} = supervisor:start_child(SupPid, hg_dummy_fault_detector:child_spec()),
+    {ok, _} = supervisor:start_child(SupPid, hg_dummy_fault_detector:child_spec()),
     _ = unlink(SupPid),
     ok = start_kv_store(SupPid),
     NewC = [
@@ -300,7 +303,6 @@ init_per_suite(C) ->
         {another_customer_client, AnotherCustomerClient},
         {root_url, RootUrl},
         {apps, Apps},
-        {fault_detector_dummy, FD},
         {test_sup, SupPid}
         | C
     ],
@@ -310,9 +312,13 @@ init_per_suite(C) ->
 
 -spec end_per_suite(config()) -> _.
 
-end_per_suite(#{test_sup := SupId, fault_detector_dummy := FD} = C) ->
+end_per_suite(C) ->
+    SupPid = cfg(test_sup, C),
+    supervisor:terminate_child(
+        SupPid,
+        {ranch_listener_sup, {woody_server_thrift_http_handler,hg_dummy_fault_detector}}
+    ),
     ok = hg_domain:cleanup(),
-    supervisor:terminate_child(SupId, FD),
     [application:stop(App) || App <- cfg(apps, C)],
     exit(cfg(test_sup, C), shutdown).
 
@@ -764,7 +770,8 @@ no_route_found_for_payment(_C) ->
 
 -spec routing_depends_on_fault_detector(config()) -> test_return().
 
-routing_depends_on_fault_detector(_C) ->
+routing_depends_on_fault_detector(C) ->
+    SupPid = cfg(test_sup, C),
     Revision = hg_domain:head(),
 
     PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
@@ -779,9 +786,16 @@ routing_depends_on_fault_detector(_C) ->
     },
 
     ok = hg_context:save(hg_context:create()),
+    supervisor:terminate_child(SupPid, {ranch_listener_sup, {woody_server_thrift_http_handler,hg_dummy_fault_detector}}),
     Result0 = hg_routing:choose(payment, PaymentInstitution, VS, Revision),
+
+    supervisor:restart_child(SupPid, {ranch_listener_sup, {woody_server_thrift_http_handler,hg_dummy_fault_detector}}),
+    Result1 = hg_routing:choose(payment, PaymentInstitution, VS, Revision),
+
     ok = hg_context:cleanup(),
-    {ok, #domain_PaymentRoute{ provider = ?prv(201) }} = Result0.
+    {ok, #domain_PaymentRoute{ provider = ?prv(200) }} = Result0,
+    {ok, #domain_PaymentRoute{ provider = ?prv(201) }} = Result1,
+    {save_config, C}.
 
 routing_depends_on_fault_detector_fixture(Revision) ->
     PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),

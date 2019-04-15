@@ -603,13 +603,11 @@ notify_fault_detector(error, {_, ProviderRef, _}, OperationId) ->
 notify_fault_detector(start, {_, ProviderRef, _}, OperationId) ->
     ProviderID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
     case hg_fault_detector_client:register_operation(start, ProviderID, OperationId) of
-        ok ->
-            ok;
         not_found ->
             hg_fault_detector_client:init_service(ProviderID),
             hg_fault_detector_client:register_operation(start, ProviderID, OperationId);
-        error ->
-            error
+        Result ->
+            Result
     end.
 
 -spec choose_routing_predestination(payment()) -> hg_routing:route_predestination().

@@ -104,6 +104,7 @@ init_per_suite(C) ->
     Shop1ID = hg_ct_helper:create_party_and_shop(?cat(1), <<"RUB">>, ?tmpl(1), ?pinst(1), PartyClient),
     Shop2ID = hg_ct_helper:create_party_and_shop(?cat(1), <<"RUB">>, ?tmpl(1), ?pinst(1), PartyClient),
     {ok, SupPid} = supervisor:start_link(?MODULE, []),
+    {ok, _} = supervisor:start_child(SupPid, hg_dummy_fault_detector:child_spec()),
     _ = unlink(SupPid),
     C1 = [
         {apps, Apps},
@@ -116,15 +117,14 @@ init_per_suite(C) ->
         {test_sup, SupPid}
         | C
     ],
-    ok = start_proxies([
-                        {hg_dummy_provider, 1, C1},
-                        {hg_dummy_inspector, 2, C1}
-                       ]),
+    ok = start_proxies([ {hg_dummy_provider, 1, C1}, {hg_dummy_inspector, 2, C1} ]),
     C1.
 
 -spec end_per_suite(config()) -> config().
 end_per_suite(C) ->
+    SupPid = cfg(test_sup, C),
     ok = hg_domain:cleanup(),
+    supervisor:terminate_child(SupPid, {ranch_listener_sup, {woody_server_thrift_http_handler,hg_dummy_fault_detector}}),
     [application:stop(App) || App <- cfg(apps, C)].
 
 -spec init_per_group(group_name(), config()) -> config().

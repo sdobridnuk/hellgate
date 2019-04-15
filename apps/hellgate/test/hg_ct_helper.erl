@@ -128,7 +128,7 @@ start_app(hellgate = AppName) ->
             customer_management => <<"http://hellgate:8022/v1/processing/customer_management">>,
             recurrent_paytool   => <<"http://hellgate:8022/v1/processing/recpaytool">>,
             sequences           => <<"http://sequences:8022/v1/sequences">>,
-            fault_detector      => <<"http://127.0.01:19999/">>
+            fault_detector      => <<"http://127.0.01:20001/">>
         }},
         {proxy_opts, #{
             transport_opts => #{

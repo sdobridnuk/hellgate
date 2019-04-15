@@ -22,9 +22,9 @@
            operation_id = OpId,
            state        = State}).
 
--define(state_start(TimeStamp), #fault_detector_Start{ time_start = TimeStamp }).
--define(state_error(TimeStamp), #fault_detector_Error{ time_end   = TimeStamp }).
--define(state_finish(TimeStamp), #fault_detector_Finish{ time_end = TimeStamp }).
+-define(state_start(TimeStamp),  #fault_detector_Start{ time_start = TimeStamp }).
+-define(state_error(TimeStamp),  #fault_detector_Error{ time_end   = TimeStamp }).
+-define(state_finish(TimeStamp), #fault_detector_Finish{ time_end  = TimeStamp }).
 
 -export([build_config/2]).
 -export([build_config/3]).
@@ -35,7 +35,7 @@
 -export([get_statistics/1]).
 
 -export([register_operation/3]).
--export([register_operation/6]).
+-export([register_operation/4]).
 
 -type operation_status()        :: start | finish | error.
 -type service_stats()           :: fd_proto_fault_detector_thrift:'ServiceStatistics'().
@@ -125,19 +125,19 @@ get_statistics(ServiceIds) when is_list(ServiceIds) ->
 -spec register_operation(operation_status(), service_id(), operation_id()) ->
     ok | not_found | error.
 register_operation(start, ServiceId, OperationId) ->
-    OperationState  = {start, ?state_start(hg_datetime:format_now()}),
+    OperationState  = {start, ?state_start(hg_datetime:format_now())},
     Operation       = ?operation(OperationId, OperationState),
     ServiceConfig   = ?DEFAULT_CONFIG,
     do_register_operation(ServiceId, Operation, ServiceConfig);
 
 register_operation(finish, ServiceId, OperationId) ->
-    OperationState  = {finish, ?state_finish(hg_datetime:format_now()}),
+    OperationState  = {finish, ?state_finish(hg_datetime:format_now())},
     Operation       = ?operation(OperationId, OperationState),
     ServiceConfig   = ?DEFAULT_CONFIG,
     do_register_operation(ServiceId, Operation, ServiceConfig);
 
 register_operation(error, ServiceId, OperationId) ->
-    OperationState  = {error, ?state_error(hg_datetime:format_now()}),
+    OperationState  = {error, ?state_error(hg_datetime:format_now())},
     Operation       = ?operation(OperationId, OperationState),
     ServiceConfig   = ?DEFAULT_CONFIG,
     do_register_operation(ServiceId, Operation, ServiceConfig).
@@ -150,18 +150,18 @@ register_operation(error, ServiceId, OperationId) ->
 %%------------------------------------------------------------------------------
 -spec register_operation(operation_status(), service_id(), operation_id(), service_config()) ->
     ok | not_found | error.
-register_operation(start, ServiceId, OperationId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
-    OperationState  = {start, ?state_start(hg_datetime:format_now()}),
+register_operation(start, ServiceId, OperationId, ServiceConfig) ->
+    OperationState  = {start, ?state_start(hg_datetime:format_now())},
     Operation       = ?operation(OperationId, OperationState),
     do_register_operation(ServiceId, Operation, ServiceConfig);
 
-register_operation(finish, ServiceId, OperationId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
-    OperationState  = {finish, ?state_finish(hg_datetime:format_now()}),
+register_operation(finish, ServiceId, OperationId, ServiceConfig) ->
+    OperationState  = {finish, ?state_finish(hg_datetime:format_now())},
     Operation       = ?operation(OperationId, OperationState),
     do_register_operation(ServiceId, Operation, ServiceConfig);
 
-register_operation(error, ServiceId, OperationId, SlidingWindow, OpTimeLimit, PreAggrSize) ->
-    OperationState  = {error, ?state_error(hg_datetime:format_now()}),
+register_operation(error, ServiceId, OperationId, ServiceConfig) ->
+    OperationState  = {error, ?state_error(hg_datetime:format_now())},
     Operation       = ?operation(OperationId, OperationState),
     do_register_operation(ServiceId, Operation, ServiceConfig).
 
