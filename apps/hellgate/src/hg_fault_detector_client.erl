@@ -106,7 +106,7 @@ init_service(ServiceId, ServiceConfig) ->
 %% list of statistics on the services' reliability.
 %%
 %% Returns an empty list if the fault detector itself is unavailable. Services
-%% not initialised inthe fault detector will not be in the list.
+%% not initialised in the fault detector will not be in the list.
 %% @end
 %%------------------------------------------------------------------------------
 -spec get_statistics([service_id()]) -> [service_stats()].
