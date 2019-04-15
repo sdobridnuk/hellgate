@@ -71,8 +71,8 @@ build_config(SlidingWindow, OpTimeLimit) ->
 %% the optional pre-aggregation size argument.
 %% @end
 %%------------------------------------------------------------------------------
--spec build_config(sliding_window(), operation_time_limit(), pre_aggregation_size())
--> service_config().
+-spec build_config(sliding_window(), operation_time_limit(), pre_aggregation_size()) ->
+    service_config().
 build_config(SlidingWindow, OpTimeLimit, PreAggrSize) ->
     ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize).
 %%------------------------------------------------------------------------------
