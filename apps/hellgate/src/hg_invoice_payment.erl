@@ -592,25 +592,21 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
             end
     end.
 
-notify_fault_detector(start, {_, ProviderRef, _}, St) ->
-    Opts = get_opts(St),
-    OperationId = hg_utils:construct_complex_id([get_invoice_id(get_invoice(Opts)),
-                                                 get_payment_id(get_payment(St))]),
-    ProviderID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
+notify_fault_detector(start, #domain_PaymentRoute{provider = ProviderRef}, St) ->
+    OperationId = construct_payment_plan_id(St),
+    ProviderID  = erlang:integer_to_binary(ProviderRef#domain_ProviderRef.id),
     case hg_fault_detector_client:register_operation(start, ProviderID, OperationId) of
         not_found ->
-            hg_fault_detector_client:init_service(ProviderID),
-            hg_fault_detector_client:register_operation(start, ProviderID, OperationId);
+            _ = hg_fault_detector_client:init_service(ProviderID),
+            _ = hg_fault_detector_client:register_operation(start, ProviderID, OperationId);
         Result ->
             Result
     end;
 
-notify_fault_detector(Status, {_, ProviderRef, _}, St) ->
-    Opts = get_opts(St),
-    OperationId = hg_utils:construct_complex_id([get_invoice_id(get_invoice(Opts)),
-                                                 get_payment_id(get_payment(St))]),
-    ProviderID = integer_to_binary(ProviderRef#domain_ProviderRef.id),
-    hg_fault_detector_client:register_operation(Status, ProviderID, OperationId).
+notify_fault_detector(Status, #domain_PaymentRoute{provider = ProviderRef}, St) ->
+    OperationId = construct_payment_plan_id(St),
+    ProviderID  = erlang:integer_to_binary(ProviderRef#domain_ProviderRef.id),
+    _ = hg_fault_detector_client:register_operation(Status, ProviderID, OperationId).
 
 -spec choose_routing_predestination(payment()) -> hg_routing:route_predestination().
 choose_routing_predestination(#domain_InvoicePayment{make_recurrent = true}) ->
@@ -1039,7 +1035,7 @@ construct_refund_id(St) ->
     InvoiceID = get_invoice_id(get_invoice(get_opts(St))),
     SequenceID = make_refund_squence_id(PaymentID, InvoiceID),
     IntRefundID = hg_sequences:get_next(SequenceID),
-    integer_to_binary(IntRefundID).
+    erlang:integer_to_binary(IntRefundID).
 
 make_refund_squence_id(PaymentID, InvoiceID) ->
     <<InvoiceID/binary, <<"_">>/binary, PaymentID/binary>>.
@@ -1261,7 +1257,7 @@ get_adjustment_revision(Params) ->
     ).
 
 construct_adjustment_id(#st{adjustments = As}) ->
-    integer_to_binary(length(As) + 1).
+    erlang:integer_to_binary(length(As) + 1).
 
 -spec assert_activity(activity(), st()) -> ok | no_return().
 assert_activity(Activity, #st{activity = Activity}) ->

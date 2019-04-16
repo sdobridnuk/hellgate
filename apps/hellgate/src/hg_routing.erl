@@ -46,7 +46,9 @@
 
 choose(Predestination, PaymentInstitution, VS, Revision) ->
     % TODO not the optimal strategy
-    RejectContext0 = #{ varset => VS },
+    RejectContext0 = #{
+        varset => VS
+    },
     {Providers, RejectContext1} = collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContext0),
     ScoredProviders = score_providers_with_fault_detector(Providers),
     {Choices,   RejectContext2} = collect_routes(Predestination, ScoredProviders, VS, Revision, RejectContext1),
@@ -132,13 +134,13 @@ collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContex
 score_providers_with_fault_detector([]) -> [];
 score_providers_with_fault_detector([{ProviderRef, Provider}]) -> [{ProviderRef, Provider, 0.0}];
 score_providers_with_fault_detector(Providers) ->
-    ProviderIDs     = [integer_to_binary(PR#domain_ProviderRef.id) || {PR, _P} <- Providers],
+    ProviderIDs     = [erlang:integer_to_binary(PR#domain_ProviderRef.id) || {PR, _P} <- Providers],
     FDStats         = hg_fault_detector_client:get_statistics(ordsets:from_list(ProviderIDs)),
     ScoredProviders = [{PR, P, get_provider_fail_rate(PR, FDStats)} || {PR, P} <- Providers],
     ScoredProviders.
 
 get_provider_fail_rate(#domain_ProviderRef{id = ID}, FDStats) ->
-    ProviderID = integer_to_binary(ID),
+    ProviderID = erlang:integer_to_binary(ID),
     case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FDStats) of
         {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
             FailRate;
