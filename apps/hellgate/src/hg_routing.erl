@@ -33,26 +33,56 @@
 -type rejected_terminal() :: {terminal_ref(), Reason :: term()}.
 -type provider_ref() :: dmsl_domain_thrift:'ProviderRef'().
 -type terminal_ref() :: dmsl_domain_thrift:'TerminalRef'().
+-type fail_rate()    :: float().
+
+-type fail_rated_providers() :: [{provider_ref(), fail_rate()}].
 
 -export_type([route_predestination/0]).
 
 -spec choose(
     route_predestination(),
-    dmsl_domain_thrift:'PaymentInstitution'(),
+    fail_rated_providers(),
     hg_selector:varset(),
     hg_domain:revision()
 ) ->
     {ok, route()} | {error, {no_route_found, reject_context()}}.
 
-choose(Predestination, PaymentInstitution, VS, Revision) ->
+choose(Predestination, FailRatedProviders0, VS, Revision) ->
     % TODO not the optimal strategy
     RejectContext0 = #{
         varset => VS
     },
-    {Providers, RejectContext1} = collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContext0),
-    ScoredProviders = score_providers_with_fault_detector(Providers),
-    {Choices,   RejectContext2} = collect_routes(Predestination, ScoredProviders, VS, Revision, RejectContext1),
-    choose_route(Choices, VS, RejectContext2).
+    {FailRatedProviders1, RejectContext1} = collect_providers(
+        Predestination,
+        FailRatedProviders0,
+        VS,
+        Revision,
+        RejectContext0
+    ),
+    {FailRatedRoutes, RejectContext2} = collect_routes(
+        Predestination,
+        FailRatedProviders1,
+        VS,
+        Revision,
+        RejectContext1
+    ),
+    choose_route(FailRatedRoutes, VS, RejectContext2).
+
+collect_providers(Predestination, FailRatedProviders0, VS, Revision, RejectContext) ->
+    {FailRatedProviders1, RejectReasons} = lists:foldl(
+        fun ({ProviderRef, _FailRate} = FailRatedProvider, {Prvs, Reasons}) ->
+            try
+                P = acceptable_provider(Predestination, FailRatedProvider, VS, Revision),
+                {[P | Prvs], Reasons}
+             catch
+                ?rejected(Reason) ->
+                    {Prvs, [{ProviderRef, Reason} | Reasons]}
+            end
+        end,
+        {[], []},
+        FailRatedProviders0
+    ),
+    {FailRatedProviders1, RejectContext#{rejected_providers => RejectReasons}}.
 
 collect_routes(Predestination, Providers, VS, Revision, RejectContext) ->
     {Accepted, Rejected} = lists:foldl(
@@ -100,68 +130,51 @@ get_rec_paytools_terms(?route(ProviderRef, _), Revision) ->
 %% Score ∈ [0.0 .. 1.0]
 %% Higher score is better, e.g. route is more likely to be chosen.
 
-score_route(Route, VS) ->
-    score_risk_coverage(Route, VS).
+score_route({_Provider, {_TerminalRef, Terminal}, FailRate}, VS) ->
+    %% TODO: use failrate here
+    score_risk_coverage(Terminal, VS) * (1 - FailRate).
 
-score_risk_coverage({_Provider, {_TerminalRef, Terminal}, FailRate}, VS) ->
+score_risk_coverage(Terminal, VS) ->
     RiskScore = getv(risk_score, VS),
     RiskCoverage = Terminal#domain_Terminal.risk_coverage,
-    math:exp(-hg_inspector:compare_risk_score(RiskCoverage, RiskScore)) * (1.0 - FailRate).
+    %% TODO: remove failrate from here
+    math:exp(-hg_inspector:compare_risk_score(RiskCoverage, RiskScore)).
+    % math:exp(-hg_inspector:compare_risk_score(RiskCoverage, RiskScore)) * (1.0 - FailRate).
 
 %%
 
-collect_providers(Predestination, PaymentInstitution, VS, Revision, RejectContext) ->
-    ProviderSelector = PaymentInstitution#domain_PaymentInstitution.providers,
-    ProviderRefs0    = reduce(provider, ProviderSelector, VS, Revision),
-    ProviderRefs1    = ordsets:to_list(ProviderRefs0),
+%% TODO: move to invoice payment
+% score_providers_with_fault_detector([]) -> [];
+% score_providers_with_fault_detector([{ProviderRef, Provider}]) -> [{ProviderRef, Provider, 0.0}];
+% score_providers_with_fault_detector(Providers) ->
+%     ProviderIDs     = [erlang:integer_to_binary(PR#domain_ProviderRef.id) || {PR, _P} <- Providers],
+%     FDStats         = hg_fault_detector_client:get_statistics(ordsets:from_list(ProviderIDs)),
+%     ScoredProviders = [{PR, P, get_provider_fail_rate(PR, FDStats)} || {PR, P} <- Providers],
+%     ScoredProviders.
 
-    {Providers, RejectReasons} = lists:foldl(
-        fun (ProviderRef, {Prvs, Reasons}) ->
-            try
-                P = acceptable_provider(Predestination, ProviderRef, VS, Revision),
-                {[P | Prvs], Reasons}
-             catch
-                ?rejected(Reason) ->
-                    {Prvs, [{ProviderRef, Reason} | Reasons]}
-            end
-        end,
-        {[], []},
-        ProviderRefs1
-    ),
+% get_provider_fail_rate(#domain_ProviderRef{id = ID}, FDStats) ->
+%     ProviderID = erlang:integer_to_binary(ID),
+%     case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FDStats) of
+%         {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
+%             FailRate;
 
-    {Providers, RejectContext#{rejected_providers => RejectReasons}}.
+%         false ->
+%             0.0
+%     end.
 
-score_providers_with_fault_detector([]) -> [];
-score_providers_with_fault_detector([{ProviderRef, Provider}]) -> [{ProviderRef, Provider, 0.0}];
-score_providers_with_fault_detector(Providers) ->
-    ProviderIDs     = [erlang:integer_to_binary(PR#domain_ProviderRef.id) || {PR, _P} <- Providers],
-    FDStats         = hg_fault_detector_client:get_statistics(ordsets:from_list(ProviderIDs)),
-    ScoredProviders = [{PR, P, get_provider_fail_rate(PR, FDStats)} || {PR, P} <- Providers],
-    ScoredProviders.
-
-get_provider_fail_rate(#domain_ProviderRef{id = ID}, FDStats) ->
-    ProviderID = erlang:integer_to_binary(ID),
-    case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FDStats) of
-        {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
-            FailRate;
-
-        false ->
-            0.0
-    end.
-
-acceptable_provider(payment, ProviderRef, VS, Revision) ->
+acceptable_provider(payment, {ProviderRef, FailRate}, VS, Revision) ->
     Provider = #domain_Provider{
         payment_terms = Terms
     } = hg_domain:get(Revision, {provider, ProviderRef}),
     _ = acceptable_payment_terms(Terms, VS, Revision),
-    {ProviderRef, Provider};
-acceptable_provider(recurrent_paytool, ProviderRef, VS, Revision) ->
+    {ProviderRef, Provider, FailRate};
+acceptable_provider(recurrent_paytool, {ProviderRef, FailRate}, VS, Revision) ->
     Provider = #domain_Provider{
         recurrent_paytool_terms = Terms
     } = hg_domain:get(Revision, {provider, ProviderRef}),
     _ = acceptable_recurrent_paytool_terms(Terms, VS, Revision),
-    {ProviderRef, Provider};
-acceptable_provider(recurrent_payment, ProviderRef, VS, Revision) ->
+    {ProviderRef, Provider, FailRate};
+acceptable_provider(recurrent_payment, {ProviderRef, FailRate}, VS, Revision) ->
     % Use provider check combined from recurrent_paytool and payment check
     Provider = #domain_Provider{
         payment_terms = PaymentTerms,
@@ -169,7 +182,7 @@ acceptable_provider(recurrent_payment, ProviderRef, VS, Revision) ->
     } = hg_domain:get(Revision, {provider, ProviderRef}),
     _ = acceptable_payment_terms(PaymentTerms, VS, Revision),
     _ = acceptable_recurrent_paytool_terms(RecurrentTerms, VS, Revision),
-    {ProviderRef, Provider}.
+    {ProviderRef, Provider, FailRate}.
 
 %%
 

@@ -575,6 +575,7 @@ validate_limit(Cash, CashRange) ->
             throw_invalid_request(<<"Invalid amount, more than allowed maximum">>)
     end.
 
+%% TODO: receive scored providers
 choose_route(PaymentInstitution, VS, Revision, St) ->
     Payer = get_payment_payer(St),
     case get_predefined_route(Payer) of
@@ -583,7 +584,9 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
         undefined ->
             Payment = get_payment(St),
             Predestination = choose_routing_predestination(Payment),
-            case hg_routing:choose(Predestination, PaymentInstitution, VS, Revision) of
+            ProviderRefs = collect_providers(PaymentInstitution, VS, Revision),
+            FailRatedProviders = score_providers_with_fault_detector(ProviderRefs),
+            case hg_routing:choose(Predestination, FailRatedProviders, VS, Revision) of
                 {ok, _Route} = Result ->
                     Result;
                 {error, {no_route_found, RejectContext}} = Error ->
@@ -592,11 +595,49 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
             end
     end.
 
+collect_providers(PaymentInstitution, VS, Revision) ->
+    ProviderSelector = PaymentInstitution#domain_PaymentInstitution.providers,
+    ProviderRefs0    = reduce(provider, ProviderSelector, VS, Revision),
+    ProviderRefs1    = ordsets:to_list(ProviderRefs0),
+    ProviderRefs1.
+
+score_providers_with_fault_detector([]) -> [];
+score_providers_with_fault_detector([ProviderRef]) -> [{ProviderRef, 0.0}];
+score_providers_with_fault_detector(ProviderRefs) ->
+    ProviderIDs        = [build_fd_service_id(PR) || PR <- ProviderRefs],
+    FDStats            = hg_fault_detector_client:get_statistics(ProviderIDs),
+    FailRatedProviders = [{PR, get_provider_fail_rate(PR, FDStats)} || PR <- ProviderRefs],
+    FailRatedProviders.
+
+get_provider_fail_rate(ProviderRef, FDStats) ->
+    ProviderID = build_fd_service_id(ProviderRef),
+    case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FDStats) of
+        {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
+            FailRate;
+
+        false ->
+            0.0
+    end.
+
+build_fd_service_id(#domain_ProviderRef{id = ID}) ->
+    hg_utils:construct_complex_id([
+        <<"hellgate_provider_service">>,
+        erlang:integer_to_binary(ID)
+    ]).
+
+reduce(Name, S, VS, Revision) ->
+    case hg_selector:reduce(S, VS, Revision) of
+        {value, V} ->
+            V;
+        Ambiguous ->
+            error({misconfiguration, {'Could not reduce selector to a value', {Name, Ambiguous}}})
+    end.
+
 notify_fault_detector(start, #domain_PaymentRoute{provider = ProviderRef}, St) ->
     OperationId = construct_payment_plan_id(St),
     ProviderID  = erlang:integer_to_binary(ProviderRef#domain_ProviderRef.id),
     case hg_fault_detector_client:register_operation(start, ProviderID, OperationId) of
-        not_found ->
+        {error, not_found} ->
             _ = hg_fault_detector_client:init_service(ProviderID),
             _ = hg_fault_detector_client:register_operation(start, ProviderID, OperationId);
         Result ->
@@ -1437,7 +1478,7 @@ process_routing(Action, St) ->
     VS1 = VS0#{risk_score => RiskScore},
     case choose_route(PaymentInstitution, VS1, Revision, St) of
         {ok, Route} ->
-            notify_fault_detector(start, Route, St),
+            _ = notify_fault_detector(start, Route, St),
             process_cash_flow_building(Route, VS1, Payment, PaymentInstitution, Revision, Opts, Events0, Action);
         {error, {no_route_found, _Details}} ->
             Failure = {failure, payproc_errors:construct('PaymentFailure',

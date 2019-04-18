@@ -6,6 +6,7 @@
 
 -include_lib("dmsl/include/dmsl_payment_processing_thrift.hrl").
 -include_lib("dmsl/include/dmsl_proxy_provider_thrift.hrl").
+-include_lib("fault_detector_proto/include/fd_proto_fault_detector_thrift.hrl").
 
 -define(NS, <<"recurrent_paytools">>).
 
@@ -202,8 +203,10 @@ init([PaymentTool, Params], #{id := RecPaymentToolID}) ->
     RecPaymentTool = create_rec_payment_tool(RecPaymentToolID, CreatedAt, Params, Revision),
     VS0 = collect_varset(Party, Shop, #{payment_tool => PaymentTool}),
     {RiskScore     ,  VS1} = validate_risk_score(inspect(RecPaymentTool, VS0), VS0),
+    ProviderRefs = collect_providers(PaymentInstitution, VS1, Revision),
+    FailRatedProviders = score_providers_with_fault_detector(ProviderRefs),
     Route = validate_route(
-        hg_routing:choose(recurrent_paytool, PaymentInstitution, VS1, Revision),
+        hg_routing:choose(recurrent_paytool, FailRatedProviders, VS1, Revision),
         RecPaymentTool
     ),
     {ok, {Changes, Action}} = start_session(),
@@ -211,6 +214,44 @@ init([PaymentTool, Params], #{id := RecPaymentToolID}) ->
         changes => [?recurrent_payment_tool_has_created(RecPaymentTool, RiskScore, Route) | Changes],
         action => Action
     }).
+
+collect_providers(PaymentInstitution, VS, Revision) ->
+    ProviderSelector = PaymentInstitution#domain_PaymentInstitution.providers,
+    ProviderRefs0    = reduce(provider, ProviderSelector, VS, Revision),
+    ProviderRefs1    = ordsets:to_list(ProviderRefs0),
+    ProviderRefs1.
+
+score_providers_with_fault_detector([]) -> [];
+score_providers_with_fault_detector([ProviderRef]) -> [{ProviderRef, 0.0}];
+score_providers_with_fault_detector(ProviderRefs) ->
+    ProviderIDs        = [build_fd_service_id(PR) || PR <- ProviderRefs],
+    FDStats            = hg_fault_detector_client:get_statistics(ProviderIDs),
+    FailRatedProviders = [{PR, get_provider_fail_rate(PR, FDStats)} || PR <- ProviderRefs],
+    FailRatedProviders.
+
+get_provider_fail_rate(ProviderRef, FDStats) ->
+    ProviderID = build_fd_service_id(ProviderRef),
+    case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FDStats) of
+        {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
+            FailRate;
+
+        false ->
+            0.0
+    end.
+
+build_fd_service_id(#domain_ProviderRef{id = ID}) ->
+    hg_utils:construct_complex_id([
+        <<"hellgate_provider_service">>,
+        erlang:integer_to_binary(ID)
+    ]).
+
+reduce(Name, S, VS, Revision) ->
+    case hg_selector:reduce(S, VS, Revision) of
+        {value, V} ->
+            V;
+        Ambiguous ->
+            error({misconfiguration, {'Could not reduce selector to a value', {Name, Ambiguous}}})
+    end.
 
 get_party_shop(Params) ->
     PartyID = Params#payproc_RecurrentPaymentToolParams.party_id,
