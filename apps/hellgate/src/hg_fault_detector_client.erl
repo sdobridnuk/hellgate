@@ -7,9 +7,9 @@
 %% TODO move config to a proper place
 -define(DEFAULT_CONFIG,
         #fault_detector_ServiceConfig{
-           sliding_window       = 60000,
-           operation_time_limit = 10000,
-           pre_aggregation_size = 2}).
+           sliding_window       = genlib_app:env(hellgate, fault_detector_default_sliding_window, 60000),
+           operation_time_limit = genlib_app:env(hellgate, fault_detector_default_operation_time_limit, 10000),
+           pre_aggregation_size = genlib_app:env(hellgate, fault_detector_default_pre_aggregation_size, 2)}).
 
 -define(service_config(SW, OTL, PAS),
         #fault_detector_ServiceConfig{
@@ -75,6 +75,7 @@ build_config(SlidingWindow, OpTimeLimit) ->
     service_config().
 build_config(SlidingWindow, OpTimeLimit, PreAggrSize) ->
     ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize).
+
 %%------------------------------------------------------------------------------
 %% @doc
 %% `init_service/1` receives a service id and initialises a fault detector
@@ -84,10 +85,9 @@ build_config(SlidingWindow, OpTimeLimit, PreAggrSize) ->
 %% @end
 %%------------------------------------------------------------------------------
 -spec init_service(service_id()) ->
-    ok | error.
+    {ok, initialised} | {error, any()}.
 init_service(ServiceId) ->
-    ServiceConfig = ?DEFAULT_CONFIG,
-    do_init_service(ServiceId, ServiceConfig).
+    do_init_service(ServiceId, ?DEFAULT_CONFIG).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -96,7 +96,7 @@ init_service(ServiceId) ->
 %% @end
 %%------------------------------------------------------------------------------
 -spec init_service(service_id(), service_config()) ->
-    ok | error.
+    {ok, initialised} | {error, any()}.
 init_service(ServiceId, ServiceConfig) ->
     do_init_service(ServiceId, ServiceConfig).
 
@@ -119,28 +119,13 @@ get_statistics(ServiceIds) when is_list(ServiceIds) ->
 %% operation status which is one of the following atoms: `start`, `finish`, `error`,
 %% respectively for registering a start and either a successful or an erroneous
 %% end of an operation. The data is then used to aggregate statistics on a
-%% service's availability that is available via `get_statistics/1`.
+%% service's availability that is accessible via `get_statistics/1`.
 %% @end
 %%------------------------------------------------------------------------------
 -spec register_operation(operation_status(), service_id(), operation_id()) ->
-    ok | not_found | error.
-register_operation(start, ServiceId, OperationId) ->
-    OperationState  = {start, ?state_start(hg_datetime:format_now())},
-    Operation       = ?operation(OperationId, OperationState),
-    ServiceConfig   = ?DEFAULT_CONFIG,
-    do_register_operation(ServiceId, Operation, ServiceConfig);
-
-register_operation(finish, ServiceId, OperationId) ->
-    OperationState  = {finish, ?state_finish(hg_datetime:format_now())},
-    Operation       = ?operation(OperationId, OperationState),
-    ServiceConfig   = ?DEFAULT_CONFIG,
-    do_register_operation(ServiceId, Operation, ServiceConfig);
-
-register_operation(error, ServiceId, OperationId) ->
-    OperationState  = {error, ?state_error(hg_datetime:format_now())},
-    Operation       = ?operation(OperationId, OperationState),
-    ServiceConfig   = ?DEFAULT_CONFIG,
-    do_register_operation(ServiceId, Operation, ServiceConfig).
+    {ok, registered} | {error, not_found} | {error, any()}.
+register_operation(Status, ServiceId, OperationId) ->
+    register_operation(Status, ServiceId, OperationId, ?DEFAULT_CONFIG).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -149,56 +134,53 @@ register_operation(error, ServiceId, OperationId) ->
 %% @end
 %%------------------------------------------------------------------------------
 -spec register_operation(operation_status(), service_id(), operation_id(), service_config()) ->
-    ok | not_found | error.
-register_operation(start, ServiceId, OperationId, ServiceConfig) ->
-    OperationState  = {start, ?state_start(hg_datetime:format_now())},
-    Operation       = ?operation(OperationId, OperationState),
-    do_register_operation(ServiceId, Operation, ServiceConfig);
-
-register_operation(finish, ServiceId, OperationId, ServiceConfig) ->
-    OperationState  = {finish, ?state_finish(hg_datetime:format_now())},
-    Operation       = ?operation(OperationId, OperationState),
-    do_register_operation(ServiceId, Operation, ServiceConfig);
-
-register_operation(error, ServiceId, OperationId, ServiceConfig) ->
-    OperationState  = {error, ?state_error(hg_datetime:format_now())},
-    Operation       = ?operation(OperationId, OperationState),
+    {ok, registered} | {error, not_found} | {error, any()}.
+register_operation(Status, ServiceId, OperationId, ServiceConfig) ->
+    OperationState = case Status of
+        start  -> {Status, ?state_start(hg_datetime:format_now())};
+        error  -> {Status, ?state_error(hg_datetime:format_now())};
+        finish -> {Status, ?state_finish(hg_datetime:format_now())}
+    end,
+    Operation = ?operation(OperationId, OperationState),
     do_register_operation(ServiceId, Operation, ServiceConfig).
 
 %% PRIVATE
 
 do_init_service(ServiceId, ServiceConfig) ->
-    try hg_woody_wrapper:call(
-          fault_detector,
-          'InitService',
-          [ServiceId, ServiceConfig]
-         ) of
-        {ok, _Result} -> ok;
-        _Result       -> error
+    Args = [ServiceId, ServiceConfig],
+    Opts = #{url => genlib:to_binary(maps:get(fault_detector, genlib_app:env(hellgate, services)))},
+    Deadline = woody_deadline:from_timeout(genlib_app:env(hellgate, fault_detector_timeout, infinity)),
+    try hg_woody_wrapper:call(fault_detector, 'InitService', Args, Opts, Deadline) of
+        {ok, _Result} -> {ok, initialised}
     catch
-        _:_ -> error
+        _Error:Reason ->
+            _ = lager:error("Unable to init service ~p in fault detector.\n~p", [ServiceId, Reason]),
+            {error, Reason}
     end.
 
 do_get_statistics(ServiceIds) ->
-    try hg_woody_wrapper:call(
-          fault_detector,
-          'GetStatistics',
-          [ServiceIds]
-         ) of
-        {ok, Stats} -> Stats;
-        _Result     -> []
+    Args = [ServiceIds],
+    Opts = #{url => genlib:to_binary(maps:get(fault_detector, genlib_app:env(hellgate, services)))},
+    Deadline = woody_deadline:from_timeout(genlib_app:env(hellgate, fault_detector_timeout, infinity)),
+    try hg_woody_wrapper:call(fault_detector, 'GetStatistics', Args, Opts, Deadline) of
+        {ok, Stats} -> Stats
     catch
-        _:_ -> []
+        _Error:Reason ->
+            _ = lager:error("Unable to get statistics from fault detector.\n~p", [Reason]),
+            []
     end.
 
 do_register_operation(ServiceId, Operation, ServiceConfig) ->
-    try hg_woody_wrapper:call(
-          fault_detector,
-          'RegisterOperation',
-          [ServiceId, Operation, ServiceConfig]
-         ) of
-        {ok, _Result} -> ok;
-        {exception, #fault_detector_ServiceNotFoundException{}} -> not_found
+    Args = [ServiceId, Operation, ServiceConfig],
+    Opts = #{url => genlib:to_binary(maps:get(fault_detector, genlib_app:env(hellgate, services)))},
+    Deadline = woody_deadline:from_timeout(genlib_app:env(hellgate, fault_detector_timeout, infinity)),
+    try hg_woody_wrapper:call(fault_detector, 'RegisterOperation', Args, Opts, Deadline) of
+        {ok, _Result} ->
+            {ok, registered};
+        {exception, #fault_detector_ServiceNotFoundException{}} ->
+            {error, not_found}
     catch
-        _:_ -> error
+        _Error:Reason ->
+            _ = lager:error("Unable to register operation ~p, for service ~p in fault detector.\n~p", [Operation, ServiceId, Reason]),
+            {error, Reason}
     end.
