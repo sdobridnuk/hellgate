@@ -33,9 +33,7 @@
 -export([overdue_invoice_cancellation/1]).
 -export([invoice_cancellation_after_payment_timeout/1]).
 -export([invalid_payment_amount/1]).
--export([no_route_found_for_payment/1]).
 
--export([routing_depends_on_fault_detector/1]).
 -export([payment_start_idempotency/1]).
 -export([payment_success/1]).
 -export([payment_success_empty_cvv/1]).
@@ -173,10 +171,6 @@ groups() ->
             {group, repair_scenarios}
         ]},
 
-        {routing, [], [
-            routing_depends_on_fault_detector
-        ]},
-
         {base_payments, [parallel], [
             invoice_creation_idempotency,
             invalid_invoice_shop,
@@ -190,7 +184,6 @@ groups() ->
             overdue_invoice_cancellation,
             invoice_cancellation_after_payment_timeout,
             invalid_payment_amount,
-            no_route_found_for_payment,
             payment_start_idempotency,
             payment_success,
             payment_success_empty_cvv,
@@ -383,7 +376,6 @@ end_per_group(_Group, _C) ->
 init_per_testcase(Name, C) when
     Name == payment_adjustment_success;
     Name == rounding_cashflow_volume;
-    Name == routing_depends_on_fault_detector;
     Name == payments_w_bank_card_issuer_conditions;
     Name == payments_w_bank_conditions;
     Name == invalid_permit_partial_capture_in_service;
@@ -395,8 +387,6 @@ init_per_testcase(Name, C) when
             get_adjustment_fixture(Revision);
         rounding_cashflow_volume ->
             get_cashflow_rounding_fixture(Revision);
-        routing_depends_on_fault_detector ->
-            routing_depends_on_fault_detector_fixture(Revision);
         payments_w_bank_card_issuer_conditions ->
             payments_w_bank_card_issuer_conditions_fixture(Revision);
         payments_w_bank_conditions ->
@@ -736,190 +726,6 @@ invalid_payment_amount(C) ->
     {exception, #'InvalidRequest'{
         errors = [<<"Invalid amount, more", _/binary>>]
     }} = hg_client_invoicing:start_payment(InvoiceID2, PaymentParams, Client).
-
--spec no_route_found_for_payment(config()) -> test_return().
-
-no_route_found_for_payment(_C) ->
-    Revision = hg_domain:head(),
-    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
-    VS1 = #{
-        category        => ?cat(1),
-        currency        => ?cur(<<"RUB">>),
-        cost            => ?cash(1000, <<"RUB">>),
-        payment_tool    => {bank_card, #domain_BankCard{}},
-        party_id        => <<"12345">>,
-        risk_score      => low,
-        flow            => instant
-    },
-    {error, {no_route_found, #{
-        varset := VS1,
-        rejected_providers := [
-            {?prv(3), {'PaymentsProvisionTerms', payment_tool}},
-            {?prv(2), {'PaymentsProvisionTerms', category}},
-            {?prv(1), {'PaymentsProvisionTerms', payment_tool}}
-        ],
-        rejected_terminals := []
-    }}} = hg_routing:choose(payment, PaymentInstitution, VS1, Revision),
-    VS2 = VS1#{
-        payment_tool => {payment_terminal, #domain_PaymentTerminal{terminal_type = euroset}}
-    },
-    {ok, #domain_PaymentRoute{
-        provider = ?prv(3),
-        terminal = ?trm(10)
-    }} = hg_routing:choose(payment, PaymentInstitution, VS2, Revision).
-
--spec routing_depends_on_fault_detector(config()) -> test_return().
-
-routing_depends_on_fault_detector(C) ->
-    SupPid = cfg(test_sup, C),
-    Revision = hg_domain:head(),
-
-    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
-    VS = #{
-        category        => ?cat(1),
-        currency        => ?cur(<<"RUB">>),
-        cost            => ?cash(1000, <<"RUB">>),
-        payment_tool    => {payment_terminal, #domain_PaymentTerminal{terminal_type = euroset}},
-        party_id        => <<"12345">>,
-        risk_score      => low,
-        flow            => instant
-    },
-
-    ok = hg_context:save(hg_context:create()),
-    supervisor:terminate_child(
-        SupPid,
-        {ranch_listener_sup, {woody_server_thrift_http_handler, hg_dummy_fault_detector}}
-    ),
-    Result0 = hg_routing:choose(payment, PaymentInstitution, VS, Revision),
-
-    supervisor:restart_child(
-        SupPid,
-        {ranch_listener_sup, {woody_server_thrift_http_handler, hg_dummy_fault_detector}}
-    ),
-    Result1 = hg_routing:choose(payment, PaymentInstitution, VS, Revision),
-
-    ok = hg_context:cleanup(),
-    {ok, #domain_PaymentRoute{ provider = ?prv(200) }} = Result0,
-    {ok, #domain_PaymentRoute{ provider = ?prv(201) }} = Result1,
-    {save_config, C}.
-
-routing_depends_on_fault_detector_fixture(Revision) ->
-    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
-    [
-        {payment_institution, #domain_PaymentInstitutionObject{
-            ref = ?pinst(1),
-            data = PaymentInstitution#domain_PaymentInstitution{
-                providers = {value, ?ordset([
-                    ?prv(200),
-                    ?prv(201)
-                ])}
-            }}
-        },
-        {provider, #domain_ProviderObject{
-            ref = ?prv(200),
-            data = #domain_Provider{
-                name = <<"Biba">>,
-                description = <<"Payment terminal provider">>,
-                terminal = {value, [?trm(111)]},
-                proxy = #domain_Proxy{
-                    ref = ?prx(1),
-                    additional = #{
-                        <<"override">> => <<"biba">>
-                    }
-                },
-                abs_account = <<"0987654321">>,
-                accounts = hg_ct_fixture:construct_provider_account_set([?cur(<<"RUB">>)]),
-                payment_terms = #domain_PaymentsProvisionTerms{
-                    currencies = {value, ?ordset([
-                        ?cur(<<"RUB">>)
-                    ])},
-                    categories = {value, ?ordset([
-                        ?cat(1)
-                    ])},
-                    payment_methods = {value, ?ordset([
-                        ?pmt(payment_terminal, euroset),
-                        ?pmt(digital_wallet, qiwi)
-                    ])},
-                    cash_limit = {value, ?cashrng(
-                        {inclusive, ?cash(    1000, <<"RUB">>)},
-                        {exclusive, ?cash(10000000, <<"RUB">>)}
-                    )},
-                    cash_flow = {value, [
-                        ?cfpost(
-                            {provider, settlement},
-                            {merchant, settlement},
-                            ?share(1, 1, operation_amount)
-                        ),
-                        ?cfpost(
-                            {system, settlement},
-                            {provider, settlement},
-                            ?share(21, 1000, operation_amount)
-                        )
-                    ]}
-                }
-            }
-        }},
-        {terminal, #domain_TerminalObject{
-            ref = ?trm(111),
-            data = #domain_Terminal{
-                name = <<"Payment Terminal Terminal">>,
-                description = <<"Euroset">>,
-                risk_coverage = low
-            }
-        }},
-        {provider, #domain_ProviderObject{
-            ref = ?prv(201),
-            data = #domain_Provider{
-                name = <<"Boba">>,
-                description = <<"Payment terminal provider">>,
-                terminal = {value, [?trm(222)]},
-                proxy = #domain_Proxy{
-                    ref = ?prx(1),
-                    additional = #{
-                        <<"override">> => <<"biba">>
-                    }
-                },
-                abs_account = <<"0987654321">>,
-                accounts = hg_ct_fixture:construct_provider_account_set([?cur(<<"RUB">>)]),
-                payment_terms = #domain_PaymentsProvisionTerms{
-                    currencies = {value, ?ordset([
-                        ?cur(<<"RUB">>)
-                    ])},
-                    categories = {value, ?ordset([
-                        ?cat(1)
-                    ])},
-                    payment_methods = {value, ?ordset([
-                        ?pmt(payment_terminal, euroset),
-                        ?pmt(digital_wallet, qiwi)
-                    ])},
-                    cash_limit = {value, ?cashrng(
-                        {inclusive, ?cash(    1000, <<"RUB">>)},
-                        {exclusive, ?cash(10000000, <<"RUB">>)}
-                    )},
-                    cash_flow = {value, [
-                        ?cfpost(
-                            {provider, settlement},
-                            {merchant, settlement},
-                            ?share(1, 1, operation_amount)
-                        ),
-                        ?cfpost(
-                            {system, settlement},
-                            {provider, settlement},
-                            ?share(21, 1000, operation_amount)
-                        )
-                    ]}
-                }
-            }
-        }},
-        {terminal, #domain_TerminalObject{
-            ref = ?trm(222),
-            data = #domain_Terminal{
-                name = <<"Payment Terminal Terminal">>,
-                description = <<"Euroset">>,
-                risk_coverage = high
-            }
-        }}
-    ].
 
 -spec payment_start_idempotency(config()) -> test_return().
 
