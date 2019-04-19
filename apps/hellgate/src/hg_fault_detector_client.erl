@@ -40,6 +40,9 @@
 -export([build_config/2]).
 -export([build_config/3]).
 
+-export([build_service_id/2]).
+-export([build_operation_id/2]).
+
 -export([init_service/1]).
 -export([init_service/2]).
 
@@ -86,6 +89,33 @@ build_config(SlidingWindow, OpTimeLimit) ->
     service_config().
 build_config(SlidingWindow, OpTimeLimit, PreAggrSize) ->
     ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize).
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% `build_service_id/2` is a helper function for building service IDs
+%% @end
+%%------------------------------------------------------------------------------
+-spec build_service_id(binary(), binary()) -> binary().
+build_service_id(ServiceType, ID) ->
+    hg_utils:construct_complex_id([
+        <<"hellgate_service">>,
+        ServiceType,
+        ID
+    ]).
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% `build_operation_id_id/3` is a helper function for building operation IDs
+%% @end
+%%------------------------------------------------------------------------------
+-spec build_operation_id(binary(), binary()) -> binary().
+build_operation_id(OperationType, ID) ->
+    hg_utils:construct_complex_id([
+        <<"hellgate_operation">>,
+        OperationType,
+        ID,
+        erlang:integer_to_binary(os:system_time())
+    ]).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -167,7 +197,8 @@ do_call('InitService', Args, Opts, Deadline) ->
         {ok, _Result} -> {ok, initialised}
     catch
         _Error:Reason ->
-            String = "Unable to init service ~p in fault detector.\n~p",
+            [ServiceId | _] = Args,
+            String = "Unable to init service ~p with config ~p in fault detector.\n~p",
             _ = lager:error(String, [ServiceId, Reason]),
             {error, Reason}
     end;
@@ -188,7 +219,8 @@ do_call('RegisterOperation', Args, Opts, Deadline) ->
             {error, not_found}
     catch
         _Error:Reason ->
-            String = "Unable to register operation ~p, for service ~p in fault detector.\n~p",
-            _ = lager:error(String, [Operation, ServiceId, Reason]),
+            [ServiceId, OperationId | _] = Args,
+            String = "Unable to register operation ~p for service ~p in fault detector.\n~p",
+            _ = lager:error(String, [OperationId, ServiceId, Reason]),
             {error, Reason}
     end.

@@ -581,10 +581,9 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
         {ok, _Route} = Result ->
             Result;
         undefined ->
-            Payment = get_payment(St),
-            Predestination = choose_routing_predestination(Payment),
-            ProviderRefs = collect_providers(PaymentInstitution, VS, Revision),
-            FailRatedProviders = score_providers_with_fault_detector(ProviderRefs),
+            Payment            = get_payment(St),
+            Predestination     = choose_routing_predestination(Payment),
+            FailRatedProviders = hg_routing:gather_fail_rated_providers(PaymentInstitution, VS, Revision),
             case hg_routing:choose(Predestination, FailRatedProviders, VS, Revision) of
                 {ok, _Route} = Result ->
                     Result;
@@ -592,30 +591,6 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
                     _ = log_reject_context(RejectContext),
                     Error
             end
-    end.
-
-collect_providers(PaymentInstitution, VS, Revision) ->
-    ProviderSelector = PaymentInstitution#domain_PaymentInstitution.providers,
-    ProviderRefs0    = reduce(provider, ProviderSelector, VS, Revision),
-    ProviderRefs1    = ordsets:to_list(ProviderRefs0),
-    ProviderRefs1.
-
-score_providers_with_fault_detector([]) -> [];
-score_providers_with_fault_detector([ProviderRef]) -> [{ProviderRef, 0.0}];
-score_providers_with_fault_detector(ProviderRefs) ->
-    ServiceIDs         = [build_fd_service_id(PR) || PR <- ProviderRefs],
-    FDStats            = hg_fault_detector_client:get_statistics(ServiceIDs),
-    FailRatedProviders = [{PR, get_provider_fail_rate(PR, FDStats)} || PR <- ProviderRefs],
-    FailRatedProviders.
-
-get_provider_fail_rate(ProviderRef, FDStats) ->
-    ProviderID = build_fd_service_id(ProviderRef),
-    case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FDStats) of
-        {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
-            FailRate;
-
-        false ->
-            0.0
     end.
 
 notify_fault_detector(start, ServiceID, OperationID) ->
@@ -628,29 +603,6 @@ notify_fault_detector(start, ServiceID, OperationID) ->
     end;
 notify_fault_detector(Status, ServiceID, OperationID) ->
     hg_fault_detector_client:register_operation(Status, ServiceID, OperationID).
-
-build_fd_service_id(#domain_ProviderRef{id = ID}) ->
-    hg_utils:construct_complex_id([
-        <<"hellgate_adapter_availability_service">>,
-        erlang:integer_to_binary(ID)
-    ]).
-
-build_fd_operation_id(St) ->
-    Opts = get_opts(St),
-    hg_utils:construct_complex_id([
-        <<"hellgate_adapter_availability_operation">>,
-        get_invoice_id(get_invoice(Opts)),
-        get_payment_id(get_payment(St)),
-        erlang:integer_to_binary(os:system_time())
-    ]).
-
-reduce(Name, S, VS, Revision) ->
-    case hg_selector:reduce(S, VS, Revision) of
-        {value, V} ->
-            V;
-        Ambiguous ->
-            error({misconfiguration, {'Could not reduce selector to a value', {Name, Ambiguous}}})
-    end.
 
 -spec choose_routing_predestination(payment()) -> hg_routing:route_predestination().
 choose_routing_predestination(#domain_InvoicePayment{make_recurrent = true}) ->
@@ -2537,8 +2489,17 @@ issue_proxy_call(Func, Args, St) ->
     CallOpts    = get_call_options(St),
     Route       = get_route(St),
     ProviderRef = get_route_provider_ref(Route),
-    ServiceID   = build_fd_service_id(ProviderRef),
-    OperationID = build_fd_operation_id(St),
+    ProviderID  = ProviderRef#domain_ProviderRef.id,
+    BinaryID    = erlang:integer_to_binary(ProviderID),
+    ServiceType = <<"adapter_availability">>,
+    ServiceID   = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
+
+    OpType      = <<"invoice_payment">>,
+    Opts        = get_opts(St),
+    InvoiceID   = get_invoice_id(get_invoice(Opts)),
+    PaymentID   = get_payment_id(get_payment(St)),
+    CompoundID  = <<InvoiceID/binary, <<"_">>/binary, PaymentID/binary>>,
+    OperationID = hg_fault_detector_client:build_operation_id(OpType, CompoundID),
     _ = notify_fault_detector(start, ServiceID, OperationID),
     try hg_woody_wrapper:call(proxy_provider, Func, Args, CallOpts) of
         Result ->

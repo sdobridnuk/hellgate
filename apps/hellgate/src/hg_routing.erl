@@ -5,6 +5,7 @@
 -include_lib("fault_detector_proto/include/fd_proto_fault_detector_thrift.hrl").
 
 -export([choose/4]).
+-export([gather_fail_rated_providers/3]).
 -export([get_payments_terms/2]).
 -export([get_rec_paytools_terms/2]).
 
@@ -19,6 +20,7 @@
                | dmsl_domain_thrift:'RecurrentPaytoolsProvisionTerms'()
                | undefined.
 
+-type payment_institution()  :: dmsl_domain_thrift:'PaymentInstitution'().
 -type route()                :: dmsl_domain_thrift:'PaymentRoute'().
 -type route_predestination() :: payment | recurrent_paytool | recurrent_payment.
 
@@ -52,14 +54,14 @@ choose(Predestination, FailRatedProviders0, VS, Revision) ->
     RejectContext0 = #{
         varset => VS
     },
-    {FailRatedProviders1, RejectContext1} = collect_providers(
+    {FailRatedProviders1, RejectContext1} = select_providers(
         Predestination,
         FailRatedProviders0,
         VS,
         Revision,
         RejectContext0
     ),
-    {FailRatedRoutes, RejectContext2} = collect_routes(
+    {FailRatedRoutes, RejectContext2} = select_routes(
         Predestination,
         FailRatedProviders1,
         VS,
@@ -68,7 +70,7 @@ choose(Predestination, FailRatedProviders0, VS, Revision) ->
     ),
     choose_route(FailRatedRoutes, VS, RejectContext2).
 
-collect_providers(Predestination, FailRatedProviders0, VS, Revision, RejectContext) ->
+select_providers(Predestination, FailRatedProviders0, VS, Revision, RejectContext) ->
     {FailRatedProviders1, RejectReasons} = lists:foldl(
         fun ({ProviderRef, _FailRate} = FailRatedProvider, {Prvs, Reasons}) ->
             try
@@ -84,7 +86,7 @@ collect_providers(Predestination, FailRatedProviders0, VS, Revision, RejectConte
     ),
     {FailRatedProviders1, RejectContext#{rejected_providers => RejectReasons}}.
 
-collect_routes(Predestination, Providers, VS, Revision, RejectContext) ->
+select_routes(Predestination, Providers, VS, Revision, RejectContext) ->
     {Accepted, Rejected} = lists:foldl(
         fun (Provider, {AcceptedTerminals, RejectedTerminals}) ->
             {Accepts, Rejects} = collect_routes_for_provider(Predestination, Provider, VS, Revision),
@@ -110,6 +112,42 @@ export_route({ProviderRef, {TerminalRef, _Terminal}}) ->
     % TODO shouldn't we provide something along the lines of `get_provider_ref/1`,
     %      `get_terminal_ref/1` instead?
     ?route(ProviderRef, TerminalRef).
+
+-spec gather_fail_rated_providers(
+    payment_institution(),
+    hg_selector:varset(),
+    hg_domain:revision()
+) ->
+    fail_rated_providers().
+gather_fail_rated_providers(PaymentInstitution, VS, Revision) ->
+    ProviderSelector   = PaymentInstitution#domain_PaymentInstitution.providers,
+    ProviderRefs0      = reduce(provider, ProviderSelector, VS, Revision),
+    ProviderRefs1      = ordsets:to_list(ProviderRefs0),
+    FailRatedProviders = score_providers_with_fault_detector(ProviderRefs1),
+    FailRatedProviders.
+
+score_providers_with_fault_detector([]) -> [];
+score_providers_with_fault_detector([ProviderRef]) -> [{ProviderRef, 0.0}];
+score_providers_with_fault_detector(ProviderRefs) ->
+    ServiceIDs         = [build_fd_service_id(PR) || PR <- ProviderRefs],
+    FDStats            = hg_fault_detector_client:get_statistics(ServiceIDs),
+    FailRatedProviders = [{PR, get_provider_fail_rate(PR, FDStats)} || PR <- ProviderRefs],
+    FailRatedProviders.
+
+get_provider_fail_rate(ProviderRef, FDStats) ->
+    ProviderID = build_fd_service_id(ProviderRef),
+    case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FDStats) of
+        {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
+            FailRate;
+
+        false ->
+            0.0
+    end.
+
+build_fd_service_id(#domain_ProviderRef{id = ID}) ->
+    ServiceType = <<"adapter_availability">>,
+    BinaryId = erlang:integer_to_binary(ID),
+    hg_fault_detector_client:build_service_id(ServiceType, BinaryId).
 
 -spec get_payments_terms(route(), hg_domain:revision()) -> terms().
 
