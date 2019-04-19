@@ -154,7 +154,7 @@ do_init_service(ServiceId, ServiceConfig) ->
         {ok, _Result} -> {ok, initialised}
     catch
         _Error:Reason ->
-            String = "Unable to init service ~p in fault detector.\n~p"
+            String = "Unable to init service ~p in fault detector.\n~p",
             _ = lager:error(String, [ServiceId, Reason]),
             {error, Reason}
     end.
@@ -167,7 +167,7 @@ do_get_statistics(ServiceIds) ->
         {ok, Stats} -> Stats
     catch
         _Error:Reason ->
-            String = "Unable to get statistics from fault detector.\n~p"
+            String = "Unable to get statistics from fault detector.\n~p",
             _ = lager:error(String, [Reason]),
             []
     end.
