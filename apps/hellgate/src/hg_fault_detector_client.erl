@@ -154,7 +154,8 @@ do_init_service(ServiceId, ServiceConfig) ->
         {ok, _Result} -> {ok, initialised}
     catch
         _Error:Reason ->
-            _ = lager:error("Unable to init service ~p in fault detector.\n~p", [ServiceId, Reason]),
+            String = "Unable to init service ~p in fault detector.\n~p"
+            _ = lager:error(String, [ServiceId, Reason]),
             {error, Reason}
     end.
 
@@ -166,7 +167,8 @@ do_get_statistics(ServiceIds) ->
         {ok, Stats} -> Stats
     catch
         _Error:Reason ->
-            _ = lager:error("Unable to get statistics from fault detector.\n~p", [Reason]),
+            String = "Unable to get statistics from fault detector.\n~p"
+            _ = lager:error(String, [Reason]),
             []
     end.
 
@@ -181,6 +183,7 @@ do_register_operation(ServiceId, Operation, ServiceConfig) ->
             {error, not_found}
     catch
         _Error:Reason ->
-            _ = lager:error("Unable to register operation ~p, for service ~p in fault detector.\n~p", [Operation, ServiceId, Reason]),
+            String = "Unable to register operation ~p, for service ~p in fault detector.\n~p",
+            _ = lager:error(String, [Operation, ServiceId, Reason]),
             {error, Reason}
     end.
