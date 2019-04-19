@@ -1626,7 +1626,6 @@ process_result({payment, finalizing_accounter}, Action, St) ->
         ?cancelled() ->
             rollback_payment_cashflow(St)
     end,
-    Route = get_route(St),
     NewAction = get_action(Target, Action, St),
     {done, {[?payment_status_changed(Target)], NewAction}};
 
@@ -1644,7 +1643,6 @@ process_result({refund_accounter, ID}, Action, St) ->
             ?cash(Amount, _) when Amount > 0 ->
                 []
         end,
-    Route = get_route(St),
     {done, {Events2 ++ Events3, Action}}.
 
 process_failure(Activity, Events, Action, Failure, St) ->
@@ -1666,7 +1664,6 @@ process_failure({payment, Step}, Events, Action, Failure, St, _RefundSt) when
             {SessionEvents, SessionAction} = retry_session(Action, Target, Timeout),
             {next, {Events ++ SessionEvents, SessionAction}};
         fatal ->
-            Route = get_route(St),
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
 process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
@@ -1682,7 +1679,6 @@ process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
             Events1 = [
                 ?refund_ev(ID, ?refund_status_changed(?refund_failed(Failure)))
             ],
-            Route = get_route(St),
             {done, {Events ++ Events1, Action}}
     end.
 
@@ -1755,7 +1751,7 @@ handle_proxy_result(
     Session
 ) ->
     Events1 = wrap_session_events(hg_proxy_provider:bind_transaction(Trx, Session), Session),
-    Events2 = update_iproxy_state(ProxyState, Session),
+    Events2 = update_proxy_state(ProxyState, Session),
     {Events3, Action} = handle_proxy_intent(Intent, Action0, Session),
     {lists:flatten([Events0, Events1, Events2, Events3]), Action}.
 
@@ -2551,7 +2547,8 @@ issue_proxy_call(Func, Args, St) ->
     catch
         Error ->
             _ = notify_fault_detector(error, ServiceID, OperationID),
-            error(Error).
+            error(Error)
+    end.
 
 get_call_options(St) ->
     Revision = hg_domain:head(),
