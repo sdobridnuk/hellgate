@@ -5,9 +5,21 @@
 -include_lib("fault_detector_proto/include/fd_proto_fault_detector_thrift.hrl").
 
 -define(DEFAULT_CONFIG, #fault_detector_ServiceConfig{
-     sliding_window       = genlib_app:env(hellgate, fault_detector_default_sliding_window, 60000),
-     operation_time_limit = genlib_app:env(hellgate, fault_detector_default_operation_time_limit, 10000),
-     pre_aggregation_size = genlib_app:env(hellgate, fault_detector_default_pre_aggregation_size, 2)
+    sliding_window = genlib_app:env(
+        hellgate,
+        fault_detector_default_sliding_window,
+        60000
+    ),
+    operation_time_limit = genlib_app:env(
+        hellgate,
+        fault_detector_default_operation_time_limit,
+        10000
+    ),
+    pre_aggregation_size = genlib_app:env(
+        hellgate,
+        fault_detector_default_pre_aggregation_size,
+        2
+    )
 }).
 
 -define(service_config(SW, OTL, PAS), #fault_detector_ServiceConfig{

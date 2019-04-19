@@ -603,7 +603,7 @@ collect_providers(PaymentInstitution, VS, Revision) ->
 score_providers_with_fault_detector([]) -> [];
 score_providers_with_fault_detector([ProviderRef]) -> [{ProviderRef, 0.0}];
 score_providers_with_fault_detector(ProviderRefs) ->
-    ServiceIDs        = [build_fd_service_id(PR) || PR <- ProviderRefs],
+    ServiceIDs         = [build_fd_service_id(PR) || PR <- ProviderRefs],
     FDStats            = hg_fault_detector_client:get_statistics(ServiceIDs),
     FailRatedProviders = [{PR, get_provider_fail_rate(PR, FDStats)} || PR <- ProviderRefs],
     FailRatedProviders.
