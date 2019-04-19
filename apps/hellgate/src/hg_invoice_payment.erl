@@ -575,7 +575,6 @@ validate_limit(Cash, CashRange) ->
             throw_invalid_request(<<"Invalid amount, more than allowed maximum">>)
     end.
 
-%% TODO: receive scored providers
 choose_route(PaymentInstitution, VS, Revision, St) ->
     Payer = get_payment_payer(St),
     case get_predefined_route(Payer) of
@@ -604,8 +603,8 @@ collect_providers(PaymentInstitution, VS, Revision) ->
 score_providers_with_fault_detector([]) -> [];
 score_providers_with_fault_detector([ProviderRef]) -> [{ProviderRef, 0.0}];
 score_providers_with_fault_detector(ProviderRefs) ->
-    ProviderIDs        = [build_fd_service_id(PR) || PR <- ProviderRefs],
-    FDStats            = hg_fault_detector_client:get_statistics(ProviderIDs),
+    ServiceIDs        = [build_fd_service_id(PR) || PR <- ProviderRefs],
+    FDStats            = hg_fault_detector_client:get_statistics(ServiceIDs),
     FailRatedProviders = [{PR, get_provider_fail_rate(PR, FDStats)} || PR <- ProviderRefs],
     FailRatedProviders.
 
@@ -619,10 +618,30 @@ get_provider_fail_rate(ProviderRef, FDStats) ->
             0.0
     end.
 
+notify_fault_detector(start, ServiceID, OperationID) ->
+    case hg_fault_detector_client:register_operation(start, ServiceID, OperationID) of
+        {error, not_found} ->
+            _ = hg_fault_detector_client:init_service(ServiceID),
+            _ = hg_fault_detector_client:register_operation(start, ServiceID, OperationID);
+        Result ->
+            Result
+    end;
+notify_fault_detector(Status, ServiceID, OperationID) ->
+    hg_fault_detector_client:register_operation(Status, ServiceID, OperationID).
+
 build_fd_service_id(#domain_ProviderRef{id = ID}) ->
     hg_utils:construct_complex_id([
-        <<"hellgate_provider_service">>,
+        <<"hellgate_adapter_availability_service">>,
         erlang:integer_to_binary(ID)
+    ]).
+
+build_fd_operation_id(St) ->
+    Opts = get_opts(St),
+    hg_utils:construct_complex_id([
+        <<"hellgate_adapter_availability_operation">>,
+        get_invoice_id(get_invoice(Opts)),
+        get_payment_id(get_payment(St)),
+        erlang:integer_to_binary(os:system_time())
     ]).
 
 reduce(Name, S, VS, Revision) ->
@@ -633,27 +652,12 @@ reduce(Name, S, VS, Revision) ->
             error({misconfiguration, {'Could not reduce selector to a value', {Name, Ambiguous}}})
     end.
 
-notify_fault_detector(start, #domain_PaymentRoute{provider = ProviderRef}, St) ->
-    OperationId = construct_payment_plan_id(St),
-    ProviderID  = erlang:integer_to_binary(ProviderRef#domain_ProviderRef.id),
-    case hg_fault_detector_client:register_operation(start, ProviderID, OperationId) of
-        {error, not_found} ->
-            _ = hg_fault_detector_client:init_service(ProviderID),
-            _ = hg_fault_detector_client:register_operation(start, ProviderID, OperationId);
-        Result ->
-            Result
-    end;
-
-notify_fault_detector(Status, #domain_PaymentRoute{provider = ProviderRef}, St) ->
-    OperationId = construct_payment_plan_id(St),
-    ProviderID  = erlang:integer_to_binary(ProviderRef#domain_ProviderRef.id),
-    _ = hg_fault_detector_client:register_operation(Status, ProviderID, OperationId).
-
 -spec choose_routing_predestination(payment()) -> hg_routing:route_predestination().
 choose_routing_predestination(#domain_InvoicePayment{make_recurrent = true}) ->
     recurrent_payment;
 choose_routing_predestination(#domain_InvoicePayment{payer = ?payment_resource_payer()}) ->
     payment.
+
 % Other payers has predefined routes
 
 log_reject_context(RejectContext) ->
@@ -1478,7 +1482,6 @@ process_routing(Action, St) ->
     VS1 = VS0#{risk_score => RiskScore},
     case choose_route(PaymentInstitution, VS1, Revision, St) of
         {ok, Route} ->
-            _ = notify_fault_detector(start, Route, St),
             process_cash_flow_building(Route, VS1, Payment, PaymentInstitution, Revision, Opts, Events0, Action);
         {error, {no_route_found, _Details}} ->
             Failure = {failure, payproc_errors:construct('PaymentFailure',
@@ -1624,7 +1627,6 @@ process_result({payment, finalizing_accounter}, Action, St) ->
             rollback_payment_cashflow(St)
     end,
     Route = get_route(St),
-    notify_fault_detector(finish, Route, St),
     NewAction = get_action(Target, Action, St),
     {done, {[?payment_status_changed(Target)], NewAction}};
 
@@ -1643,7 +1645,6 @@ process_result({refund_accounter, ID}, Action, St) ->
                 []
         end,
     Route = get_route(St),
-    notify_fault_detector(finish, Route, St),
     {done, {Events2 ++ Events3, Action}}.
 
 process_failure(Activity, Events, Action, Failure, St) ->
@@ -1666,7 +1667,6 @@ process_failure({payment, Step}, Events, Action, Failure, St, _RefundSt) when
             {next, {Events ++ SessionEvents, SessionAction}};
         fatal ->
             Route = get_route(St),
-            notify_fault_detector(error, Route, St),
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
 process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
@@ -1683,7 +1683,6 @@ process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
                 ?refund_ev(ID, ?refund_status_changed(?refund_failed(Failure)))
             ],
             Route = get_route(St),
-            notify_fault_detector(error, Route, St),
             {done, {Events ++ Events1, Action}}
     end.
 
@@ -1756,7 +1755,7 @@ handle_proxy_result(
     Session
 ) ->
     Events1 = wrap_session_events(hg_proxy_provider:bind_transaction(Trx, Session), Session),
-    Events2 = update_proxy_state(ProxyState, Session),
+    Events2 = update_iproxy_state(ProxyState, Session),
     {Events3, Action} = handle_proxy_intent(Intent, Action0, Session),
     {lists:flatten([Events0, Events1, Events2, Events3]), Action}.
 
@@ -2539,8 +2538,20 @@ issue_callback_call(Payload, ProxyContext, St) ->
     issue_proxy_call('HandlePaymentCallback', [Payload, ProxyContext], St).
 
 issue_proxy_call(Func, Args, St) ->
-    CallOpts = get_call_options(St),
-    hg_woody_wrapper:call(proxy_provider, Func, Args, CallOpts).
+    CallOpts    = get_call_options(St),
+    Route       = get_route(St),
+    ProviderRef = get_route_provider_ref(Route),
+    ServiceID   = build_fd_service_id(ProviderRef),
+    OperationID = build_fd_operation_id(St),
+    _ = notify_fault_detector(start, ServiceID, OperationID),
+    try hg_woody_wrapper:call(proxy_provider, Func, Args, CallOpts) of
+        Result ->
+            _ = notify_fault_detector(finish, ServiceID, OperationID),
+            Result
+    catch
+        Error ->
+            _ = notify_fault_detector(error, ServiceID, OperationID),
+            error(Error).
 
 get_call_options(St) ->
     Revision = hg_domain:head(),

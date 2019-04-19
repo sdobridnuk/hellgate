@@ -124,43 +124,17 @@ get_rec_paytools_terms(?route(ProviderRef, _), Revision) ->
     #domain_Provider{recurrent_paytool_terms = Terms} = hg_domain:get(Revision, {provider, ProviderRef}),
     Terms.
 
-%%
-
 %% NOTE
 %% Score ∈ [0.0 .. 1.0]
 %% Higher score is better, e.g. route is more likely to be chosen.
 
 score_route({_Provider, {_TerminalRef, Terminal}, FailRate}, VS) ->
-    %% TODO: use failrate here
     score_risk_coverage(Terminal, VS) * (1 - FailRate).
 
 score_risk_coverage(Terminal, VS) ->
     RiskScore = getv(risk_score, VS),
     RiskCoverage = Terminal#domain_Terminal.risk_coverage,
-    %% TODO: remove failrate from here
     math:exp(-hg_inspector:compare_risk_score(RiskCoverage, RiskScore)).
-    % math:exp(-hg_inspector:compare_risk_score(RiskCoverage, RiskScore)) * (1.0 - FailRate).
-
-%%
-
-%% TODO: move to invoice payment
-% score_providers_with_fault_detector([]) -> [];
-% score_providers_with_fault_detector([{ProviderRef, Provider}]) -> [{ProviderRef, Provider, 0.0}];
-% score_providers_with_fault_detector(Providers) ->
-%     ProviderIDs     = [erlang:integer_to_binary(PR#domain_ProviderRef.id) || {PR, _P} <- Providers],
-%     FDStats         = hg_fault_detector_client:get_statistics(ordsets:from_list(ProviderIDs)),
-%     ScoredProviders = [{PR, P, get_provider_fail_rate(PR, FDStats)} || {PR, P} <- Providers],
-%     ScoredProviders.
-
-% get_provider_fail_rate(#domain_ProviderRef{id = ID}, FDStats) ->
-%     ProviderID = erlang:integer_to_binary(ID),
-%     case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FDStats) of
-%         {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
-%             FailRate;
-
-%         false ->
-%             0.0
-%     end.
 
 acceptable_provider(payment, {ProviderRef, FailRate}, VS, Revision) ->
     Provider = #domain_Provider{
