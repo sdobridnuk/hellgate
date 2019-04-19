@@ -15,6 +15,7 @@
 -export([init_per_testcase/2]).
 -export([end_per_testcase/2]).
 
+-export([gathers_fail_rated_providers/1]).
 -export([no_route_found_for_payment/1]).
 -export([fail_rate_affects_routing/1]).
 
@@ -65,6 +66,23 @@ end_per_testcase(_Name, C) ->
 
 cfg(Key, C) ->
     hg_ct_helper:cfg(Key, C).
+
+-spec gathers_fail_rated_providers(config()) -> test_return().
+gathers_fail_rated_providers(_C) ->
+    VS1 = #{
+        category        => ?cat(1),
+        currency        => ?cur(<<"RUB">>),
+        cost            => ?cash(1000, <<"RUB">>),
+        payment_tool    => {bank_card, #domain_BankCard{}},
+        party_id        => <<"12345">>,
+        risk_score      => low,
+        flow            => instant
+    },
+
+    Revision = hg_domain:head(),
+    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
+    [] = hg_routing:gathers_fail_rated_providers(PaymentInstitution, VS1, Revision),
+    ok.
 
 -spec no_route_found_for_payment(config()) -> test_return().
 no_route_found_for_payment(_C) ->
