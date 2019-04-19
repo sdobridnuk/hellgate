@@ -87,7 +87,7 @@ build_config(SlidingWindow, OpTimeLimit, PreAggrSize) ->
 -spec init_service(service_id()) ->
     {ok, initialised} | {error, any()}.
 init_service(ServiceId) ->
-    do_init_service(ServiceId, ?DEFAULT_CONFIG).
+    call('InitService', [ServiceId, ?DEFAULT_CONFIG]).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -98,7 +98,7 @@ init_service(ServiceId) ->
 -spec init_service(service_id(), service_config()) ->
     {ok, initialised} | {error, any()}.
 init_service(ServiceId, ServiceConfig) ->
-    do_init_service(ServiceId, ServiceConfig).
+    call('InitService', [ServiceId, ServiceConfig]).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -111,7 +111,7 @@ init_service(ServiceId, ServiceConfig) ->
 %%------------------------------------------------------------------------------
 -spec get_statistics([service_id()]) -> [service_stats()].
 get_statistics(ServiceIds) when is_list(ServiceIds) ->
-    do_get_statistics(ServiceIds).
+    call('GetStatistics', [ServiceIds]).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -142,14 +142,16 @@ register_operation(Status, ServiceId, OperationId, ServiceConfig) ->
         finish -> {Status, ?state_finish(hg_datetime:format_now())}
     end,
     Operation = ?operation(OperationId, OperationState),
-    do_register_operation(ServiceId, Operation, ServiceConfig).
+    call('RegisterOperation', [ServiceId, Operation, ServiceConfig]).
 
 %% PRIVATE
 
-do_init_service(ServiceId, ServiceConfig) ->
-    Args = [ServiceId, ServiceConfig],
+call(Function, Args) ->
     Opts = #{url => genlib:to_binary(maps:get(fault_detector, genlib_app:env(hellgate, services)))},
     Deadline = woody_deadline:from_timeout(genlib_app:env(hellgate, fault_detector_timeout, infinity)),
+    do_call(Function, Args, Opts, Deadline).
+
+do_call('InitService', Args, Opts, Deadline) ->
     try hg_woody_wrapper:call(fault_detector, 'InitService', Args, Opts, Deadline) of
         {ok, _Result} -> {ok, initialised}
     catch
@@ -157,12 +159,8 @@ do_init_service(ServiceId, ServiceConfig) ->
             String = "Unable to init service ~p in fault detector.\n~p",
             _ = lager:error(String, [ServiceId, Reason]),
             {error, Reason}
-    end.
-
-do_get_statistics(ServiceIds) ->
-    Args = [ServiceIds],
-    Opts = #{url => genlib:to_binary(maps:get(fault_detector, genlib_app:env(hellgate, services)))},
-    Deadline = woody_deadline:from_timeout(genlib_app:env(hellgate, fault_detector_timeout, infinity)),
+    end;
+do_call('GetStatistics', Args, Opts, Deadline) ->
     try hg_woody_wrapper:call(fault_detector, 'GetStatistics', Args, Opts, Deadline) of
         {ok, Stats} -> Stats
     catch
@@ -170,12 +168,8 @@ do_get_statistics(ServiceIds) ->
             String = "Unable to get statistics from fault detector.\n~p",
             _ = lager:error(String, [Reason]),
             []
-    end.
-
-do_register_operation(ServiceId, Operation, ServiceConfig) ->
-    Args = [ServiceId, Operation, ServiceConfig],
-    Opts = #{url => genlib:to_binary(maps:get(fault_detector, genlib_app:env(hellgate, services)))},
-    Deadline = woody_deadline:from_timeout(genlib_app:env(hellgate, fault_detector_timeout, infinity)),
+    end;
+do_call('RegisterOperation', Args, Opts, Deadline) ->
     try hg_woody_wrapper:call(fault_detector, 'RegisterOperation', Args, Opts, Deadline) of
         {ok, _Result} ->
             {ok, registered};
