@@ -203,9 +203,24 @@ init([PaymentTool, Params], #{id := RecPaymentToolID}) ->
     RecPaymentTool     = create_rec_payment_tool(RecPaymentToolID, CreatedAt, Params, Revision),
     VS0                = collect_varset(Party, Shop, #{payment_tool => PaymentTool}),
     {RiskScore, VS1}   = validate_risk_score(inspect(RecPaymentTool, VS0), VS0),
-    FailRatedProviders = hg_routing:gather_fail_rated_providers(PaymentInstitution, VS1, Revision),
+
+    {Providers, RejectContext0} = hg_routing:gather_providers(
+        recurrent_paytool,
+        PaymentInstitution,
+        VS1,
+        Revision
+    ),
+    FailRatedProviders = hg_routing:gather_provider_fail_rates(Providers),
+    {FailRatedRoutes, RejectContext1} = hg_routing:gather_routes(
+        recurrent_paytool,
+        FailRatedProviders,
+        RejectContext0,
+        VS1,
+        Revision
+    ),
+
     Route = validate_route(
-        hg_routing:choose(recurrent_paytool, FailRatedProviders, VS1, Revision),
+        hg_routing:choose_route(FailRatedRoutes, RejectContext1, VS1),
         RecPaymentTool
     ),
     {ok, {Changes, Action}} = start_session(),
@@ -322,13 +337,13 @@ process(Action, St) ->
     ProviderRef  = get_route_provider_ref(Route),
     ProviderID   = ProviderRef#domain_ProviderRef.id,
     BinaryProvID = erlang:integer_to_binary(ProviderID),
-    ServiceType  = <<"adapter_availability">>,
+    ServiceType  = adapter_availability,
     ServiceID    = hg_fault_detector_client:build_service_id(ServiceType, BinaryProvID),
 
     RecPayTool   = get_rec_payment_tool(St),
     RecPayToolID = RecPayTool#payproc_RecurrentPaymentTool.id,
     OpType       = <<"recurrent_payment_tool">>,
-    OperationID  = hg_fault_detector_client:build_operation_id(OpType, RecPayToolID),
+    OperationID  = hg_fault_detector_client:build_operation_id(ServiceType, OpType, RecPayToolID),
 
     _ = notify_fault_detector(start, ServiceID, OperationID),
     try hg_proxy_provider:generate_token(ProxyContext, get_route(St)) of
@@ -564,13 +579,13 @@ dispatch_callback({provider, Payload}, St) ->
             ProviderRef  = get_route_provider_ref(Route),
             ProviderID   = ProviderRef#domain_ProviderRef.id,
             BinaryProvID = erlang:integer_to_binary(ProviderID),
-            ServiceType  = <<"adapter_availability">>,
+            ServiceType  = adapter_availability,
             ServiceID    = hg_fault_detector_client:build_service_id(ServiceType, BinaryProvID),
 
             RecPayTool   = get_rec_payment_tool(St),
             RecPayToolID = RecPayTool#payproc_RecurrentPaymentTool.id,
             OpType       = <<"recurrent_payment_tool">>,
-            OperationID  = hg_fault_detector_client:build_operation_id(OpType, RecPayToolID),
+            OperationID  = hg_fault_detector_client:build_operation_id(ServiceType, OpType, RecPayToolID),
 
             _ = notify_fault_detector(start, ServiceID, OperationID),
             try hg_proxy_provider:handle_recurrent_token_callback(

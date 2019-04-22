@@ -24,28 +24,33 @@ child_spec() ->
 -spec handle_function(woody:func(), woody:args(), _, hg_woody_wrapper:handler_opts()) ->
     {ok, term()} | no_return().
 
-handle_function('GetStatistics', [[<<"200">>, <<"201">>]], _Context, _Options) ->
+handle_function(
+    'GetStatistics',
+    _Args,
+    _Context,
+    _Options
+ ) ->
     {ok, [
           #fault_detector_ServiceStatistics{
-             service_id = <<"200">>,
-             failure_rate = 1.0,
-             operations_count = 322,
-             error_operations_count = 322,
+             service_id = <<"hellgate_service.adapter_availability.200">>,
+             failure_rate = 0.9,
+             operations_count = 10,
+             error_operations_count = 9,
              overtime_operations_count = 0,
-             success_operations_count = 0
+             success_operations_count = 1
             },
           #fault_detector_ServiceStatistics{
-             service_id = <<"201">>,
-             failure_rate = 0.0,
-             operations_count = 322,
-             error_operations_count = 0,
+             service_id = <<"hellgate_service.adapter_availability.201">>,
+             failure_rate = 0.1,
+             operations_count = 10,
+             error_operations_count = 1,
              overtime_operations_count = 0,
-             success_operations_count = 322
+             success_operations_count = 9
             }
          ]};
 
-handle_function('GetStatistics', _Args, _Context, _Options) ->
-    {ok, []};
+% handle_function('GetStatistics', _Args, _Context, _Options) ->
+%     {ok, []};
 
-handle_function(_, _Args, _Context, _Options) ->
+handle_function(_Function, _Args, _Context, _Options) ->
     {ok, undefined}.

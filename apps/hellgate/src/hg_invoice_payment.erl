@@ -581,14 +581,27 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
         {ok, _Route} = Result ->
             Result;
         undefined ->
-            Payment            = get_payment(St),
-            Predestination     = choose_routing_predestination(Payment),
-            FailRatedProviders = hg_routing:gather_fail_rated_providers(PaymentInstitution, VS, Revision),
-            case hg_routing:choose(Predestination, FailRatedProviders, VS, Revision) of
+            Payment         = get_payment(St),
+            Predestination  = choose_routing_predestination(Payment),
+            {Providers, RejectContext0} = hg_routing:gather_providers(
+                Predestination,
+                PaymentInstitution,
+                VS,
+                Revision
+            ),
+            FailRatedProviders = hg_routing:gather_provider_fail_rates(Providers),
+            {FailRatedRoutes, RejectContext1} = hg_routing:gather_routes(
+                 Predestination,
+                 FailRatedProviders,
+                 RejectContext0,
+                 VS,
+                 Revision
+            ),
+            case hg_routing:choose_route(FailRatedRoutes, RejectContext1, VS) of
                 {ok, _Route} = Result ->
                     Result;
-                {error, {no_route_found, RejectContext}} = Error ->
-                    _ = log_reject_context(RejectContext),
+                {error, {no_route_found, RejectContext2}} = Error ->
+                    _ = log_reject_context(RejectContext2),
                     Error
             end
     end.
@@ -2491,7 +2504,7 @@ issue_proxy_call(Func, Args, St) ->
     ProviderRef = get_route_provider_ref(Route),
     ProviderID  = ProviderRef#domain_ProviderRef.id,
     BinaryID    = erlang:integer_to_binary(ProviderID),
-    ServiceType = <<"adapter_availability">>,
+    ServiceType = adapter_availability,
     ServiceID   = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
 
     OpType      = <<"invoice_payment">>,
@@ -2499,7 +2512,7 @@ issue_proxy_call(Func, Args, St) ->
     InvoiceID   = get_invoice_id(get_invoice(Opts)),
     PaymentID   = get_payment_id(get_payment(St)),
     CompoundID  = <<InvoiceID/binary, <<"_">>/binary, PaymentID/binary>>,
-    OperationID = hg_fault_detector_client:build_operation_id(OpType, CompoundID),
+    OperationID = hg_fault_detector_client:build_operation_id(ServiceType, OpType, CompoundID),
     _ = notify_fault_detector(start, ServiceID, OperationID),
     try hg_woody_wrapper:call(proxy_provider, Func, Args, CallOpts) of
         Result ->

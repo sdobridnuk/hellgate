@@ -41,7 +41,7 @@
 -export([build_config/3]).
 
 -export([build_service_id/2]).
--export([build_operation_id/2]).
+-export([build_operation_id/3]).
 
 -export([init_service/1]).
 -export([init_service/2]).
@@ -59,6 +59,8 @@
 -type sliding_window()          :: fd_proto_fault_detector_thrift:'Milliseconds'().
 -type operation_time_limit()    :: fd_proto_fault_detector_thrift:'Milliseconds'().
 -type pre_aggregation_size()    :: fd_proto_fault_detector_thrift:'Seconds'() | undefined.
+
+-type fd_service_type()         :: adapter_availability.
 
 %% API
 
@@ -95,27 +97,19 @@ build_config(SlidingWindow, OpTimeLimit, PreAggrSize) ->
 %% `build_service_id/2` is a helper function for building service IDs
 %% @end
 %%------------------------------------------------------------------------------
--spec build_service_id(binary(), binary()) -> binary().
+-spec build_service_id(fd_service_type(), binary()) ->
+    binary().
 build_service_id(ServiceType, ID) ->
-    hg_utils:construct_complex_id([
-        <<"hellgate_service">>,
-        ServiceType,
-        ID
-    ]).
+    do_build_service_id(ServiceType, ID).
 
 %%------------------------------------------------------------------------------
 %% @doc
 %% `build_operation_id_id/3` is a helper function for building operation IDs
 %% @end
 %%------------------------------------------------------------------------------
--spec build_operation_id(binary(), binary()) -> binary().
-build_operation_id(OperationType, ID) ->
-    hg_utils:construct_complex_id([
-        <<"hellgate_operation">>,
-        OperationType,
-        ID,
-        erlang:integer_to_binary(os:system_time())
-    ]).
+-spec build_operation_id(fd_service_type(), binary(), binary()) -> binary().
+build_operation_id(ServiceType, OperationType, ID) ->
+    do_build_operation_id(ServiceType, OperationType, ID).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -188,8 +182,12 @@ register_operation(Status, ServiceId, OperationId, ServiceConfig) ->
 %% PRIVATE
 
 call(Function, Args) ->
-    Opts = #{url => genlib:to_binary(maps:get(fault_detector, genlib_app:env(hellgate, services)))},
-    Deadline = woody_deadline:from_timeout(genlib_app:env(hellgate, fault_detector_timeout, infinity)),
+    Opts = #{
+        url => genlib:to_binary( maps:get(fault_detector, genlib_app:env(hellgate, services)))
+    },
+    Deadline = woody_deadline:from_timeout(
+        genlib_app:env(hellgate, fault_detector_timeout, infinity)
+    ),
     do_call(Function, Args, Opts, Deadline).
 
 do_call('InitService', Args, Opts, Deadline) ->
@@ -224,3 +222,19 @@ do_call('RegisterOperation', Args, Opts, Deadline) ->
             _ = lager:error(String, [OperationId, ServiceId, Reason]),
             {error, Reason}
     end.
+
+do_build_service_id(adapter_availability, ID) ->
+    hg_utils:construct_complex_id([
+        <<"hellgate_service">>,
+        <<"adapter_availability">>,
+        ID
+    ]).
+
+do_build_operation_id(adapter_availability, OperationType, ID) ->
+    hg_utils:construct_complex_id([
+        <<"hellgate_operation">>,
+        <<"adapter_availability">>,
+        OperationType,
+        ID,
+        erlang:integer_to_binary(os:system_time())
+    ]).

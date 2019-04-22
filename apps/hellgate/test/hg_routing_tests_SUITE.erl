@@ -19,13 +19,26 @@
 -export([no_route_found_for_payment/1]).
 -export([fail_rate_affects_routing/1]).
 
+-behaviour(supervisor).
+-export([init/1]).
+
+-spec init([]) ->
+    {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
+
+init([]) ->
+    {ok, {#{strategy => one_for_all, intensity => 1, period => 1}, []}}.
+
 -type config()         :: hg_ct_helper:config().
 -type test_case_name() :: hg_ct_helper:test_case_name().
 -type group_name()     :: hg_ct_helper:group_name().
 -type test_return()    :: _ | no_return().
 
 -spec all() -> [test_case_name() | {group, group_name()}].
-all() -> [no_route_found_for_payment, fail_rate_affects_routing].
+all() -> [
+    no_route_found_for_payment,
+    fail_rate_affects_routing,
+    gathers_fail_rated_providers
+].
 
 -spec groups() -> [{group_name(), list(), [test_case_name()]}].
 groups() -> [].
@@ -37,10 +50,20 @@ init_per_suite(C) ->
         lager, woody, scoper, dmt_client, hellgate, {cowboy, CowboySpec}
     ]),
     ok = hg_domain:insert(construct_domain_fixture()),
-    [{apps, Apps} | C].
+
+    {ok, SupPid} = supervisor:start_link(?MODULE, []),
+    {ok, _} = supervisor:start_child(SupPid, hg_dummy_fault_detector:child_spec()),
+    _ = unlink(SupPid),
+    [{apps, Apps}, {test_sup, SupPid} | C].
 
 -spec end_per_suite(config()) -> _.
-end_per_suite(_C) -> ok = hg_domain:cleanup().
+end_per_suite(C) ->
+    SupPid = cfg(test_sup, C),
+    supervisor:terminate_child(
+        SupPid,
+        {ranch_listener_sup, {woody_server_thrift_http_handler, hg_dummy_fault_detector}}
+    ),
+    ok = hg_domain:cleanup().
 
 -spec init_per_group(group_name(), config()) -> config().
 init_per_group(_, C) -> C.
@@ -49,6 +72,10 @@ init_per_group(_, C) -> C.
 end_per_group(_Group, _C) -> ok.
 
 -spec init_per_testcase(test_case_name(), config()) -> config().
+init_per_testcase(gathers_fail_rated_providers, C) ->
+    Revision = hg_domain:head(),
+    ok = hg_domain:upsert(fail_rate_affects_routing_fixture(Revision)),
+    C;
 init_per_testcase(fail_rate_affects_routing, C) ->
     Revision = hg_domain:head(),
     ok = hg_domain:upsert(fail_rate_affects_routing_fixture(Revision)),
@@ -69,7 +96,33 @@ cfg(Key, C) ->
 
 -spec gathers_fail_rated_providers(config()) -> test_return().
 gathers_fail_rated_providers(_C) ->
-    VS1 = #{
+    ok = hg_context:save(hg_context:create()),
+
+    VS = #{
+        category        => ?cat(1),
+        currency        => ?cur(<<"RUB">>),
+        cost            => ?cash(1000, <<"RUB">>),
+        payment_tool    => {payment_terminal, #domain_PaymentTerminal{terminal_type = euroset}},
+        party_id        => <<"12345">>,
+        risk_score      => low,
+        flow            => instant
+    },
+    Revision = hg_domain:head(),
+    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
+
+    {Providers0, _RejectContext0} = hg_routing:gather_providers(payment, PaymentInstitution, VS, Revision),
+    [
+        {?prv(202), _, 0.0},
+        {?prv(201), _, 0.1},
+        {?prv(200), _, 0.9}
+    ] = hg_routing:gather_provider_fail_rates(Providers0),
+
+    hg_context:cleanup(),
+    ok.
+
+-spec no_route_found_for_payment(config()) -> test_return().
+no_route_found_for_payment(_C) ->
+    VS0 = #{
         category        => ?cat(1),
         currency        => ?cur(<<"RUB">>),
         cost            => ?cash(1000, <<"RUB">>),
@@ -81,50 +134,54 @@ gathers_fail_rated_providers(_C) ->
 
     Revision = hg_domain:head(),
     PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
-    [] = hg_routing:gathers_fail_rated_providers(PaymentInstitution, VS1, Revision),
-    ok.
 
--spec no_route_found_for_payment(config()) -> test_return().
-no_route_found_for_payment(_C) ->
-    Revision = hg_domain:head(),
-    VS1 = #{
-        category        => ?cat(1),
-        currency        => ?cur(<<"RUB">>),
-        cost            => ?cash(1000, <<"RUB">>),
-        payment_tool    => {bank_card, #domain_BankCard{}},
-        party_id        => <<"12345">>,
-        risk_score      => low,
-        flow            => instant
-    },
-
-    ScoredProviders = [
-        {#domain_ProviderRef{id = 1}, 0.0},
-        {#domain_ProviderRef{id = 2}, 0.0},
-        {#domain_ProviderRef{id = 3}, 0.0}
-    ],
-
-    {error, {no_route_found, #{
-        varset := VS1,
+    {Providers0, RejectContext0} = hg_routing:gather_providers(payment, PaymentInstitution, VS0, Revision),
+    {[], #{
         rejected_providers := [
             {?prv(3), {'PaymentsProvisionTerms', payment_tool}},
             {?prv(2), {'PaymentsProvisionTerms', category}},
             {?prv(1), {'PaymentsProvisionTerms', payment_tool}}
+        ]}
+    } = {Providers0, RejectContext0},
+
+    FailRatedProviders0 = hg_routing:gather_provider_fail_rates(Providers0),
+    [] = FailRatedProviders0,
+
+    {FailRatedRoutes0, RejectContext1} = hg_routing:gather_routes(payment, FailRatedProviders0, RejectContext0, VS0, Revision),
+
+    Result0 = {error, {no_route_found, #{
+        varset => VS0,
+        rejected_providers => [
+            {?prv(3), {'PaymentsProvisionTerms', payment_tool}},
+            {?prv(2), {'PaymentsProvisionTerms', category}},
+            {?prv(1), {'PaymentsProvisionTerms', payment_tool}}
         ],
-        rejected_terminals := []
-    }}} = hg_routing:choose(payment, ScoredProviders, VS1, Revision),
-    VS2 = VS1#{
+        rejected_terminals => []
+    }}},
+
+    Result0 = hg_routing:choose_route(FailRatedRoutes0, RejectContext1, VS0),
+
+    VS1 = VS0#{
         payment_tool => {payment_terminal, #domain_PaymentTerminal{terminal_type = euroset}}
     },
-    {ok, #domain_PaymentRoute{
+
+    {Providers1, RejectContext2} = hg_routing:gather_providers(payment, PaymentInstitution, VS1, Revision),
+
+    FailRatedProviders1 = hg_routing:gather_provider_fail_rates(Providers1),
+
+    {FailRatedRoutes1, RejectContext3} = hg_routing:gather_routes(payment, FailRatedProviders1, RejectContext2, VS1, Revision),
+
+    Result1 = {ok, #domain_PaymentRoute{
         provider = ?prv(3),
         terminal = ?trm(10)
-    }} = hg_routing:choose(payment, ScoredProviders, VS2, Revision).
+    }},
+
+    Result1 = hg_routing:choose_route(FailRatedRoutes1, RejectContext3, VS1),
+    ok.
 
 -spec fail_rate_affects_routing(config()) -> test_return().
 
 fail_rate_affects_routing(_C) ->
-    Revision = hg_domain:head(),
-
     VS = #{
         category        => ?cat(1),
         currency        => ?cur(<<"RUB">>),
@@ -135,41 +192,32 @@ fail_rate_affects_routing(_C) ->
         flow            => instant
     },
 
-    ScoredProviders0 = [
-        {#domain_ProviderRef{id = 200}, 0.0},
-        {#domain_ProviderRef{id = 201}, 1.0},
-        {#domain_ProviderRef{id = 202}, 1.0}
-    ],
-    ScoredProviders1 = [
-        {#domain_ProviderRef{id = 200}, 1.0},
-        {#domain_ProviderRef{id = 201}, 0.0},
-        {#domain_ProviderRef{id = 202}, 1.0}
-    ],
-    ScoredProviders2 = [
-        {#domain_ProviderRef{id = 200}, 1.0},
-        {#domain_ProviderRef{id = 201}, 1.0},
-        {#domain_ProviderRef{id = 202}, 0.0}
-    ],
-    ScoredProviders3 = [
-        {#domain_ProviderRef{id = 200}, 0.6},
-        {#domain_ProviderRef{id = 201}, 0.7},
-        {#domain_ProviderRef{id = 202}, 1.0}
-    ],
-    % ScoredProviders3 = [
-    %     {#domain_ProviderRef{id = 200}, 0.5},
-    %     {#domain_ProviderRef{id = 201}, 0.0},
-    %     {#domain_ProviderRef{id = 202}, 1.0}
-    % ],
+    Revision = hg_domain:head(),
+    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
 
-    Result0 = hg_routing:choose(payment, ScoredProviders0, VS, Revision),
-    Result1 = hg_routing:choose(payment, ScoredProviders1, VS, Revision),
-    Result2 = hg_routing:choose(payment, ScoredProviders2, VS, Revision),
-    Result3 = hg_routing:choose(payment, ScoredProviders3, VS, Revision),
+    {Providers, RejectContext} = hg_routing:gather_providers(payment, PaymentInstitution, VS, Revision),
 
-    {ok, #domain_PaymentRoute{provider = ?prv(200)}} = Result0,
+    {ProviderRefs, ProviderData} = lists:unzip(Providers),
+
+    FailRatedProviders0 = lists:zip3(ProviderRefs, ProviderData, [0.0, 1.0, 1.0]),
+    FailRatedProviders1 = lists:zip3(ProviderRefs, ProviderData, [1.0, 0.0, 1.0]),
+    FailRatedProviders2 = lists:zip3(ProviderRefs, ProviderData, [1.0, 1.0, 0.0]),
+    FailRatedProviders3 = lists:zip3(ProviderRefs, ProviderData, [0.7, 0.6, 1.0]),
+
+    {FailRatedRoutes0, RC0} = hg_routing:gather_routes(payment, FailRatedProviders0, RejectContext, VS, Revision),
+    {FailRatedRoutes1, RC1} = hg_routing:gather_routes(payment, FailRatedProviders1, RejectContext, VS, Revision),
+    {FailRatedRoutes2, RC2} = hg_routing:gather_routes(payment, FailRatedProviders2, RejectContext, VS, Revision),
+    {FailRatedRoutes3, RC3} = hg_routing:gather_routes(payment, FailRatedProviders3, RejectContext, VS, Revision),
+
+    Result0 = hg_routing:choose_route(FailRatedRoutes0, RC0, VS),
+    Result1 = hg_routing:choose_route(FailRatedRoutes1, RC1, VS),
+    Result2 = hg_routing:choose_route(FailRatedRoutes2, RC2, VS),
+    Result3 = hg_routing:choose_route(FailRatedRoutes3, RC3, VS),
+
+    {ok, #domain_PaymentRoute{provider = ?prv(202)}} = Result0,
     {ok, #domain_PaymentRoute{provider = ?prv(201)}} = Result1,
-    {ok, #domain_PaymentRoute{provider = ?prv(202)}} = Result2,
-    {ok, #domain_PaymentRoute{provider = ?prv(200)}} = Result3,
+    {ok, #domain_PaymentRoute{provider = ?prv(200)}} = Result2,
+    {ok, #domain_PaymentRoute{provider = ?prv(201)}} = Result3,
 
     ok.
 
