@@ -147,7 +147,13 @@ no_route_found_for_payment(_C) ->
     FailRatedProviders0 = hg_routing:gather_provider_fail_rates(Providers0),
     [] = FailRatedProviders0,
 
-    {FailRatedRoutes0, RejectContext1} = hg_routing:gather_routes(payment, FailRatedProviders0, RejectContext0, VS0, Revision),
+    {FailRatedRoutes0, RejectContext1} = hg_routing:gather_routes(
+        payment,
+        FailRatedProviders0,
+        RejectContext0,
+        VS0,
+        Revision
+    ),
 
     Result0 = {error, {no_route_found, #{
         varset => VS0,
@@ -169,7 +175,13 @@ no_route_found_for_payment(_C) ->
 
     FailRatedProviders1 = hg_routing:gather_provider_fail_rates(Providers1),
 
-    {FailRatedRoutes1, RejectContext3} = hg_routing:gather_routes(payment, FailRatedProviders1, RejectContext2, VS1, Revision),
+    {FailRatedRoutes1, RejectContext3} = hg_routing:gather_routes(
+        payment,
+        FailRatedProviders1,
+        RejectContext2,
+        VS1,
+        Revision
+    ),
 
     Result1 = {ok, #domain_PaymentRoute{
         provider = ?prv(3),
