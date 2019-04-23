@@ -229,17 +229,6 @@ init([PaymentTool, Params], #{id := RecPaymentToolID}) ->
         action => Action
     }).
 
-notify_fault_detector(start, ServiceID, OperationID) ->
-    case hg_fault_detector_client:register_operation(start, ServiceID, OperationID) of
-        {error, not_found} ->
-            _ = hg_fault_detector_client:init_service(ServiceID),
-            _ = hg_fault_detector_client:register_operation(start, ServiceID, OperationID);
-        Result ->
-            Result
-    end;
-notify_fault_detector(Status, ServiceID, OperationID) ->
-    hg_fault_detector_client:register_operation(Status, ServiceID, OperationID).
-
 get_party_shop(Params) ->
     PartyID = Params#payproc_RecurrentPaymentToolParams.party_id,
     ShopID = Params#payproc_RecurrentPaymentToolParams.shop_id,
@@ -333,29 +322,9 @@ get_session_status(Session) ->
 
 process(Action, St) ->
     ProxyContext = construct_proxy_context(St),
-    Route        = get_route(St),
-    ProviderRef  = get_route_provider_ref(Route),
-    ProviderID   = ProviderRef#domain_ProviderRef.id,
-    BinaryProvID = erlang:integer_to_binary(ProviderID),
-    ServiceType  = adapter_availability,
-    ServiceID    = hg_fault_detector_client:build_service_id(ServiceType, BinaryProvID),
-
-    RecPayTool   = get_rec_payment_tool(St),
-    RecPayToolID = RecPayTool#payproc_RecurrentPaymentTool.id,
-    OpType       = <<"recurrent_payment_tool">>,
-    OperationID  = hg_fault_detector_client:build_operation_id(ServiceType, OpType, RecPayToolID),
-
-    _ = notify_fault_detector(start, ServiceID, OperationID),
-    try hg_proxy_provider:generate_token(ProxyContext, get_route(St)) of
-        {ok, ProxyResult} ->
-            _ = notify_fault_detector(finish, ServiceID, OperationID),
-            Result = handle_proxy_result(ProxyResult, Action, get_session(St)),
-            finish_processing(Result, St)
-    catch
-        Error ->
-            _ = notify_fault_detector(error, ServiceID, OperationID),
-            error(Error)
-    end.
+    {ok, ProxyResult} = hg_proxy_provider:generate_token(ProxyContext, get_route(St)),
+    Result = handle_proxy_result(ProxyResult, Action, get_session(St)),
+    finish_processing(Result, St).
 
 process_callback_timeout(Action, St) ->
     Result = handle_proxy_callback_timeout(Action),
@@ -363,9 +332,6 @@ process_callback_timeout(Action, St) ->
 
 get_route(#st{route = Route}) ->
     Route.
-
-get_route_provider_ref(#domain_PaymentRoute{provider = ProviderRef}) ->
-    ProviderRef.
 %%
 
 construct_proxy_context(St) ->
@@ -575,36 +541,15 @@ dispatch_callback({provider, Payload}, St) ->
     case get_session_status(get_session(St)) of
         suspended ->
             ProxyContext = construct_proxy_context(St),
-            Route        = get_route(St),
-            ProviderRef  = get_route_provider_ref(Route),
-            ProviderID   = ProviderRef#domain_ProviderRef.id,
-            BinaryProvID = erlang:integer_to_binary(ProviderID),
-            ServiceType  = adapter_availability,
-            ServiceID    = hg_fault_detector_client:build_service_id(ServiceType, BinaryProvID),
-
-            RecPayTool   = get_rec_payment_tool(St),
-            RecPayToolID = RecPayTool#payproc_RecurrentPaymentTool.id,
-            OpType       = <<"recurrent_payment_tool">>,
-            OperationID  = hg_fault_detector_client:build_operation_id(ServiceType, OpType, RecPayToolID),
-
-            _ = notify_fault_detector(start, ServiceID, OperationID),
-            try hg_proxy_provider:handle_recurrent_token_callback(
+            {ok, CallbackResult} = hg_proxy_provider:handle_recurrent_token_callback(
                 Payload,
                 ProxyContext,
                 get_route(St)
-            ) of
-                {ok, CallbackResult} ->
-                    _ = notify_fault_detector(finish, ServiceID, OperationID),
-                    {Response, Result} = handle_callback_result(CallbackResult, Action, get_session(St)),
-                    maps:merge(#{response => Response}, finish_processing(Result, St));
-                _ ->
-                    _ = notify_fault_detector(finish, ServiceID, OperationID),
-                    throw(invalid_callback)
-            catch
-                Error ->
-                    _ = notify_fault_detector(error, ServiceID, OperationID),
-                    error(Error)
-            end
+            ),
+            {Response, Result} = handle_callback_result(CallbackResult, Action, get_session(St)),
+            maps:merge(#{response => Response}, finish_processing(Result, St));
+        _ ->
+            throw(invalid_callback)
     end.
 
 -type tag()               :: dmsl_base_thrift:'Tag'().

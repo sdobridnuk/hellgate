@@ -4,24 +4,6 @@
 
 -include_lib("fault_detector_proto/include/fd_proto_fault_detector_thrift.hrl").
 
--define(DEFAULT_CONFIG, #fault_detector_ServiceConfig{
-    sliding_window = genlib_app:env(
-        hellgate,
-        fault_detector_default_sliding_window,
-        60000
-    ),
-    operation_time_limit = genlib_app:env(
-        hellgate,
-        fault_detector_default_operation_time_limit,
-        10000
-    ),
-    pre_aggregation_size = genlib_app:env(
-        hellgate,
-        fault_detector_default_pre_aggregation_size,
-        2
-    )
-}).
-
 -define(service_config(SW, OTL, PAS), #fault_detector_ServiceConfig{
      sliding_window       = SW,
      operation_time_limit = OTL,
@@ -41,7 +23,7 @@
 -export([build_config/3]).
 
 -export([build_service_id/2]).
--export([build_operation_id/3]).
+-export([build_operation_id/1]).
 
 -export([init_service/1]).
 -export([init_service/2]).
@@ -107,9 +89,9 @@ build_service_id(ServiceType, ID) ->
 %% `build_operation_id_id/3` is a helper function for building operation IDs
 %% @end
 %%------------------------------------------------------------------------------
--spec build_operation_id(fd_service_type(), binary(), binary()) -> binary().
-build_operation_id(ServiceType, OperationType, ID) ->
-    do_build_operation_id(ServiceType, OperationType, ID).
+-spec build_operation_id(fd_service_type()) -> binary().
+build_operation_id(ServiceType) ->
+    do_build_operation_id(ServiceType).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -122,7 +104,13 @@ build_operation_id(ServiceType, OperationType, ID) ->
 -spec init_service(service_id()) ->
     {ok, initialised} | {error, any()}.
 init_service(ServiceId) ->
-    call('InitService', [ServiceId, ?DEFAULT_CONFIG]).
+    #{default_service_config := #{
+        sliding_window       := SlidingWindow,
+        operation_time_limit := OpTimeLimit,
+        pre_aggregation_size := PreAggrSize
+    }} = genlib_app:env(hellgate, fault_detector),
+    ServiceConfig = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
+    call('InitService', [ServiceId, ServiceConfig]).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -160,7 +148,13 @@ get_statistics(ServiceIds) when is_list(ServiceIds) ->
 -spec register_operation(operation_status(), service_id(), operation_id()) ->
     {ok, registered} | {error, not_found} | {error, any()}.
 register_operation(Status, ServiceId, OperationId) ->
-    register_operation(Status, ServiceId, OperationId, ?DEFAULT_CONFIG).
+    #{default_service_config := #{
+        sliding_window       := SlidingWindow,
+        operation_time_limit := OpTimeLimit,
+        pre_aggregation_size := PreAggrSize
+    }} = genlib_app:env(hellgate, fault_detector),
+    ServiceConfig = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
+    register_operation(Status, ServiceId, OperationId, ServiceConfig).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -182,12 +176,13 @@ register_operation(Status, ServiceId, OperationId, ServiceConfig) ->
 %% PRIVATE
 
 call(Function, Args) ->
-    Opts = #{
-        url => genlib:to_binary( maps:get(fault_detector, genlib_app:env(hellgate, services)))
-    },
-    Deadline = woody_deadline:from_timeout(
-        genlib_app:env(hellgate, fault_detector_timeout, infinity)
-    ),
+    ServiceUrls = genlib_app:env(hellgate, services),
+    Url         = genlib:to_binary(maps:get(fault_detector, ServiceUrls)),
+    Opts        = #{url => Url},
+
+    %% TODO: Timeout from context ???
+    #{timeout := Timeout} = genlib_app:env(hellgate, fault_detector, #{timeout => infinity}),
+    Deadline    = woody_deadline:from_timeout(Timeout),
     do_call(Function, Args, Opts, Deadline).
 
 do_call('InitService', Args, Opts, Deadline) ->
@@ -196,8 +191,8 @@ do_call('InitService', Args, Opts, Deadline) ->
     catch
         _Error:Reason ->
             [ServiceId | _] = Args,
-            String = "Unable to init service ~p with config ~p in fault detector.\n~p",
-            _ = lager:error(String, [ServiceId, Reason]),
+            String = "Unable to init service ~p in fault detector.\n~p",
+            _ = lager:warning(String, [ServiceId, Reason]),
             {error, Reason}
     end;
 do_call('GetStatistics', Args, Opts, Deadline) ->
@@ -206,7 +201,7 @@ do_call('GetStatistics', Args, Opts, Deadline) ->
     catch
         _Error:Reason ->
             String = "Unable to get statistics from fault detector.\n~p",
-            _ = lager:error(String, [Reason]),
+            _ = lager:warning(String, [Reason]),
             []
     end;
 do_call('RegisterOperation', Args, Opts, Deadline) ->
@@ -219,7 +214,7 @@ do_call('RegisterOperation', Args, Opts, Deadline) ->
         _Error:Reason ->
             [ServiceId, OperationId | _] = Args,
             String = "Unable to register operation ~p for service ~p in fault detector.\n~p",
-            _ = lager:error(String, [OperationId, ServiceId, Reason]),
+            _ = lager:warning(String, [OperationId, ServiceId, Reason]),
             {error, Reason}
     end.
 
@@ -230,11 +225,9 @@ do_build_service_id(adapter_availability, ID) ->
         ID
     ]).
 
-do_build_operation_id(adapter_availability, OperationType, ID) ->
+do_build_operation_id(adapter_availability) ->
     hg_utils:construct_complex_id([
         <<"hellgate_operation">>,
         <<"adapter_availability">>,
-        OperationType,
-        ID,
-        erlang:integer_to_binary(os:system_time())
+        hg_utils:unique_id()
     ]).

@@ -88,8 +88,6 @@ gather_routes(Predestination, FailRatedProviders, RejectContext, VS, Revision) -
 choose_route(FailRatedRoutes, RejectContext, VS) ->
     do_choose_route(FailRatedRoutes, VS, RejectContext).
 
-%% ------
-
 select_providers(Predestination, PaymentInstitution, VS, Revision, RejectContext) ->
     ProviderSelector = PaymentInstitution#domain_PaymentInstitution.providers,
     ProviderRefs0    = reduce(provider, ProviderSelector, VS, Revision),

@@ -140,10 +140,14 @@ start_app(hellgate = AppName) ->
             refunded => {intervals, [1, 1, 1]}
         }},
         {inspect_timeout, 1000},
-        {fault_detector_timeout, 2000},
-        {fault_detector_default_sliding_window, 60000},
-        {fault_detector_default_operation_time_limit, 10000},
-        {fault_detector_default_pre_aggregation_size, 2}
+        {fault_detector, #{
+            timeout => 2000,
+            default_service_config => #{
+                sliding_window => 60000,
+                operation_time_limit => 60000,
+                pre_aggregation_size => 2
+            }
+        }}
     ]), #{
         hellgate_root_url => get_hellgate_url()
     }};

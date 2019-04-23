@@ -606,17 +606,6 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
             end
     end.
 
-notify_fault_detector(start, ServiceID, OperationID) ->
-    case hg_fault_detector_client:register_operation(start, ServiceID, OperationID) of
-        {error, not_found} ->
-            _ = hg_fault_detector_client:init_service(ServiceID),
-            _ = hg_fault_detector_client:register_operation(start, ServiceID, OperationID);
-        Result ->
-            Result
-    end;
-notify_fault_detector(Status, ServiceID, OperationID) ->
-    hg_fault_detector_client:register_operation(Status, ServiceID, OperationID).
-
 -spec choose_routing_predestination(payment()) -> hg_routing:route_predestination().
 choose_routing_predestination(#domain_InvoicePayment{make_recurrent = true}) ->
     recurrent_payment;
@@ -1507,7 +1496,8 @@ repair_session(St = #st{repair_scenario = Scenario}) ->
             {ok, Result};
         call ->
             ProxyContext = construct_proxy_context(St),
-            issue_process_call(ProxyContext, St)
+            Route        = get_route(St),
+            hg_proxy_provider:process_payment(ProxyContext, Route)
     end.
 
 -spec finalize_payment(action(), st()) -> machine_result().
@@ -1536,7 +1526,8 @@ process_callback_timeout(Action, Session, Events, St) ->
 
 handle_callback(Payload, Action, St) ->
     ProxyContext = construct_proxy_context(St),
-    {ok, CallbackResult} = issue_callback_call(Payload, ProxyContext, St),
+    Route        = get_route(St),
+    {ok, CallbackResult} = hg_proxy_provider:handle_payment_callback(Payload, ProxyContext, Route),
     {Response, Result} = handle_callback_result(CallbackResult, Action, get_activity_session(St)),
     {Response, finish_session_processing(Result, St)}.
 
@@ -2491,43 +2482,6 @@ get_customer(CustomerID) ->
         {exception, Error} ->
             error({<<"Can't get customer">>, Error})
     end.
-
-issue_process_call(ProxyContext, St) ->
-    issue_proxy_call('ProcessPayment', [ProxyContext], St).
-
-issue_callback_call(Payload, ProxyContext, St) ->
-    issue_proxy_call('HandlePaymentCallback', [Payload, ProxyContext], St).
-
-issue_proxy_call(Func, Args, St) ->
-    CallOpts    = get_call_options(St),
-    Route       = get_route(St),
-    ProviderRef = get_route_provider_ref(Route),
-    ProviderID  = ProviderRef#domain_ProviderRef.id,
-    BinaryID    = erlang:integer_to_binary(ProviderID),
-    ServiceType = adapter_availability,
-    ServiceID   = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
-
-    OpType      = <<"invoice_payment">>,
-    Opts        = get_opts(St),
-    InvoiceID   = get_invoice_id(get_invoice(Opts)),
-    PaymentID   = get_payment_id(get_payment(St)),
-    CompoundID  = <<InvoiceID/binary, <<"_">>/binary, PaymentID/binary>>,
-    OperationID = hg_fault_detector_client:build_operation_id(ServiceType, OpType, CompoundID),
-    _ = notify_fault_detector(start, ServiceID, OperationID),
-    try hg_woody_wrapper:call(proxy_provider, Func, Args, CallOpts) of
-        Result ->
-            _ = notify_fault_detector(finish, ServiceID, OperationID),
-            Result
-    catch
-        Error ->
-            _ = notify_fault_detector(error, ServiceID, OperationID),
-            error(Error)
-    end.
-
-get_call_options(St) ->
-    Revision = hg_domain:head(),
-    Provider = hg_domain:get(Revision, {provider, get_route_provider_ref(get_route(St))}),
-    hg_proxy:get_call_options(Provider#domain_Provider.proxy, Revision).
 
 get_route(#st{route = Route}) ->
     Route.

@@ -49,8 +49,5 @@ handle_function(
             }
          ]};
 
-% handle_function('GetStatistics', _Args, _Context, _Options) ->
-%     {ok, []};
-
 handle_function(_Function, _Args, _Context, _Options) ->
     {ok, undefined}.
