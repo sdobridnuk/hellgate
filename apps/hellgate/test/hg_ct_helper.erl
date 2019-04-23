@@ -144,7 +144,7 @@ start_app(hellgate = AppName) ->
             timeout => 2000,
             default_service_config => #{
                 sliding_window => 60000,
-                operation_time_limit => 60000,
+                operation_time_limit => 10000,
                 pre_aggregation_size => 2
             }
         }}
