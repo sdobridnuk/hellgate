@@ -136,18 +136,16 @@ start_app(hellgate = AppName) ->
         }},
         {payment_retry_policy, #{
             processed => {intervals, [1, 1, 1]},
-            captured => {intervals, [1, 1, 1]},
-            refunded => {intervals, [1, 1, 1]}
+            captured  => {intervals, [1, 1, 1]},
+            refunded  => {intervals, [1, 1, 1]}
         }},
         {inspect_timeout, 1000},
-        {critical_fail_rate, 0.7},
         {fault_detector, #{
-            timeout => 2000,
-            default_service_config => #{
-                sliding_window => 60000,
-                operation_time_limit => 10000,
-                pre_aggregation_size => 2
-            }
+            critical_fail_rate   => 0.7,
+            timeout              => 2000,
+            sliding_window       => 60000,
+            operation_time_limit => 10000,
+            pre_aggregation_size => 2
         }}
     ]), #{
         hellgate_root_url => get_hellgate_url()
