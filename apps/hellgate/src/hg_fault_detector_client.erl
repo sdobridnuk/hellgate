@@ -19,6 +19,7 @@
 -define(state_error(TimeStamp),  #fault_detector_Error{ time_end   = TimeStamp }).
 -define(state_finish(TimeStamp), #fault_detector_Finish{ time_end  = TimeStamp }).
 
+-export([build_config/0]).
 -export([build_config/2]).
 -export([build_config/3]).
 
@@ -48,14 +49,34 @@
 
 %%------------------------------------------------------------------------------
 %% @doc
-%% `build_config/2` receives the length of the sliding windown and the operation
-%% time limit as arguments. The config can then be used with `init_service/2`
-%% and `register_operation/4`.
+%% `build_config/0` creaates a default config that can be used  with
+%% `init_service/2` and `register_operation/4`.
+%%
+%% The default values can be adjusted via sys.config.
 %%
 %% Config
 %% `SlidingWindow`: pick operations from SlidingWindow milliseconds.
+%%      Default: 60000
 %% `OpTimeLimit`: expected operation execution time, in milliseconds.
+%%      Default: 10000
 %% `PreAggrSize`: time interval for data preaggregation, in seconds.
+%%      Default: 2
+%% @end
+%%------------------------------------------------------------------------------
+-spec build_config() ->
+    service_config().
+build_config() ->
+    EnvFDConfig     = genlib_app:env(hellgate, fault_detector, #{}),
+    SlidingWindow   = genlib_map:get(sliding_window,       EnvFDConfig, 60000),
+    OpTimeLimit     = genlib_map:get(operation_time_limit, EnvFDConfig, 10000),
+    PreAggrSize     = genlib_map:get(pre_aggregation_size, EnvFDConfig, 2),
+    ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize).
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% `build_config/2` receives the length of the sliding windown and the operation
+%% time limit as arguments. The config can then be used with `init_service/2`
+%% and `register_operation/4`.
 %% @end
 %%------------------------------------------------------------------------------
 -spec build_config(sliding_window(), operation_time_limit()) ->
@@ -104,12 +125,7 @@ build_operation_id(ServiceType) ->
 -spec init_service(service_id()) ->
     {ok, initialised} | {error, any()}.
 init_service(ServiceId) ->
-    #{default_service_config := #{
-        sliding_window       := SlidingWindow,
-        operation_time_limit := OpTimeLimit,
-        pre_aggregation_size := PreAggrSize
-    }} = genlib_app:env(hellgate, fault_detector),
-    ServiceConfig = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
+    ServiceConfig = build_config(),
     call('InitService', [ServiceId, ServiceConfig]).
 
 %%------------------------------------------------------------------------------
@@ -148,18 +164,14 @@ get_statistics(ServiceIds) when is_list(ServiceIds) ->
 -spec register_operation(operation_status(), service_id(), operation_id()) ->
     {ok, registered} | {error, not_found} | {error, any()}.
 register_operation(Status, ServiceId, OperationId) ->
-    #{default_service_config := #{
-        sliding_window       := SlidingWindow,
-        operation_time_limit := OpTimeLimit,
-        pre_aggregation_size := PreAggrSize
-    }} = genlib_app:env(hellgate, fault_detector),
-    ServiceConfig = ?service_config(SlidingWindow, OpTimeLimit, PreAggrSize),
+    ServiceConfig = build_config(),
     register_operation(Status, ServiceId, OperationId, ServiceConfig).
 
 %%------------------------------------------------------------------------------
 %% @doc
-%% `register_operation/4` is analogous to `register_operation/3` but also receives
-%% configuration for the fault detector service created by `build_config/3`.
+%% `register_operation/4` is analogous to `register_operation/3` but also
+%% receives configuration for the fault detector service created
+%% by `build_config/3`.
 %% @end
 %%------------------------------------------------------------------------------
 -spec register_operation(operation_status(), service_id(), operation_id(), service_config()) ->
@@ -179,9 +191,8 @@ call(Function, Args) ->
     ServiceUrls = genlib_app:env(hellgate, services),
     Url         = genlib:to_binary(maps:get(fault_detector, ServiceUrls)),
     Opts        = #{url => Url},
-
-    %% TODO: Timeout from context ???
-    #{timeout := Timeout} = genlib_app:env(hellgate, fault_detector, #{timeout => infinity}),
+    EnvFDConfig = genlib_app:env(hellgate, fault_detector, #{}),
+    Timeout     = genlib_map:get(timeout, EnvFDConfig, infinity),
     Deadline    = woody_deadline:from_timeout(Timeout),
     do_call(Function, Args, Opts, Deadline).
 
@@ -214,7 +225,6 @@ do_call('GetStatistics', Args, Opts, Deadline) ->
             _ = lager:warning(String, [ServiceIds, error, Reason]),
             [];
         error:{woody_error, {_Source, result_unexpected, _Details}} = Reason ->
-        % _Error:Reason ->
             [ServiceIds | _] = Args,
             String = "Unable to get statistics for services ~p from fault detector, ~p:~p",
             _ = lager:error(String, [ServiceIds, error, Reason]),
