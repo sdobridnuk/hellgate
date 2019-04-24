@@ -28,7 +28,6 @@
 -type route_predestination() :: payment | recurrent_paytool | recurrent_payment.
 
 -define(rejected(Reason), {rejected, Reason}).
--define(critical_fail_rate, genlib_app:env(hellgate, critical_fail_rate, 0.7)).
 
 -type reject_context() :: #{
     varset              := hg_selector:varset(),
@@ -131,34 +130,8 @@ choose_scored_route([], RejectContext) ->
 choose_scored_route([{_Score, Route}], _RejectContext) ->
     {ok, export_route(Route)};
 choose_scored_route(ScoredRoutes, _RejectContext) ->
-    [ScoredRoute|Rest] = lists:sort(fun sort_by_risk_score/2, ScoredRoutes),
-    do_choose_scored_route(Rest, ScoredRoute).
-
-sort_by_risk_score(
-    {{RiskScore0, _Condition0, _FailRate0}, _Route0},
-    {{RiskScore1, _Condition1, _FailRate1}, _Route1}
- ) ->
-    RiskScore0 >= RiskScore1.
-
-do_choose_scored_route([], {_Status, Route}) ->
-    {ok, export_route(Route)};
-do_choose_scored_route([NewScoredRoute|Rest], CurrentScoredRoute) ->
-    case {NewScoredRoute, CurrentScoredRoute} of
-        {{{_NewRiskScore,     alive, _NewFailRate},     _},
-         {{_CurrentRiskScore, dead,  _CurrentFailRate}, _}} ->
-            do_choose_scored_route(Rest, NewScoredRoute);
-        {{{_NewRiskScore,     dead,  _NewFailRate},     _},
-         {{_CurrentRiskScore, alive, _CurrentFailRate}, _}} ->
-            do_choose_scored_route(Rest, CurrentScoredRoute);
-        {{{NewRiskScore,     _, NewFailRate},     _},
-         {{CurrentRiskScore, _, CurrentFailRate}, _}}
-            when NewRiskScore  >  CurrentRiskScore;
-                 NewRiskScore =:= CurrentRiskScore,
-                 NewFailRate   <  CurrentFailRate ->
-            do_choose_scored_route(Rest, NewScoredRoute);
-        _Otherwise ->
-            do_choose_scored_route(Rest, CurrentScoredRoute)
-    end.
+    [{_Score, Route}|_Rest] = lists:reverse(lists:keysort(1, ScoredRoutes)),
+    {ok, export_route(Route)}.
 
 score_routes(Routes, VS) ->
     [{score_route(R, VS), {Provider, Terminal}} || {Provider, Terminal, _ProviderStatus} = R <- Routes].
@@ -172,27 +145,29 @@ score_providers_with_fault_detector([]) -> [];
 score_providers_with_fault_detector(Providers) ->
     ServiceIDs         = [build_fd_service_id(PR) || {PR, _P} <- Providers],
     FDStats            = hg_fault_detector_client:get_statistics(ServiceIDs),
-    FailRatedProviders = [{PR, P, get_provider_fail_rate(PR, P, FDStats)} || {PR, P} <- Providers],
+    FailRatedProviders = [{PR, P, get_provider_status(PR, P, FDStats)} || {PR, P} <- Providers],
     FailRatedProviders.
 
 %% TODO: maybe use custom cutoffs per provider
-get_provider_fail_rate(ProviderRef, _Provider, FDStats) ->
-    ProviderID = build_fd_service_id(ProviderRef),
-    CriticalFailRate = ?critical_fail_rate,
+get_provider_status(ProviderRef, _Provider, FDStats) ->
+    ProviderID       = build_fd_service_id(ProviderRef),
+    FDConfig         = genlib_app:env(hellgate, fault_detector, #{}),
+    CriticalFailRate = genlib_map:get(critical_fail_rate, FDConfig, 0.7),
     case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FDStats) of
         {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}}
             when FailRate >= CriticalFailRate ->
-            {dead, FailRate};
+            {0, FailRate};
         {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
-            {alive, FailRate};
+            {1, FailRate};
         false ->
-            {alive, 0.0}
+            {1, 0.0}
     end.
 
 score_route({_Provider, {_TerminalRef, Terminal}, ProviderStatus}, VS) ->
     RiskCoverage = score_risk_coverage(Terminal, VS),
     {ProviderCondition, FailRate} = ProviderStatus,
-    {RiskCoverage, ProviderCondition, FailRate}.
+    SuccessRate = 1.0 - FailRate,
+    {ProviderCondition, RiskCoverage, SuccessRate}.
 
 %% NOTE
 %% Score ∈ [0.0 .. 1.0]
