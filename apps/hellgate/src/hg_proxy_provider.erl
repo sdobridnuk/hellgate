@@ -89,9 +89,9 @@ issue_call(Func, Args, Route) ->
             _ = notify_fault_detector(finish, ServiceID, OperationID),
             Result
     catch
-        _Error:Reason ->
+        error:{woody_error, _ErrorType} = Reason ->
             _ = notify_fault_detector(error, ServiceID, OperationID),
-            {error, Reason}
+            error(Reason)
     end.
 
 notify_fault_detector(start, ServiceID, OperationID) ->
