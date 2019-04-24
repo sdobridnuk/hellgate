@@ -17,7 +17,9 @@
 
 -export([gathers_fail_rated_providers/1]).
 -export([no_route_found_for_payment/1]).
--export([fail_rate_affects_routing/1]).
+-export([prefer_alive/1]).
+-export([prefer_better_risk_score/1]).
+-export([prefer_lower_fail_rate/1]).
 
 -behaviour(supervisor).
 -export([init/1]).
@@ -36,12 +38,18 @@ init([]) ->
 -spec all() -> [test_case_name() | {group, group_name()}].
 all() -> [
     no_route_found_for_payment,
-    fail_rate_affects_routing,
-    gathers_fail_rated_providers
+    {group, routing_with_fail_rate}
 ].
 
 -spec groups() -> [{group_name(), list(), [test_case_name()]}].
-groups() -> [].
+groups() -> [
+                {routing_with_fail_rate, [parallel], [
+                    gathers_fail_rated_providers,
+                    prefer_alive,
+                    prefer_better_risk_score,
+                    prefer_lower_fail_rate
+                ]}
+            ].
 
 -spec init_per_suite(config()) -> config().
 init_per_suite(C) ->
@@ -66,20 +74,26 @@ end_per_suite(C) ->
     ok = hg_domain:cleanup().
 
 -spec init_per_group(group_name(), config()) -> config().
-init_per_group(_, C) -> C.
+init_per_group(routing_with_fail_rate, C) ->
+    Revision = hg_domain:head(),
+    ok = hg_domain:upsert(routing_with_fail_rate_fixture(Revision)),
+    C;
+init_per_group(_, C) ->
+    C.
 
 -spec end_per_group(group_name(), config()) -> _.
-end_per_group(_Group, _C) -> ok.
+end_per_group(routing_with_fail_rate, C) ->
+    _ = case cfg(original_domain_revision, C) of
+        Revision when is_integer(Revision) ->
+            ok = hg_domain:reset(Revision);
+        undefined ->
+            ok
+    end,
+    ok;
+end_per_group(_Group, _C) ->
+    ok.
 
 -spec init_per_testcase(test_case_name(), config()) -> config().
-init_per_testcase(gathers_fail_rated_providers, C) ->
-    Revision = hg_domain:head(),
-    ok = hg_domain:upsert(fail_rate_affects_routing_fixture(Revision)),
-    C;
-init_per_testcase(fail_rate_affects_routing, C) ->
-    Revision = hg_domain:head(),
-    ok = hg_domain:upsert(fail_rate_affects_routing_fixture(Revision)),
-    C;
 init_per_testcase(_, C) -> C.
 
 -spec end_per_testcase(test_case_name(), config()) -> config().
@@ -112,9 +126,9 @@ gathers_fail_rated_providers(_C) ->
 
     {Providers0, _RejectContext0} = hg_routing:gather_providers(payment, PaymentInstitution, VS, Revision),
     [
-        {?prv(202), _, 0.0},
-        {?prv(201), _, 0.1},
-        {?prv(200), _, 0.9}
+        {?prv(202), _, {alive, 0.0}},
+        {?prv(201), _, {alive, 0.1}},
+        {?prv(200), _, {dead, 0.9}}
     ] = hg_routing:gather_provider_fail_rates(Providers0),
 
     hg_context:cleanup(),
@@ -122,6 +136,7 @@ gathers_fail_rated_providers(_C) ->
 
 -spec no_route_found_for_payment(config()) -> test_return().
 no_route_found_for_payment(_C) ->
+    ok = hg_context:save(hg_context:create()),
     VS0 = #{
         category        => ?cat(1),
         currency        => ?cur(<<"RUB">>),
@@ -189,11 +204,11 @@ no_route_found_for_payment(_C) ->
     }},
 
     Result1 = hg_routing:choose_route(FailRatedRoutes1, RejectContext3, VS1),
+    hg_context:cleanup(),
     ok.
 
--spec fail_rate_affects_routing(config()) -> test_return().
-
-fail_rate_affects_routing(_C) ->
+-spec prefer_alive(config()) -> test_return().
+prefer_alive(_C) ->
     VS = #{
         category        => ?cat(1),
         currency        => ?cur(<<"RUB">>),
@@ -211,29 +226,83 @@ fail_rate_affects_routing(_C) ->
 
     {ProviderRefs, ProviderData} = lists:unzip(Providers),
 
-    FailRatedProviders0 = lists:zip3(ProviderRefs, ProviderData, [0.0, 1.0, 1.0]),
-    FailRatedProviders1 = lists:zip3(ProviderRefs, ProviderData, [1.0, 0.0, 1.0]),
-    FailRatedProviders2 = lists:zip3(ProviderRefs, ProviderData, [1.0, 1.0, 0.0]),
-    FailRatedProviders3 = lists:zip3(ProviderRefs, ProviderData, [0.7, 0.6, 1.0]),
+    FailRatedProviders0 = lists:zip3(ProviderRefs, ProviderData, [{alive, 0.0},  {dead, 1.0},  {dead, 1.0}]),
+    FailRatedProviders1 = lists:zip3(ProviderRefs, ProviderData, [ {dead, 1.0}, {alive, 0.0},  {dead, 1.0}]),
+    FailRatedProviders2 = lists:zip3(ProviderRefs, ProviderData, [ {dead, 1.0},  {dead, 1.0}, {alive, 0.0}]),
 
     {FailRatedRoutes0, RC0} = hg_routing:gather_routes(payment, FailRatedProviders0, RejectContext, VS, Revision),
     {FailRatedRoutes1, RC1} = hg_routing:gather_routes(payment, FailRatedProviders1, RejectContext, VS, Revision),
     {FailRatedRoutes2, RC2} = hg_routing:gather_routes(payment, FailRatedProviders2, RejectContext, VS, Revision),
-    {FailRatedRoutes3, RC3} = hg_routing:gather_routes(payment, FailRatedProviders3, RejectContext, VS, Revision),
 
     Result0 = hg_routing:choose_route(FailRatedRoutes0, RC0, VS),
     Result1 = hg_routing:choose_route(FailRatedRoutes1, RC1, VS),
     Result2 = hg_routing:choose_route(FailRatedRoutes2, RC2, VS),
-    Result3 = hg_routing:choose_route(FailRatedRoutes3, RC3, VS),
 
     {ok, #domain_PaymentRoute{provider = ?prv(202)}} = Result0,
     {ok, #domain_PaymentRoute{provider = ?prv(201)}} = Result1,
     {ok, #domain_PaymentRoute{provider = ?prv(200)}} = Result2,
-    {ok, #domain_PaymentRoute{provider = ?prv(201)}} = Result3,
 
     ok.
 
-fail_rate_affects_routing_fixture(Revision) ->
+-spec prefer_better_risk_score(config()) -> test_return().
+prefer_better_risk_score(_C) ->
+    VS = #{
+        category        => ?cat(1),
+        currency        => ?cur(<<"RUB">>),
+        cost            => ?cash(1000, <<"RUB">>),
+        payment_tool    => {payment_terminal, #domain_PaymentTerminal{terminal_type = euroset}},
+        party_id        => <<"12345">>,
+        risk_score      => low,
+        flow            => instant
+    },
+
+    Revision = hg_domain:head(),
+    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
+
+    {Providers, RejectContext} = hg_routing:gather_providers(payment, PaymentInstitution, VS, Revision),
+
+    {ProviderRefs, ProviderData} = lists:unzip(Providers),
+
+    FailRatedProviders = lists:zip3(ProviderRefs, ProviderData, [{alive, 0.6}, {alive, 0.6}, {dead, 0.8}]),
+
+    {FailRatedRoutes, RC} = hg_routing:gather_routes(payment, FailRatedProviders, RejectContext, VS, Revision),
+
+    Result = hg_routing:choose_route(FailRatedRoutes, RC, VS),
+
+    {ok, #domain_PaymentRoute{provider = ?prv(201)}} = Result,
+
+    ok.
+
+-spec prefer_lower_fail_rate(config()) -> test_return().
+prefer_lower_fail_rate(_C) ->
+    VS = #{
+        category        => ?cat(1),
+        currency        => ?cur(<<"RUB">>),
+        cost            => ?cash(1000, <<"RUB">>),
+        payment_tool    => {payment_terminal, #domain_PaymentTerminal{terminal_type = euroset}},
+        party_id        => <<"12345">>,
+        risk_score      => low,
+        flow            => instant
+    },
+
+    Revision = hg_domain:head(),
+    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
+
+    {Providers, RejectContext} = hg_routing:gather_providers(payment, PaymentInstitution, VS, Revision),
+
+    {ProviderRefs, ProviderData} = lists:unzip(Providers),
+
+    FailRatedProviders5 = lists:zip3(ProviderRefs, ProviderData, [{dead, 0.8}, {alive, 0.6}, {alive, 0.5}]),
+
+    {FailRatedRoutes5, RC5} = hg_routing:gather_routes(payment, FailRatedProviders5, RejectContext, VS, Revision),
+
+    Result5 = hg_routing:choose_route(FailRatedRoutes5, RC5, VS),
+
+    {ok, #domain_PaymentRoute{provider = ?prv(200)}} = Result5,
+
+    ok.
+
+routing_with_fail_rate_fixture(Revision) ->
     PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
     [
         {payment_institution, #domain_PaymentInstitutionObject{

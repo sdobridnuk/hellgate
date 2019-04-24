@@ -28,6 +28,7 @@
 -type route_predestination() :: payment | recurrent_paytool | recurrent_payment.
 
 -define(rejected(Reason), {rejected, Reason}).
+-define(critical_fail_rate, genlib_app:env(hellgate, critical_fail_rate, 0.7)).
 
 -type reject_context() :: #{
     varset              := hg_selector:varset(),
@@ -41,10 +42,13 @@
 -type provider_ref() :: dmsl_domain_thrift:'ProviderRef'().
 -type terminal()     :: dmsl_domain_thrift:'Terminal'().
 -type terminal_ref() :: dmsl_domain_thrift:'TerminalRef'().
--type fail_rate()    :: float().
 
--type fail_rated_provider() :: {provider_ref(), provider(), fail_rate()}.
--type fail_rated_route()    :: {provider_ref(), {terminal_ref(), terminal()}, fail_rate()}.
+-type provider_status()     :: {provider_condition(), fail_rate()}.
+-type provider_condition()  :: alive | dead.
+-type fail_rate()           :: float().
+
+-type fail_rated_provider() :: {provider_ref(), provider(), provider_status()}.
+-type fail_rated_route()    :: {provider_ref(), {terminal_ref(), terminal()}, provider_status()}.
 
 -export_type([route_predestination/0]).
 
@@ -118,16 +122,46 @@ select_routes(Predestination, FailRatedProviders, VS, Revision, RejectContext) -
     ),
     {Accepted, RejectContext#{rejected_terminals => Rejected}}.
 
-do_choose_route(Routes, VS, RejectContext) ->
-    case lists:reverse(lists:keysort(1, score_routes(Routes, VS))) of
-        [{_Score, Route} | _] ->
-            {ok, export_route(Route)};
-        [] ->
-            {error, {no_route_found, RejectContext}}
+do_choose_route(FailRatedRoutes, VS, RejectContext) ->
+    ScoredRoutes = score_routes(FailRatedRoutes, VS),
+    choose_scored_route(ScoredRoutes, RejectContext).
+
+choose_scored_route([], RejectContext) ->
+    {error, {no_route_found, RejectContext}};
+choose_scored_route([{_Score, Route}], _RejectContext) ->
+    {ok, export_route(Route)};
+choose_scored_route(ScoredRoutes, _RejectContext) ->
+    [ScoredRoute|Rest] = lists:sort(fun sort_by_risk_score/2, ScoredRoutes),
+    do_choose_scored_route(Rest, ScoredRoute).
+
+sort_by_risk_score(
+    {{RiskScore0, _Condition0, _FailRate0}, _Route0},
+    {{RiskScore1, _Condition1, _FailRate1}, _Route1}
+ ) ->
+    RiskScore0 >= RiskScore1.
+
+do_choose_scored_route([], {_Status, Route}) ->
+    {ok, export_route(Route)};
+do_choose_scored_route([NewScoredRoute|Rest], CurrentScoredRoute) ->
+    case {NewScoredRoute, CurrentScoredRoute} of
+        {{{_NewRiskScore,     alive, _NewFailRate},     _},
+         {{_CurrentRiskScore, dead,  _CurrentFailRate}, _}} ->
+            do_choose_scored_route(Rest, NewScoredRoute);
+        {{{_NewRiskScore,     dead,  _NewFailRate},     _},
+         {{_CurrentRiskScore, alive, _CurrentFailRate}, _}} ->
+            do_choose_scored_route(Rest, CurrentScoredRoute);
+        {{{NewRiskScore,     _, NewFailRate},     _},
+         {{CurrentRiskScore, _, CurrentFailRate}, _}}
+            when NewRiskScore  >  CurrentRiskScore;
+                 NewRiskScore =:= CurrentRiskScore,
+                 NewFailRate   <  CurrentFailRate ->
+            do_choose_scored_route(Rest, NewScoredRoute);
+        _Otherwise ->
+            do_choose_scored_route(Rest, CurrentScoredRoute)
     end.
 
 score_routes(Routes, VS) ->
-    [{score_route(R, VS), {Provider, Terminal}} || {Provider, Terminal, _FailRate} = R <- Routes].
+    [{score_route(R, VS), {Provider, Terminal}} || {Provider, Terminal, _ProviderStatus} = R <- Routes].
 
 export_route({ProviderRef, {TerminalRef, _Terminal}}) ->
     % TODO shouldn't we provide something along the lines of `get_provider_ref/1`,
@@ -135,22 +169,39 @@ export_route({ProviderRef, {TerminalRef, _Terminal}}) ->
     ?route(ProviderRef, TerminalRef).
 
 score_providers_with_fault_detector([]) -> [];
-score_providers_with_fault_detector([{ProviderRef, Provider}]) -> [{ProviderRef, Provider, 0.0}];
 score_providers_with_fault_detector(Providers) ->
     ServiceIDs         = [build_fd_service_id(PR) || {PR, _P} <- Providers],
     FDStats            = hg_fault_detector_client:get_statistics(ServiceIDs),
-    FailRatedProviders = [{PR, P, get_provider_fail_rate(PR, FDStats)} || {PR, P} <- Providers],
+    FailRatedProviders = [{PR, P, get_provider_fail_rate(PR, P, FDStats)} || {PR, P} <- Providers],
     FailRatedProviders.
 
-get_provider_fail_rate(ProviderRef, FDStats) ->
+%% TODO: maybe use custom cutoffs per provider
+get_provider_fail_rate(ProviderRef, _Provider, FDStats) ->
     ProviderID = build_fd_service_id(ProviderRef),
+    CriticalFailRate = ?critical_fail_rate,
     case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FDStats) of
+        {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}}
+            when FailRate >= CriticalFailRate ->
+            {dead, FailRate};
         {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
-            FailRate;
-
+            {alive, FailRate};
         false ->
-            0.0
+            {alive, 0.0}
     end.
+
+score_route({_Provider, {_TerminalRef, Terminal}, ProviderStatus}, VS) ->
+    RiskCoverage = score_risk_coverage(Terminal, VS),
+    {ProviderCondition, FailRate} = ProviderStatus,
+    {RiskCoverage, ProviderCondition, FailRate}.
+
+%% NOTE
+%% Score ∈ [0.0 .. 1.0]
+%% Higher score is better, e.g. route is more likely to be chosen.
+
+score_risk_coverage(Terminal, VS) ->
+    RiskScore = getv(risk_score, VS),
+    RiskCoverage = Terminal#domain_Terminal.risk_coverage,
+    math:exp(-hg_inspector:compare_risk_score(RiskCoverage, RiskScore)).
 
 build_fd_service_id(#domain_ProviderRef{id = ID}) ->
     BinaryID = erlang:integer_to_binary(ID),
@@ -168,18 +219,6 @@ get_payments_terms(?route(ProviderRef, TerminalRef), Revision) ->
 get_rec_paytools_terms(?route(ProviderRef, _), Revision) ->
     #domain_Provider{recurrent_paytool_terms = Terms} = hg_domain:get(Revision, {provider, ProviderRef}),
     Terms.
-
-%% NOTE
-%% Score ∈ [0.0 .. 1.0]
-%% Higher score is better, e.g. route is more likely to be chosen.
-
-score_route({_Provider, {_TerminalRef, Terminal}, FailRate}, VS) ->
-    score_risk_coverage(Terminal, VS) * (1 - FailRate).
-
-score_risk_coverage(Terminal, VS) ->
-    RiskScore = getv(risk_score, VS),
-    RiskCoverage = Terminal#domain_Terminal.risk_coverage,
-    math:exp(-hg_inspector:compare_risk_score(RiskCoverage, RiskScore)).
 
 acceptable_provider(payment, ProviderRef, VS, Revision) ->
     Provider = #domain_Provider{
