@@ -600,8 +600,8 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
             case hg_routing:choose_route(FailRatedRoutes, RejectContext1, VS) of
                 {ok, _Route} = Result ->
                     Result;
-                {error, {no_route_found, RejectContext2}} = Error ->
-                    _ = log_reject_context(RejectContext2),
+                {error, {no_route_found, {RejectReason, RejectContext}}} = Error ->
+                    _ = log_reject_context(RejectReason, RejectContext),
                     Error
             end
     end.
@@ -614,10 +614,27 @@ choose_routing_predestination(#domain_InvoicePayment{payer = ?payment_resource_p
 
 % Other payers has predefined routes
 
-log_reject_context(RejectContext) ->
-    _ = lager:warning("No route found, varset: ~p", [maps:get(varset, RejectContext)]),
-    _ = lager:warning("No route found, rejected providers: ~p", [maps:get(rejected_providers, RejectContext)]),
-    _ = lager:warning("No route found, rejected terminals: ~p", [maps:get(rejected_terminals, RejectContext)]),
+log_reject_context(risk_score_is_too_high = RejectReason, RejectContext) ->
+    log_reject_context(info, RejectReason, RejectContext);
+log_reject_context(RejectReason, RejectContext) ->
+    log_reject_context(warning, RejectReason, RejectContext).
+
+log_reject_context(Level, RejectReason, RejectContext) ->
+    _ = lager:log(
+        Level,
+        lager:md(),
+        "No route found, reason = ~p, varset: ~p",
+        [RejectReason, maps:get(varset, RejectContext)]),
+    _ = lager:log(
+        Level,
+        lager:md(),
+        "No route found, reason = ~p, rejected providers: ~p",
+        [RejectReason, maps:get(rejected_providers, RejectContext)]),
+    _ = lager:log(
+        Level,
+        lager:md(),
+        "No route found, reason = ~p, rejected terminals: ~p",
+        [RejectReason, maps:get(rejected_terminals, RejectContext)]),
     ok.
 
 validate_refund_time(RefundCreatedAt, PaymentCreatedAt, TimeSpanSelector, VS, Revision) ->
@@ -1437,9 +1454,9 @@ process_routing(Action, St) ->
     case choose_route(PaymentInstitution, VS1, Revision, St) of
         {ok, Route} ->
             process_cash_flow_building(Route, VS1, Payment, PaymentInstitution, Revision, Opts, Events0, Action);
-        {error, {no_route_found, _Details}} ->
+        {error, {no_route_found, {Reason, _Details}}} ->
             Failure = {failure, payproc_errors:construct('PaymentFailure',
-                {no_route_found, #payprocerr_GeneralFailure{}}
+                {no_route_found, {Reason, #payprocerr_GeneralFailure{}}}
             )},
             process_failure(get_activity(St), Events0, Action, Failure, St)
     end.
