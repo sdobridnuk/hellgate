@@ -49,7 +49,7 @@
 
 %%------------------------------------------------------------------------------
 %% @doc
-%% `build_config/0` creaates a default config that can be used  with
+%% `build_config/0` creates a default config that can be used  with
 %% `init_service/2` and `register_operation/4`.
 %%
 %% The default values can be adjusted via sys.config.

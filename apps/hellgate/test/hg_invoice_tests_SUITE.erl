@@ -34,8 +34,6 @@
 -export([invoice_cancellation_after_payment_timeout/1]).
 -export([invalid_payment_amount/1]).
 
--export([fatal_risk_score_for_route_found/1]).
-
 -export([payment_start_idempotency/1]).
 -export([payment_success/1]).
 -export([payment_success_empty_cvv/1]).
@@ -186,8 +184,6 @@ groups() ->
             overdue_invoice_cancellation,
             invoice_cancellation_after_payment_timeout,
             invalid_payment_amount,
-
-            fatal_risk_score_for_route_found,
 
             payment_start_idempotency,
             payment_success,
@@ -731,42 +727,6 @@ invalid_payment_amount(C) ->
     {exception, #'InvalidRequest'{
         errors = [<<"Invalid amount, more", _/binary>>]
     }} = hg_client_invoicing:start_payment(InvoiceID2, PaymentParams, Client).
-
--spec fatal_risk_score_for_route_found(config()) -> test_return().
-
-fatal_risk_score_for_route_found(_C) ->
-    Revision = hg_domain:head(),
-    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
-    VS1 = #{
-        category        => ?cat(1),
-        currency        => ?cur(<<"RUB">>),
-        cost            => ?cash(1000, <<"RUB">>),
-        payment_tool    => {bank_card, #domain_BankCard{}},
-        party_id        => <<"12345">>,
-        risk_score      => fatal,
-        flow            => instant
-    },
-
-    {error, {no_route_found, {risk_score_is_too_high, #{
-        varset := VS1,
-        rejected_providers := [
-            {?prv(3), {'PaymentsProvisionTerms', payment_tool}},
-            {?prv(2), {'PaymentsProvisionTerms', category}},
-            {?prv(1), {'PaymentsProvisionTerms', payment_tool}}
-        ],
-        rejected_terminals := []
-    }}}} = hg_routing:choose(payment, PaymentInstitution, VS1, Revision),
-    VS2 = VS1#{
-        payment_tool => {payment_terminal, #domain_PaymentTerminal{terminal_type = euroset}}
-    },
-    {error, {no_route_found, {risk_score_is_too_high, #{
-        varset := VS2,
-        rejected_providers := [
-            {?prv(2), {'PaymentsProvisionTerms', category}},
-            {?prv(1), {'PaymentsProvisionTerms', payment_tool}}
-        ],
-        rejected_terminals := [{?prv(3), ?trm(10), {'Terminal', risk_coverage}}]}
-    }}} = hg_routing:choose(payment, PaymentInstitution, VS2, Revision).
 
 -spec payment_start_idempotency(config()) -> test_return().
 

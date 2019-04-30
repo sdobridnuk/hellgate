@@ -17,6 +17,7 @@
 
 -export([gathers_fail_rated_providers/1]).
 -export([no_route_found_for_payment/1]).
+-export([fatal_risk_score_for_route_found/1]).
 -export([prefer_alive/1]).
 -export([prefer_better_risk_score/1]).
 -export([prefer_lower_fail_rate/1]).
@@ -37,6 +38,7 @@ init([]) ->
 
 -spec all() -> [test_case_name() | {group, group_name()}].
 all() -> [
+    fatal_risk_score_for_route_found,
     no_route_found_for_payment,
     {group, routing_with_fail_rate}
 ].
@@ -134,6 +136,66 @@ gathers_fail_rated_providers(_C) ->
     hg_context:cleanup(),
     ok.
 
+-spec fatal_risk_score_for_route_found(config()) -> test_return().
+
+fatal_risk_score_for_route_found(_C) ->
+    ok = hg_context:save(hg_context:create()),
+    Revision = hg_domain:head(),
+    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
+    VS0 = #{
+        category        => ?cat(1),
+        currency        => ?cur(<<"RUB">>),
+        cost            => ?cash(1000, <<"RUB">>),
+        payment_tool    => {bank_card, #domain_BankCard{}},
+        party_id        => <<"12345">>,
+        risk_score      => fatal,
+        flow            => instant
+    },
+    {Providers0, RejectContext0} = hg_routing:gather_providers(payment, PaymentInstitution, VS0, Revision),
+    FailRatedProviders0 = hg_routing:gather_provider_fail_rates(Providers0),
+    {FailRatedRoutes0, RejectContext1} = hg_routing:gather_routes(
+        payment,
+        FailRatedProviders0,
+        RejectContext0,
+        VS0,
+        Revision
+    ),
+    Result0 = hg_routing:choose_route(FailRatedRoutes0, RejectContext1, VS0),
+
+    {error, {no_route_found, {risk_score_is_too_high, #{
+        varset := VS0,
+        rejected_providers := [
+            {?prv(3), {'PaymentsProvisionTerms', payment_tool}},
+            {?prv(2), {'PaymentsProvisionTerms', category}},
+            {?prv(1), {'PaymentsProvisionTerms', payment_tool}}
+        ],
+        rejected_terminals := []
+    }}}} = Result0,
+
+    VS1 = VS0#{
+        payment_tool => {payment_terminal, #domain_PaymentTerminal{terminal_type = euroset}}
+    },
+    {Providers1, RejectContext2} = hg_routing:gather_providers(payment, PaymentInstitution, VS1, Revision),
+    FailRatedProviders1 = hg_routing:gather_provider_fail_rates(Providers1),
+    {FailRatedRoutes1, RejectContext3} = hg_routing:gather_routes(
+        payment,
+        FailRatedProviders1,
+        RejectContext2,
+        VS1,
+        Revision
+    ),
+    Result1 = hg_routing:choose_route(FailRatedRoutes1, RejectContext3, VS1),
+    {error, {no_route_found, {risk_score_is_too_high, #{
+        varset := VS1,
+        rejected_providers := [
+            {?prv(2), {'PaymentsProvisionTerms', category}},
+            {?prv(1), {'PaymentsProvisionTerms', payment_tool}}
+        ],
+        rejected_terminals := [{?prv(3), ?trm(10), {'Terminal', risk_coverage}}]}
+    }}} = Result1,
+    hg_context:cleanup(),
+    ok.
+
 -spec no_route_found_for_payment(config()) -> test_return().
 no_route_found_for_payment(_C) ->
     ok = hg_context:save(hg_context:create()),
@@ -170,7 +232,7 @@ no_route_found_for_payment(_C) ->
         Revision
     ),
 
-    Result0 = {error, {no_route_found, #{
+    Result0 = {error, {no_route_found, {unknown, #{
         varset => VS0,
         rejected_providers => [
             {?prv(3), {'PaymentsProvisionTerms', payment_tool}},
@@ -178,7 +240,7 @@ no_route_found_for_payment(_C) ->
             {?prv(1), {'PaymentsProvisionTerms', payment_tool}}
         ],
         rejected_terminals => []
-    }}},
+    }}}},
 
     Result0 = hg_routing:choose_route(FailRatedRoutes0, RejectContext1, VS0),
 

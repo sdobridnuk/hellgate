@@ -121,9 +121,9 @@ select_routes(Predestination, FailRatedProviders, VS, Revision, RejectContext) -
     ),
     {Accepted, RejectContext#{rejected_terminals => Rejected}}.
 
-do_choose_route(FailRatedRoutes, #{risk_score := fatal}, RejectContext) ->
+do_choose_route(_FailRatedRoutes, #{risk_score := fatal}, RejectContext) ->
     {error, {no_route_found, {risk_score_is_too_high, RejectContext}}};
-do_choose_route([] = _FailRatedRoutes, VS, RejectContext) ->
+do_choose_route([] = _FailRatedRoutes, _VS, RejectContext) ->
     {error, {no_route_found, {unknown, RejectContext}}};
 do_choose_route(FailRatedRoutes, VS, RejectContext) ->
     ScoredRoutes = score_routes(FailRatedRoutes, VS),
