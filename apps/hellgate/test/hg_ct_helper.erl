@@ -81,9 +81,21 @@
 
 -spec start_app(app_name()) -> [app_name()].
 
+start_app(lager = AppName) ->
+    {start_app(AppName, [
+        {async_threshold, 1},
+        {async_threshold_window, 0},
+        {error_logger_hwm, 600},
+        {suppress_application_start_stop, true},
+        {handlers, [
+            % {lager_common_test_backend, [debug, {lager_logstash_formatter, []}]}
+            {lager_common_test_backend, warning}
+        ]}
+    ]), #{}};
+
 start_app(scoper = AppName) ->
     {start_app(AppName, [
-        {storage, scoper_storage_logger}
+        {storage, scoper_storage_lager}
     ]), #{}};
 
 start_app(woody = AppName) ->
@@ -372,10 +384,7 @@ ensure_claim_accepted(#payproc_Claim{id = ClaimID, revision = ClaimRevision, sta
 
 get_account(AccountID) ->
     % TODO we sure need to proxy this through the hellgate interfaces
-    ok = hg_context:save(hg_context:create()),
-    Account = hg_accounting:get_account(AccountID),
-    ok = hg_context:cleanup(),
-    Account.
+    hg_accounting:get_account(AccountID).
 
 -spec get_first_payout_tool_id(contract_id(), Client :: pid()) ->
     dmsl_domain_thrift:'PayoutToolID'().
