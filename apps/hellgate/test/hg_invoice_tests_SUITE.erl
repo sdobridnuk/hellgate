@@ -308,10 +308,7 @@ init_per_suite(C) ->
 
 end_per_suite(C) ->
     SupPid = cfg(test_sup, C),
-    supervisor:terminate_child(
-        SupPid,
-        {ranch_listener_sup, {woody_server_thrift_http_handler, hg_dummy_fault_detector}}
-    ),
+    supervisor:terminate_child(SupPid, hg_dummy_fault_detector),
     ok = hg_domain:cleanup(),
     [application:stop(App) || App <- cfg(apps, C)],
     exit(cfg(test_sup, C), shutdown).
