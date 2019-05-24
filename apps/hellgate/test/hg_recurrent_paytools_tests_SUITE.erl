@@ -86,7 +86,7 @@ init_per_suite(C) ->
 
 end_per_suite(C) ->
     SupPid = cfg(test_sup, C),
-    supervisor:terminate_child(SupPid, hg_dummy_fault_detector),
+    ok = supervisor:terminate_child(SupPid, hg_dummy_fault_detector),
     ok = hg_domain:cleanup(),
     [application:stop(App) || App <- cfg(apps, C)].
 

@@ -69,7 +69,7 @@ init_per_suite(C) ->
 -spec end_per_suite(config()) -> _.
 end_per_suite(C) ->
     SupPid = cfg(test_sup, C),
-    supervisor:terminate_child(SupPid, hg_dummy_fault_detector),
+    ok = supervisor:terminate_child(SupPid, hg_dummy_fault_detector),
     ok = hg_domain:cleanup().
 
 -spec init_per_group(group_name(), config()) -> config().
