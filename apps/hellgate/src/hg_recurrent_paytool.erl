@@ -6,7 +6,6 @@
 
 -include_lib("dmsl/include/dmsl_payment_processing_thrift.hrl").
 -include_lib("dmsl/include/dmsl_proxy_provider_thrift.hrl").
--include_lib("fault_detector_proto/include/fd_proto_fault_detector_thrift.hrl").
 
 -define(NS, <<"recurrent_paytools">>).
 
