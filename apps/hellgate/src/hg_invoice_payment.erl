@@ -143,6 +143,7 @@
 -type tag()                 :: dmsl_proxy_provider_thrift:'CallbackTag'().
 -type callback()            :: dmsl_proxy_provider_thrift:'Callback'().
 -type callback_response()   :: dmsl_proxy_provider_thrift:'CallbackResponse'().
+-type timeout_behaviour()   :: dmsl_timeout_behaviour_thrift:'TimeoutBehaviour'().
 -type make_recurrent()      :: true | false.
 -type recurrent_token()     :: dmsl_domain_thrift:'Token'().
 -type retry_strategy()      :: hg_retry:strategy().
@@ -154,7 +155,8 @@
     trx         := trx_info(),
     tags        := [tag()],
     result      => session_result(),
-    proxy_state => proxy_state()
+    proxy_state => proxy_state(),
+    timeout_behaviour => timeout_behaviour()
 }.
 
 -type opts() :: #{
@@ -1900,7 +1902,11 @@ handle_proxy_intent(#prxprv_SleepIntent{timer = Timer, user_interaction = UserIn
     Events = wrap_session_events(try_request_interaction(UserInteraction), Session),
     {Events, Action};
 handle_proxy_intent(
-    #prxprv_SuspendIntent{tag = Tag, timeout = Timer, user_interaction = UserInteraction, timeout_behaviour = TimeoutBehaviour},
+    #prxprv_SuspendIntent{
+        tag = Tag,
+        timeout = Timer,
+        user_interaction = UserInteraction,
+        timeout_behaviour = TimeoutBehaviour},
     Action0,
     Session
 ) ->

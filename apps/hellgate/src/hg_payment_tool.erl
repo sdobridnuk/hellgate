@@ -229,6 +229,8 @@ marshal(payment_method, digital_wallet) ->
     <<"wallet">>;
 marshal(payment_method, crypto_currency) ->
     <<"crypto_currency">>;
+marshal(payment_method, mobile_commerce) ->
+    <<"mobile_commerce">>;
 
 marshal({bank_card, payment_system}, visa) ->
     <<"visa">>;
@@ -281,6 +283,17 @@ marshal({bank_card, boolean}, true) ->
     <<"true">>;
 marshal({bank_card, boolean}, false) ->
     <<"false">>;
+
+marshal({mobile_commerce, operator}, mts) ->
+    <<"mts">>;
+marshal({mobile_commerce, operator}, megafone) ->
+    <<"megafone">>;
+marshal({mobile_commerce, operator}, yota) ->
+    <<"yota">>;
+marshal({mobile_commerce, operator}, tele2) ->
+    <<"tele2">>;
+marshal({mobile_commerce, operator}, beeline) ->
+    <<"beeline">>;
 
 marshal({crypto_currency, currency}, bitcoin) ->
     <<"bitcoin">>;
@@ -346,6 +359,17 @@ unmarshal(digital_wallet = T, #{
     };
 unmarshal(crypto_currency = T, CC) ->
     {crypto_currency, unmarshal({T, currency}, CC)};
+unmarshal(mobile_commerce = T, #{
+    <<"operator">> := Operator,
+    <<"phone">>    := #{cc := CC, ctn := Ctn}
+}) ->
+    #domain_MobileCommerce{
+        operator = unmarshal({T, operator}, Operator),
+        phone = #domain_MobilePhone{
+            cc = unmarshal(str, CC),
+            ctn = unmarshal(str, Ctn)
+        }
+    };
 
 unmarshal(payment_tool, [2, #{<<"token">>:= _} = BankCard]) ->
     {bank_card, unmarshal(bank_card, BankCard)};
@@ -370,6 +394,8 @@ unmarshal(payment_method, <<"wallet">>) ->
     digital_wallet;
 unmarshal(payment_method, <<"crypto_currency">>) ->
     crypto_currency;
+unmarshal(payment_method, <<"mobile_commerce">>) ->
+    mobile_commerce;
 
 unmarshal({bank_card, payment_system}, <<"visa">>) ->
     visa;
@@ -435,6 +461,17 @@ unmarshal({crypto_currency, currency}, <<"ethereum">>) ->
     ethereum;
 unmarshal({crypto_currency, currency}, <<"zcash">>) ->
     zcash;
+
+unmarshal({mobile_commerce, operator}, <<"mts">>) ->
+    mts;
+unmarshal({mobile_commerce, operator}, <<"megafone">>) ->
+    megafone;
+unmarshal({mobile_commerce, operator}, <<"yota">>) ->
+    yota;
+unmarshal({mobile_commerce, operator}, <<"tele2">>) ->
+    tele2;
+unmarshal({mobile_commerce, operator}, <<"beeline">>) ->
+    beeline;
 
 unmarshal(_, Other) ->
     Other.

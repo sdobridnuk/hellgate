@@ -28,7 +28,11 @@
 -define(suspend(Tag, To, UI),
     {suspend, #'prxprv_SuspendIntent'{tag = Tag, timeout = {timeout, To}, user_interaction = UI}}).
 -define(suspend(Tag, To, UI, TimeoutBehaviour),
-    {suspend, #'prxprv_SuspendIntent'{tag = Tag, timeout = {timeout, To}, user_interaction = UI, timeout_behaviour = TimeoutBehaviour}}).
+    {suspend, #'prxprv_SuspendIntent'{
+        tag = Tag,
+        timeout = {timeout, To},
+        user_interaction = UI,
+        timeout_behaviour = TimeoutBehaviour}}).
 -define(finish(Status),
     {finish, #'prxprv_FinishIntent'{status = Status}}).
 -define(success(Token),
@@ -330,7 +334,10 @@ handle_payment_callback(<<"mobile_commerce">>, ?processed(), <<"suspended">>, Pa
 handle_payment_callback(<<"mobile_commerce failure">>, ?processed(), <<"start">>, PaymentInfo, _Opts) ->
     InvoiceID = get_invoice_id(PaymentInfo),
     PaymentID = get_payment_id(PaymentInfo),
-    Failure = #domain_Failure{code = <<"authorization_failed">>, reason = <<"test">>, sub = #domain_SubFailure{code = <<"unknown">>}},
+    Failure = #domain_Failure{
+        code = <<"authorization_failed">>,
+        reason = <<"test">>,
+        sub = #domain_SubFailure{code = <<"unknown">>}},
     TimeoutBehaviour = {failure, Failure},
     respond(<<"sure">>, #prxprv_PaymentCallbackProxyResult{
         intent     = ?suspend(<<InvoiceID/binary, "/", PaymentID/binary>>, 1, undefined, TimeoutBehaviour),

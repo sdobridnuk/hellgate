@@ -144,7 +144,7 @@ all() ->
         payments_w_bank_card_issuer_conditions,
         payments_w_bank_conditions,
 
-        % With variable domain config
+        % % With variable domain config
         {group, adjustments},
         {group, refunds},
         rounding_cashflow_volume,
@@ -159,26 +159,25 @@ all() ->
 groups() ->
     [
         {all_non_destructive_tests, [parallel], [
-            payment_w_terminal_success
-            % {group, base_payments},
-            % payment_risk_score_check,
-            % payment_risk_score_check_fail,
-            % payment_risk_score_check_timeout,
-            % party_revision_check,
+            {group, base_payments},
+            payment_risk_score_check,
+            payment_risk_score_check_fail,
+            payment_risk_score_check_timeout,
+            party_revision_check,
 
-            % invalid_payment_w_deprived_party,
-            % external_account_posting,
-            % terminal_cashflow_overrides_provider,
+            invalid_payment_w_deprived_party,
+            external_account_posting,
+            terminal_cashflow_overrides_provider,
 
-            % {group, holds_management},
+            {group, holds_management},
 
-            % {group, offsite_preauth_payment},
+            {group, offsite_preauth_payment},
 
-            % payment_with_tokenized_bank_card,
+            payment_with_tokenized_bank_card,
 
-            % {group, adhoc_repairs},
+            {group, adhoc_repairs},
 
-            % {group, repair_scenarios}
+            {group, repair_scenarios}
         ]},
 
         {base_payments, [parallel], [
@@ -282,9 +281,9 @@ groups() ->
 -spec init_per_suite(config()) -> config().
 
 init_per_suite(C) ->
-    _ = dbg:tracer(),
-    _ = dbg:p(all, c),
-    _ = dbg:tpl({'hg_invoice_payment', 'p', '_'}, x),
+    % _ = dbg:tracer(),
+    % _ = dbg:p(all, c),
+    % _ = dbg:tpl({'hg_invoice_payment', 'p', '_'}, x),
     CowboySpec = hg_dummy_provider:get_http_cowboy_spec(),
 
     {Apps, Ret} = hg_ct_helper:start_apps([
@@ -2290,9 +2289,9 @@ terms_retrieval(C) ->
             ?pmt(bank_card, mastercard),
             ?pmt(bank_card, visa),
             ?pmt(crypto_currency, bitcoin),
-            ?pmt(mobile, mts),
             ?pmt(digital_wallet, qiwi),
             ?pmt(empty_cvv_bank_card, visa),
+            ?pmt(mobile_commerce, mts),
             ?pmt(payment_terminal, euroset),
             ?pmt(tokenized_bank_card, ?tkz_bank_card(visa, applepay))
         ]}
@@ -3285,10 +3284,7 @@ construct_domain_fixture() ->
                         ?pmt(empty_cvv_bank_card, visa),
                         ?pmt(tokenized_bank_card, ?tkz_bank_card(visa, applepay)),
                         ?pmt(crypto_currency, bitcoin),
-                        ?pmt(mobile_commerce, mts),
-                        ?pmt(mobile_commerce, tele2),
-                        ?pmt(mobile_commerce, megafone),
-                        ?pmt(mobile_commerce, yota)
+                        ?pmt(mobile_commerce, mts)
                     ])}
                 }
             ]},
@@ -3474,9 +3470,6 @@ construct_domain_fixture() ->
         hg_ct_fixture:construct_payment_method(?pmt(empty_cvv_bank_card, visa)),
         hg_ct_fixture:construct_payment_method(?pmt(crypto_currency, bitcoin)),
         hg_ct_fixture:construct_payment_method(?pmt(mobile_commerce, mts)),
-        hg_ct_fixture:construct_payment_method(?pmt(mobile_commerce, tele2)),
-        hg_ct_fixture:construct_payment_method(?pmt(mobile_commerce, yota)),
-        hg_ct_fixture:construct_payment_method(?pmt(mobile_commerce, megafone)),
         hg_ct_fixture:construct_payment_method(?pmt(tokenized_bank_card, ?tkz_bank_card(visa, applepay))),
 
         hg_ct_fixture:construct_proxy(?prx(1), <<"Dummy proxy">>),
@@ -4039,7 +4032,7 @@ construct_domain_fixture() ->
             data = #domain_Provider{
                 name = <<"UnionTelecom">>,
                 description = <<"Mobile commerce terminal provider">>,
-                terminal = {value, [?prvtrm(11), ?prvtrm(12)]}, %% TODO how choose terminal
+                terminal = {value, [?prvtrm(11), ?prvtrm(12)]},
                 proxy = #domain_Proxy{
                     ref = ?prx(1),
                     additional = #{
@@ -4056,11 +4049,9 @@ construct_domain_fixture() ->
                         ?cat(1)
                     ])},
                     payment_methods = {value, ?ordset([
-                        ?pmt(mobile_commerce, mts),
-                        ?pmt(mobile_commerce, megafone),
-                        ?pmt(mobile_commerce, tele2),
-                        ?pmt(mobile_commerce, yota)
-                    ])},
+                        ?pmt(mobile_commerce, mts)
+])},
+
                     cash_limit = {value, ?cashrng(
                         {inclusive, ?cash(    1000, <<"RUB">>)},
                         {exclusive, ?cash(10000000, <<"RUB">>)}
@@ -4102,14 +4093,6 @@ construct_domain_fixture() ->
                     <<"goodPhone">> => <<"2222">>,
                     <<"prefix">>    => <<"09876543321">>
                 }
-            }
-        }},
-        {terminal, #domain_TerminalObject{
-            ref = ?trm(13),
-            data = #domain_Terminal{
-                name = <<"Payment Terminal Terminal">>,
-                description = <<"Megafone">>,
-                risk_coverage = low
             }
         }}
     ].
