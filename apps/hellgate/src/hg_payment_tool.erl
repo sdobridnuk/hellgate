@@ -34,7 +34,9 @@ get_method({payment_terminal, #domain_PaymentTerminal{terminal_type = TerminalTy
 get_method({digital_wallet, #domain_DigitalWallet{provider = Provider}}) ->
     #domain_PaymentMethodRef{id = {digital_wallet, Provider}};
 get_method({crypto_currency, CC}) ->
-    #domain_PaymentMethodRef{id = {crypto_currency, CC}}.
+    #domain_PaymentMethodRef{id = {crypto_currency, CC}};
+get_method({mobile_commerce, #domain_MobileCommerce{operator = Operator}}) ->
+    #domain_PaymentMethodRef{id = {mobile_commerce, Operator}}.
 
 -spec create_from_method(method()) -> t().
 
@@ -87,6 +89,8 @@ test_condition({digital_wallet, C}, {digital_wallet, V = #domain_DigitalWallet{}
     test_digital_wallet_condition(C, V, Rev);
 test_condition({crypto_currency, C}, {crypto_currency, V}, Rev) ->
     test_crypto_currency_condition(C, V, Rev);
+test_condition({mobile_commerce, C}, {mobile_commerce, V}, Rev) ->
+    test_mobile_commerce_condition(C, V, Rev);
 test_condition(_PaymentTool, _Condition, _Rev) ->
     false.
 
@@ -174,6 +178,12 @@ test_crypto_currency_condition(#domain_CryptoCurrencyCondition{definition = Def}
     Def =:= undefined orelse test_crypto_currency_condition_def(Def, V, Rev).
 
 test_crypto_currency_condition_def({crypto_currency_is, C1}, C2, _Rev) ->
+    C1 =:= C2.
+
+test_mobile_commerce_condition(#domain_MobileCommerceCondition{definition = Def}, V, Rev) ->
+    Def =:= undefined orelse test_mobile_commerce_condition_def(Def, V, Rev).
+
+test_mobile_commerce_condition_def({operator_is, C1}, #domain_MobileCommerce{operator = C2}, _Rev) ->
     C1 =:= C2.
 
 %% Marshalling
