@@ -135,6 +135,9 @@ cfg(Key, C) ->
 
 all() ->
     [
+        payment_w_customer_success,
+        payment_capture_retries_exceeded,
+
         invalid_party_status,
         invalid_shop_status,
 
@@ -144,7 +147,7 @@ all() ->
         payments_w_bank_card_issuer_conditions,
         payments_w_bank_conditions,
 
-        % % With variable domain config
+        % With variable domain config
         {group, adjustments},
         {group, refunds},
         rounding_cashflow_volume,
@@ -3997,7 +4000,6 @@ construct_domain_fixture() ->
                     payment_methods = {value, ?ordset([
                         ?pmt(payment_terminal, euroset),
                         ?pmt(digital_wallet, qiwi)
-                        % ?pmt(mobile_commerce, mts)
                     ])},
                     cash_limit = {value, ?cashrng(
                         {inclusive, ?cash(    1000, <<"RUB">>)},
@@ -4032,7 +4034,17 @@ construct_domain_fixture() ->
             data = #domain_Provider{
                 name = <<"UnionTelecom">>,
                 description = <<"Mobile commerce terminal provider">>,
-                terminal = {value, [?prvtrm(11), ?prvtrm(12)]},
+                terminal = {value, [?prvtrm(11)]},
+                % terminal = {decisions, [
+                %     #domain_TerminalDecision{
+                %         if_ = {condition,
+                %                 {payment_tool, {mobile_commerce, #domain_MobileCommerceCondition{
+                %                     definition = {operator_is, mts}
+                %                 }}}
+                %             },
+                %         then_ = {value, [?prvtrm(11)]}
+                %     }
+                % ]},
                 proxy = #domain_Proxy{
                     ref = ?prx(1),
                     additional = #{
@@ -4050,8 +4062,7 @@ construct_domain_fixture() ->
                     ])},
                     payment_methods = {value, ?ordset([
                         ?pmt(mobile_commerce, mts)
-])},
-
+                    ])},
                     cash_limit = {value, ?cashrng(
                         {inclusive, ?cash(    1000, <<"RUB">>)},
                         {exclusive, ?cash(10000000, <<"RUB">>)}
@@ -4080,18 +4091,6 @@ construct_domain_fixture() ->
                 options = #{
                     <<"goodPhone">> => <<"7891">>,
                     <<"prefix">>    => <<"1234567890">>
-                }
-            }
-        }},
-        {terminal, #domain_TerminalObject{
-            ref = ?trm(12),
-            data = #domain_Terminal{
-                name = <<"Hotel Payment Terminal">>,
-                description = <<"Mts">>,
-                risk_coverage = low,
-                options = #{
-                    <<"goodPhone">> => <<"2222">>,
-                    <<"prefix">>    => <<"09876543321">>
                 }
             }
         }}

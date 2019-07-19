@@ -143,7 +143,8 @@
 -type tag()                 :: dmsl_proxy_provider_thrift:'CallbackTag'().
 -type callback()            :: dmsl_proxy_provider_thrift:'Callback'().
 -type callback_response()   :: dmsl_proxy_provider_thrift:'CallbackResponse'().
--type timeout_behaviour()   :: dmsl_timeout_behaviour_thrift:'TimeoutBehaviour'().
+-type timeout_behaviour()   :: {operation_timeout, #domain_OperationTimeout{}} |
+                               dmsl_timeout_behaviour_thrift:'TimeoutBehaviour'().
 -type make_recurrent()      :: true | false.
 -type recurrent_token()     :: dmsl_domain_thrift:'Token'().
 -type retry_strategy()      :: hg_retry:strategy().
@@ -1621,12 +1622,11 @@ finalize_payment(Action, St) ->
 -spec process_callback_timeout(action(), session(), events(), st()) -> machine_result().
 process_callback_timeout(Action, Session, Events, St) ->
     case get_session_timeout_behaviour(Session) of
-        undefined ->
-            SessionEvents = [?session_finished(?session_failed(?operation_timeout()))],
-            Result = {Events ++ wrap_session_events(SessionEvents, Session), Action},
-            finish_session_processing(Result, St);
-        {failure, Failure} ->
-            SessionEvents = [?session_finished(?session_failed({failure, Failure}))],
+        {Type, Failure} when
+            Type =:= operation_timeout orelse
+            Type =:= failure
+        ->
+            SessionEvents = [?session_finished(?session_failed({Type, Failure}))],
             Result = {Events ++ wrap_session_events(SessionEvents, Session), Action},
             finish_session_processing(Result, St);
         {callback, Payload} ->
@@ -1906,7 +1906,8 @@ handle_proxy_intent(
         tag = Tag,
         timeout = Timer,
         user_interaction = UserInteraction,
-        timeout_behaviour = TimeoutBehaviour},
+        timeout_behaviour = TimeoutBehaviour
+    },
     Action0,
     Session
 ) ->
@@ -2530,16 +2531,28 @@ merge_session_change(?session_finished(Result), Session) ->
     Session#{status := finished, result => Result};
 merge_session_change(?session_activated(), Session) ->
     Session#{status := active};
-merge_session_change(?session_suspended(undefined, undefined), Session) ->
-    Session#{status := suspended};
+
 merge_session_change(?session_suspended(Tag, TimeoutBehaviour), Session) ->
-    Session#{status := suspended, tags := [Tag | get_session_tags(Session)], timeout_behaviour => TimeoutBehaviour};
+    Session2 = set_session_tag(Tag, Session),
+    Session3 = set_timeout_behaviour(TimeoutBehaviour, Session2),
+    Session3#{status := suspended};
+
 merge_session_change(?trx_bound(Trx), Session) ->
     Session#{trx := Trx};
 merge_session_change(?proxy_st_changed(ProxyState), Session) ->
     Session#{proxy_state => ProxyState};
 merge_session_change(?interaction_requested(_), Session) ->
     Session.
+
+set_timeout_behaviour(undefined, Session) ->
+    Session#{timeout_behaviour => ?operation_timeout()};
+set_timeout_behaviour(TimeoutBehaviour, Session) ->
+    Session#{timeout_behaviour => TimeoutBehaviour}.
+
+set_session_tag(undefined, Session) ->
+    Session;
+set_session_tag(Tag, Session) ->
+    Session#{tags := [Tag | get_session_tags(Session)]}.
 
 create_session(Target, Trx) ->
     #{
@@ -2579,8 +2592,8 @@ get_session_status(#{status := Status}) ->
 get_session_trx(#{trx := Trx}) ->
     Trx.
 
-get_session_timeout_behaviour(Session) ->
-    maps:get(timeout_behaviour, Session, undefined).
+get_session_timeout_behaviour(#{timeout_behaviour := TimeoutBehaviour}) ->
+    TimeoutBehaviour.
 
 get_session_proxy_state(Session) ->
     maps:get(proxy_state, Session, undefined).
@@ -2635,8 +2648,13 @@ collapse_changes(Changes, St) ->
     collapse_changes(Changes, St, #{}).
 
 collapse_changes(Changes, St, Opts) ->
-    lists:foldl(fun (C, St1) ->
-        merge_change(C, St1, Opts) end, St, Changes).
+    lists:foldl(
+        fun (C, St1) ->
+            merge_change(C, St1, Opts)
+        end,
+        St,
+        Changes
+    ).
 
 %%
 

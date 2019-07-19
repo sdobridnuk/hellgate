@@ -278,8 +278,9 @@ init({UserInfo, ApiClient}) ->
 
 -spec handle_call(term(), callref(), st()) ->
     {reply, term(), st()} | {noreply, st()}.
-
+p(_) -> ok.
 handle_call({call, Function, Args}, _From, St = #st{user_info = UserInfo, client = Client}) ->
+    p({">>>>>>>>>>>>>>>>> ", ?MODULE, Function, Args}),
     {Result, ClientNext} = hg_client_api:call(invoicing, Function, [UserInfo | Args], Client),
     {reply, Result, St#st{client = ClientNext}};
 
