@@ -97,6 +97,7 @@
     sessions       = #{}   :: #{target_type() => session()},
     retry_attempts = #{}   :: #{target_type() => non_neg_integer()},
     refunds        = #{}   :: #{refund_id() => refund_state()},
+    % chargebacks    = #{}   :: #{chargeback_id() => chargeback_state()},
     adjustments    = []    :: [adjustment()],
     recurrent_token        :: undefined | recurrent_token(),
     opts                   :: undefined | opts(),
@@ -110,7 +111,15 @@
     transaction_info  :: undefined | trx_info()
 }).
 
+% -record(chargeback_state, {
+%     chargeback        :: undefined | chargeback(),
+%     cash_flow         :: undefined | cash_flow(),
+%     session           :: undefined | session(),
+%     transaction_info  :: undefined | trx_info()
+% }).
+
 -type refund_state() :: #refund_st{}.
+% -type chargeback_state() :: #chargeback_st{}.
 
 -type st() :: #st{}.
 
@@ -126,6 +135,9 @@
 -type invoice_id()          :: dmsl_domain_thrift:'InvoiceID'().
 -type payment()             :: dmsl_domain_thrift:'InvoicePayment'().
 -type payment_id()          :: dmsl_domain_thrift:'InvoicePaymentID'().
+% -type chargeback()          :: dmsl_domain_thrift:'InvoicePaymentRefund'().
+% -type chargeback_id()       :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
+% -type chargeback_params()   :: dmsl_payment_processing_thrift:'InvoicePaymentRefundParams'().
 -type refund()              :: dmsl_domain_thrift:'InvoicePaymentRefund'().
 -type refund_id()           :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
 -type refund_params()       :: dmsl_payment_processing_thrift:'InvoicePaymentRefundParams'().
@@ -994,6 +1006,83 @@ validate_provider_holds_terms(#domain_PaymentsProvisionTerms{holds = Terms}) whe
 validate_provider_holds_terms(#domain_PaymentsProvisionTerms{holds = undefined}) ->
     ok.
 
+%% TODO: CHARGEBACKS WIP
+
+-spec create_chargeback(chargeback_params(), st(), opts()) ->
+    {chargeback(), result()}.
+
+create_chargeback(Params, St0, Opts) ->
+    St = St0#st{opts = Opts},
+    Revision = hg_domain:head(),
+    Payment = get_payment(St),
+    Chargeback = make_chargeback(Params, Payment, Revision, St, Opts),
+    % FinalCashflow = make_chargeback_cashflow(Refund, Payment, Revision, St, Opts),
+    % TODO: HISTORY
+    % Changes = [?chargeback_created(Chargeback, FinalCashflow)],
+    Action = hg_machine_action:instant(),
+    ID = Chargeback#domain_InvoicePaymentChargeback.id,
+    {Chargeback, {[?refund_ev(ID, C) || C <- Changes], Action}}.
+
+make_chargeback(Params, Payment, Revision, St, Opts) ->
+    _ = assert_payment_status(captured, Payment),
+    PartyRevision = get_opts_party_revision(Opts),
+    % _ = assert_no_active_chargebacks(St),
+    % Cash = define_chargeback_cash(Params#payproc_InvoicePaymentRefundParams.cash, Payment),
+    % _ = assert_chargeback_cash(Cash, St),
+    % Cart = Params#payproc_InvoicePaymentRefundParams.cart,
+    % _ = assert_refund_cart(Params#payproc_InvoicePaymentRefundParams.cash, Cart, St),
+    ID = construct_chargeback_id(St),
+    #domain_InvoicePaymentChargeback{
+        id              = ID,
+        created_at      = hg_datetime:format_now(),
+        domain_revision = Revision,
+        party_revision  = PartyRevision,
+        % status          = ?refund_pending(),
+        reason          = Params#payproc_InvoicePaymentRefundParams.reason_code,
+        cash            = Cash
+        % cart            = Cart
+    }.
+
+
+% TODO: check for same reason code?
+% assert_no_active_chargebacks(St) ->
+%     PendingChargebacks = lists:filter(
+%         fun
+%             _ -> false
+%         end,
+%         get_chargebacks(St)),
+%     case PendingChargebacks of
+%         [] ->
+%             ok;
+%         [_R|_] ->
+%             throw(#payproc_OperationNotPermitted{})
+%     end.
+
+% get_refund_status(#domain_InvoicePaymentRefund{status = Status}) ->
+%     Status.
+
+% set_refund_status(Status, Refund = #domain_InvoicePaymentRefund{}) ->
+%     Refund#domain_InvoicePaymentRefund{status = Status}.
+
+% get_refund_cashflow(#refund_st{cash_flow = CashFlow}) ->
+%     CashFlow.
+
+% define_refund_cash(undefined, #domain_InvoicePayment{cost = Cost}) ->
+%     Cost;
+% define_refund_cash(?cash(_, SymCode) = Cash, #domain_InvoicePayment{cost = ?cash(_, SymCode)}) ->
+%     Cash;
+% define_refund_cash(?cash(_, SymCode), _Payment) ->
+%     throw(#payproc_InconsistentRefundCurrency{currency = SymCode}).
+
+% get_refund_cash(#domain_InvoicePaymentRefund{cash = Cash}) ->
+%     Cash.
+
+% get_refund_created_at(#domain_InvoicePaymentRefund{created_at = CreatedAt}) ->
+%     CreatedAt.
+
+
+%% TODO: CHARGEBACKS WIP
+
 -spec refund(refund_params(), st(), opts()) ->
     {refund(), result()}.
 
@@ -1026,6 +1115,7 @@ manual_refund(Params, St0, Opts) ->
 make_refund(Params, Payment, Revision, St, Opts) ->
     _ = assert_payment_status(captured, Payment),
     PartyRevision = get_opts_party_revision(Opts),
+    % _ = assert_no_active_chargebacks(St),
     _ = assert_previous_refunds_finished(St),
     Cash = define_refund_cash(Params#payproc_InvoicePaymentRefundParams.cash, Payment),
     _ = assert_refund_cash(Cash, St),
