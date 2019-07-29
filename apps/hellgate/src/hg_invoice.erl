@@ -206,6 +206,8 @@ handle_function_(Fun, [UserInfo, InvoiceID | _Tail] = Args, _Opts) when
     Fun =:= 'CancelPayment' orelse
     Fun =:= 'RefundPayment' orelse
     Fun =:= 'CreateManualRefund' orelse
+    Fun =:= 'CreateChargeback' orelse
+    Fun =:= 'UpdateChargeback' orelse
     Fun =:= 'CreatePaymentAdjustment' orelse
     Fun =:= 'CapturePaymentAdjustment' orelse
     Fun =:= 'CancelPaymentAdjustment' orelse
@@ -588,6 +590,16 @@ handle_call({{'Invoicing', 'CreateManualRefund'}, [_UserInfo, _InvoiceID, Paymen
     wrap_payment_impact(
         PaymentID,
         hg_invoice_payment:manual_refund(Params, PaymentSession, get_payment_opts(St)),
+        St
+    );
+
+handle_call({{'Invoicing', 'CreateChargeback'}, [_UserInfo, _InvoiceID, PaymentID, Params]}, St) ->
+    _ = assert_invoice_accessible(St),
+    _ = assert_invoice_operable(St),
+    PaymentSession = get_payment_session(PaymentID, St),
+    wrap_payment_impact(
+        PaymentID,
+        hg_invoice_payment:create_chargeback(Params, PaymentSession, get_payment_opts(St)),
         St
     );
 
