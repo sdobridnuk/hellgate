@@ -153,6 +153,38 @@
 -define(adjustment_cancelled(At),
     {cancelled, #domain_InvoicePaymentAdjustmentCancelled{at = At}}).
 
+%% Chargebacks
+
+% -define(Chargeback_ev(ChargebackID, Payload),
+%     {invoice_payment_refund_change, #payproc_InvoicePaymentChargebackChange{
+%         id = RefundID,
+%         payload = Payload
+%     }}
+% ).
+
+-define(chargeback_created(Chargeback, CashFlow),
+    ?chargeback_created(Chargeback, CashFlow, undefined)
+).
+
+-define(chargeback_created(Chargeback, CashFlow, TrxInfo),
+    {invoice_payment_refund_created,
+        #payproc_InvoicePaymentRefundCreated{
+            chargeback = Chargeback,
+            cash_flow = CashFlow,
+            transaction_info = TrxInfo
+        }
+    }
+).
+
+-define(chargeback_status_changed(Status),
+    {invoice_payment_chargeback_status_changed,
+        #payproc_InvoicePaymentChargebackStatusChanged{status = Status}
+    }
+).
+
+% -define(chargeback_(),
+%     {'_', #domain_InvoicePaymentChargeback_{}}).
+
 %% Refunds
 
 -define(refund_ev(RefundID, Payload),
