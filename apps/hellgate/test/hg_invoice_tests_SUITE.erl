@@ -70,6 +70,9 @@
 -export([invalid_permit_partial_capture_in_service/1]).
 -export([invalid_permit_partial_capture_in_provider/1]).
 -export([payment_hold_auto_capturing/1]).
+
+-export([payment_chargeback_success/1]).
+
 -export([invalid_refund_party_status/1]).
 -export([invalid_refund_shop_status/1]).
 -export([payment_refund_success/1]).
@@ -145,6 +148,7 @@ all() ->
         % With variable domain config
         {group, adjustments},
         {group, refunds},
+        {group, chargebacks},
         rounding_cashflow_volume,
         terms_retrieval,
 
@@ -217,6 +221,22 @@ groups() ->
         {adjustments, [parallel], [
             invalid_payment_adjustment,
             payment_adjustment_success
+        ]},
+
+        {chargebacks, [], [
+            % invalid_refund_party_status,
+            % invalid_refund_shop_status,
+            {chargebacks, [parallel], [
+                payment_chargeback_success
+                % retry_temporary_unavailability_refund,
+                % payment_partial_refunds_success,
+                % invalid_amount_payment_partial_refund,
+                % invalid_amount_partial_capture_and_refund,
+                % invalid_currency_payment_partial_refund,
+                % cant_start_simultaneous_partial_refunds
+            ]}
+            % ineligible_payment_partial_refund,
+            % payment_manual_refund
         ]},
 
         {refunds, [], [
@@ -1591,6 +1611,57 @@ terminal_cashflow_overrides_provider(C) ->
     } = hg_domain:get(hg_domain:head(), {external_account_set, ?eas(2)}).
 
 %%
+
+%%  CHARGEBACKS WIP
+% -spec payment_chargeback_success(config()) -> _ | no_return().
+
+% payment_chargeback_success(C) ->
+%     Client = cfg(client, C),
+%     PartyClient = cfg(party_client, C),
+%     ShopID = hg_ct_helper:create_battle_ready_shop(?cat(2), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
+%     InvoiceID = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+%     PaymentID = process_payment(InvoiceID, make_payment_params(), Client),
+%     ChargebackParams = make_chargeback_params(),
+%     % not finished yet
+%     ?invalid_payment_status(?processed()) =
+%         hg_client_invoicing:chargeback_payment(InvoiceID, PaymentID, ChargebackParams, Client),
+%     PaymentID = await_payment_capture(InvoiceID, PaymentID, Client),
+%     % not enough funds on the merchant account
+%     Failure = {failure, payproc_errors:construct('ChargebackFailure',
+%         {terms_violated, {insufficient_merchant_funds, #payprocerr_GeneralFailure{}}}
+%     )},
+%     Chargeback0 = #domain_InvoicePaymentChargeback{id = ChargebackID0} =
+%         hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, ChargebackParams, Client),
+%     PaymentID = chargeback_payment(InvoiceID, PaymentID, ChargebackID0, Chargeback0, Client),
+%     [
+%         ?payment_ev(PaymentID, ?chargeback_ev(ChargebackID0, ?chargeback_status_changed(?chargeback_failed(Failure))))
+%     ] = next_event(InvoiceID, Client),
+%     % top up merchant account
+%     InvoiceID2 = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+%     PaymentID2 = process_payment(InvoiceID2, make_payment_params(), Client),
+%     PaymentID2 = await_payment_capture(InvoiceID2, PaymentID2, Client),
+%     % create a chargeback finally
+%     Chargeback = #domain_InvoicePaymentChargeback{id = ChargebackID} =
+%         hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, ChargebackParams, Client),
+%     Chargeback =
+%         hg_client_invoicing:get_payment_chargeback(InvoiceID, PaymentID, ChargebackID, Client),
+%     PaymentID = create_chargeback(InvoiceID, PaymentID, ChargebackID, Chargeback, Client),
+%     PaymentID = await_chargeback_session_started(InvoiceID, PaymentID, ChargebackID, Client),
+%     [
+%         ?payment_ev(PaymentID, ?chargeback_ev(ID, ?session_ev(?charged_back(), ?trx_bound(_)))),
+%         ?payment_ev(PaymentID, ?chargeback_ev(ID, ?session_ev(?charged_back(), ?session_finished(?session_succeeded()))))
+%     ] = next_event(InvoiceID, Client),
+%     [
+%         ?payment_ev(PaymentID, ?chargeback_ev(ID, ?chargeback_status_changed(?chargeback_succeeded()))),
+%         ?payment_ev(PaymentID, ?payment_status_changed(?charged_back()))
+%     ] = next_event(InvoiceID, Client),
+%     #domain_InvoicePaymentChargeback{status = ?chargeback_succeeded()} =
+%         hg_client_invoicing:get_payment_chargeback(InvoiceID, PaymentID, ChargebackID, Client),
+%     % no more chargebacks for you
+%     ?invalid_payment_status(?charged_back()) =
+%         hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, ChargebackParams, Client).
+
+%% CHARGEBACKS WIP
 
 -spec invalid_refund_party_status(config()) -> _ | no_return().
 
