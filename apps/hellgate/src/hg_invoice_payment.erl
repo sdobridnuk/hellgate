@@ -48,6 +48,8 @@
 
 -export([manual_refund/3]).
 
+-export([create_chargeback/3]).
+
 -export([create_adjustment/4]).
 -export([capture_adjustment/3]).
 -export([cancel_adjustment/3]).
@@ -97,7 +99,7 @@
     sessions       = #{}   :: #{target_type() => session()},
     retry_attempts = #{}   :: #{target_type() => non_neg_integer()},
     refunds        = #{}   :: #{refund_id() => refund_state()},
-    % chargebacks    = #{}   :: #{chargeback_id() => chargeback_state()},
+    chargebacks    = #{}   :: #{chargeback_id() => chargeback_state()},
     adjustments    = []    :: [adjustment()],
     recurrent_token        :: undefined | recurrent_token(),
     opts                   :: undefined | opts(),
@@ -111,15 +113,15 @@
     transaction_info  :: undefined | trx_info()
 }).
 
-% -record(chargeback_state, {
-%     chargeback        :: undefined | chargeback(),
-%     cash_flow         :: undefined | cash_flow(),
-%     session           :: undefined | session(),
-%     transaction_info  :: undefined | trx_info()
-% }).
+-record(chargeback_st, {
+    chargeback        :: undefined | chargeback(),
+    cash_flow         :: undefined | cash_flow(),
+    session           :: undefined | session(),
+    transaction_info  :: undefined | trx_info()
+}).
 
 -type refund_state() :: #refund_st{}.
-% -type chargeback_state() :: #chargeback_st{}.
+-type chargeback_state() :: #chargeback_st{}.
 
 -type st() :: #st{}.
 
@@ -1067,36 +1069,46 @@ make_chargeback_cashflow(_, _, _, _, _) -> [].
 %     AccountMap = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS1, Revision),
 %     construct_final_cashflow(Cashflow, collect_cash_flow_context(Chargeback), AccountMap).
 
-get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{refunds = Terms}) when Terms /= undefined ->
-    Terms;
-get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{refunds = undefined}) ->
-    throw(#payproc_OperationNotPermitted{}).
+% get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{refunds = Terms}) when Terms /= undefined ->
+%     Terms;
+% get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{refunds = undefined}) ->
+%     throw(#payproc_OperationNotPermitted{}).
 
-validate_chargeback(Terms, Chargeback, Payment, VS0, Revision) ->
-    Cost = get_payment_cost(Payment),
-    Cash = get_chargeback_cash(Chargeback),
-    case hg_cash:sub(Cost, Cash) of
-        ?cash(0, _) ->
-            validate_common_chargeback_terms(Terms, Chargeback, Payment, VS0, Revision);
-        ?cash(Amount, _) when Amount > 0 ->
-            validate_partial_chargeback(Terms, Chargeback, Payment, VS0, Revision)
-    end.
+% validate_chargeback(Terms, Chargeback, Payment, VS0, Revision) ->
+%     Cost = get_payment_cost(Payment),
+%     Cash = get_chargeback_cash(Chargeback),
+%     case hg_cash:sub(Cost, Cash) of
+%         ?cash(0, _) ->
+%             validate_common_chargeback_terms(Terms, Chargeback, Payment, VS0, Revision)
+%         % ?cash(Amount, _) when Amount > 0 ->
+%         %     validate_partial_chargeback(Terms, Chargeback, Payment, VS0, Revision)
+%     end.
 
-validate_common_chargeback_terms(Terms, Chargeback, Payment, VS0, Revision) ->
-    VS1 = validate_payment_tool(
-        get_payment_tool(Payment),
-        Terms#domain_PaymentChargebackServiceTerms.payment_methods,
-        VS0,
-        Revision
-    ),
-    VS2 = validate_chargeback_time(
-        get_chargeback_created_at(Refund),
-        get_payment_created_at(Payment),
-        Terms#domain_PaymentChargebackServiceTerms.eligibility_time,
-        VS1,
-        Revision
-    ),
-    VS2.
+% validate_common_chargeback_terms(Terms, Chargeback, Payment, VS0, Revision) ->
+%     VS1 = validate_payment_tool(
+%         get_payment_tool(Payment),
+%         Terms#domain_PaymentChargebackServiceTerms.payment_methods,
+%         VS0,
+%         Revision
+%     ),
+%     VS2 = validate_chargeback_time(
+%         get_chargeback_created_at(Chargeback),
+%         get_payment_created_at(Payment),
+%         Terms#domain_PaymentChargebackServiceTerms.eligibility_time,
+%         VS1,
+%         Revision
+%     ),
+%     VS2.
+
+% validate_chargeback_time(ChargebackCreatedAt, PaymentCreatedAt, TimeSpanSelector, VS, Revision) ->
+%     EligibilityTime = reduce_selector(eligibility_time, TimeSpanSelector, VS, Revision),
+%     ChargebackEndTime = hg_datetime:add_time_span(EligibilityTime, PaymentCreatedAt),
+%     case hg_datetime:compare(ChargebackCreatedAt, ChargebackEndTime) of
+%         Result when Result == earlier; Result == simultaneously ->
+%             VS;
+%         later ->
+%             throw(#payproc_OperationNotPermitted{})
+%     end.
 
 % validate_partial_refund(
 %     #domain_PaymentRefundsServiceTerms{partial_refunds = PRs} = Terms,
@@ -1166,10 +1178,10 @@ assert_chargeback_cash(Cash, St) ->
     PaymentAmount = get_remaining_payment_amount(Cash, St),
     assert_remaining_payment_amount(PaymentAmount, St).
 
-% get_refund_cash(#domain_InvoicePaymentRefund{cash = Cash}) ->
+% get_chargeback_cash(#domain_InvoicePaymentChargeback{cash = Cash}) ->
 %     Cash.
 
-% get_refund_created_at(#domain_InvoicePaymentRefund{created_at = CreatedAt}) ->
+% get_chargeback_created_at(#domain_InvoicePaymentChargeback{created_at = CreatedAt}) ->
 %     CreatedAt.
 
 
