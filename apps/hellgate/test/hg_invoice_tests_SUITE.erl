@@ -224,17 +224,17 @@ groups() ->
         ]},
 
         {chargebacks, [], [
+                payment_chargeback_success
             % invalid_refund_party_status,
             % invalid_refund_shop_status,
-            {chargebacks, [parallel], [
-                payment_chargeback_success
+            % {chargebacks, [parallel], [
                 % retry_temporary_unavailability_refund,
                 % payment_partial_refunds_success,
                 % invalid_amount_payment_partial_refund,
                 % invalid_amount_partial_capture_and_refund,
                 % invalid_currency_payment_partial_refund,
                 % cant_start_simultaneous_partial_refunds
-            ]}
+            % ]}
             % ineligible_payment_partial_refund,
             % payment_manual_refund
         ]},
@@ -1613,19 +1613,23 @@ terminal_cashflow_overrides_provider(C) ->
 %%
 
 %%  CHARGEBACKS WIP
-% -spec payment_chargeback_success(config()) -> _ | no_return().
+-spec payment_chargeback_success(config()) -> _ | no_return().
 
-% payment_chargeback_success(C) ->
-%     Client = cfg(client, C),
-%     PartyClient = cfg(party_client, C),
-%     ShopID = hg_ct_helper:create_battle_ready_shop(?cat(2), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
-%     InvoiceID = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
-%     PaymentID = process_payment(InvoiceID, make_payment_params(), Client),
-%     ChargebackParams = make_chargeback_params(),
+payment_chargeback_success(C) ->
+    Client            = cfg(client, C),
+    PartyClient       = cfg(party_client, C),
+    ShopID            = hg_ct_helper:create_battle_ready_shop(?cat(2), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
+    InvoiceID         = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentID         = process_payment(InvoiceID, make_payment_params(), Client),
+    ChargebackParams  = make_chargeback_params(),
+    ?invalid_payment_status(?processed()) =
+        hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, ChargebackParams, Client),
+    PaymentID = await_payment_capture(InvoiceID, PaymentID, Client),
+    Failure = {failure, payproc_errors:construct('ChargebackFailure',
+        {terms_violated, {insufficient_merchant_funds, #payprocerr_GeneralFailure{}}}
+    )},
+    ok.
 %     % not finished yet
-%     ?invalid_payment_status(?processed()) =
-%         hg_client_invoicing:chargeback_payment(InvoiceID, PaymentID, ChargebackParams, Client),
-%     PaymentID = await_payment_capture(InvoiceID, PaymentID, Client),
 %     % not enough funds on the merchant account
 %     Failure = {failure, payproc_errors:construct('ChargebackFailure',
 %         {terms_violated, {insufficient_merchant_funds, #payprocerr_GeneralFailure{}}}
@@ -2868,6 +2872,11 @@ make_payment_params(PaymentTool, Session, FlowType) ->
 
 set_payment_context(Context, Params = #payproc_InvoicePaymentParams{}) ->
     Params#payproc_InvoicePaymentParams{context = Context}.
+
+make_chargeback_params() ->
+    #payproc_InvoicePaymentChargebackParams{
+        reason_code = <<"ZANOZED">>
+    }.
 
 make_refund_params() ->
     #payproc_InvoicePaymentRefundParams{
