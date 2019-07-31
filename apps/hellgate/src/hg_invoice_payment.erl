@@ -131,19 +131,25 @@
 -type cart()                :: dmsl_domain_thrift:'InvoiceCart'().
 -type party()               :: dmsl_domain_thrift:'Party'().
 -type payer()               :: dmsl_domain_thrift:'Payer'().
+
 -type invoice()             :: dmsl_domain_thrift:'Invoice'().
 -type invoice_id()          :: dmsl_domain_thrift:'InvoiceID'().
+
 -type payment()             :: dmsl_domain_thrift:'InvoicePayment'().
 -type payment_id()          :: dmsl_domain_thrift:'InvoicePaymentID'().
-% -type chargeback()          :: dmsl_domain_thrift:'InvoicePaymentRefund'().
-% -type chargeback_id()       :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
-% -type chargeback_params()   :: dmsl_payment_processing_thrift:'InvoicePaymentRefundParams'().
+
+-type chargeback()          :: dmsl_domain_thrift:'InvoicePaymentChargeback'().
+-type chargeback_id()       :: dmsl_domain_thrift:'InvoicePaymentChargebackID'().
+-type chargeback_params()   :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackParams'().
+
 -type refund()              :: dmsl_domain_thrift:'InvoicePaymentRefund'().
 -type refund_id()           :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
 -type refund_params()       :: dmsl_payment_processing_thrift:'InvoicePaymentRefundParams'().
+
 -type adjustment()          :: dmsl_domain_thrift:'InvoicePaymentAdjustment'().
 -type adjustment_id()       :: dmsl_domain_thrift:'InvoicePaymentAdjustmentID'().
 -type adjustment_params()   :: dmsl_payment_processing_thrift:'InvoicePaymentAdjustmentParams'().
+
 -type target()              :: dmsl_domain_thrift:'TargetInvoicePaymentStatus'().
 -type target_type()         :: 'processed' | 'captured' | 'cancelled' | 'refunded'.
 -type risk_score()          :: dmsl_domain_thrift:'RiskScore'().
@@ -1016,9 +1022,9 @@ create_chargeback(Params, St0, Opts) ->
     Revision = hg_domain:head(),
     Payment = get_payment(St),
     Chargeback = make_chargeback(Params, Payment, Revision, St, Opts),
-    % FinalCashflow = make_chargeback_cashflow(Refund, Payment, Revision, St, Opts),
+    FinalCashflow = make_chargeback_cashflow(Chargeback, Payment, Revision, St, Opts),
     % TODO: HISTORY
-    % Changes = [?chargeback_created(Chargeback, FinalCashflow)],
+    Changes = [?chargeback_created(Chargeback, FinalCashflow)],
     Action = hg_machine_action:instant(),
     ID = Chargeback#domain_InvoicePaymentChargeback.id,
     {Chargeback, {[?refund_ev(ID, C) || C <- Changes], Action}}.
@@ -1027,23 +1033,95 @@ make_chargeback(Params, Payment, Revision, St, Opts) ->
     _ = assert_payment_status(captured, Payment),
     PartyRevision = get_opts_party_revision(Opts),
     % _ = assert_no_active_chargebacks(St),
-    % Cash = define_chargeback_cash(Params#payproc_InvoicePaymentRefundParams.cash, Payment),
-    % _ = assert_chargeback_cash(Cash, St),
+    Cash = define_chargeback_cash(Params#payproc_InvoicePaymentChargebackParams.cash, Payment),
+    _ = assert_chargeback_cash(Cash, St),
     % Cart = Params#payproc_InvoicePaymentRefundParams.cart,
     % _ = assert_refund_cart(Params#payproc_InvoicePaymentRefundParams.cash, Cart, St),
     ID = construct_chargeback_id(St),
+    % TODO: add history
+    % History = [],
     #domain_InvoicePaymentChargeback{
         id              = ID,
         created_at      = hg_datetime:format_now(),
         domain_revision = Revision,
         party_revision  = PartyRevision,
-        % status          = ?refund_pending(),
-        reason          = Params#payproc_InvoicePaymentRefundParams.reason_code,
+        status          = #domain_InvoicePaymentChargebackCreated{}, % ?refund_pending(),
+        reason_code     = Params#payproc_InvoicePaymentChargebackParams.reason_code,
+        history         = [],
         cash            = Cash
         % cart            = Cart
     }.
 
+make_chargeback_cashflow(_, _, _, _, _) -> [].
+% make_chargeback_cashflow(Chargeback, Payment, Revision, St, Opts) ->
+%     Route = get_route(St),
+%     Shop = get_shop(Opts),
+%     MerchantTerms = get_merchant_chargeback_terms(get_merchant_payments_terms(Opts, Revision)),
+%     VS0 = collect_validation_varset(St, Opts),
+%     VS1 = validate_chargeback(MerchantTerms, Chargeback, Payment, VS0, Revision),
+%     ProviderPaymentsTerms = get_provider_payments_terms(Route, Revision),
+%     ProviderTerms = get_provider_chargeback_terms(ProviderPaymentsTerms, Chargeback, Payment, VS1, Revision),
+%     Cashflow = collect_chargeback_cashflow(MerchantTerms, ProviderTerms, VS1, Revision),
+%     PaymentInstitution = get_payment_institution(Opts, Revision),
+%     Provider = get_route_provider(Route, Revision),
+%     AccountMap = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS1, Revision),
+%     construct_final_cashflow(Cashflow, collect_cash_flow_context(Chargeback), AccountMap).
 
+get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{refunds = Terms}) when Terms /= undefined ->
+    Terms;
+get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{refunds = undefined}) ->
+    throw(#payproc_OperationNotPermitted{}).
+
+validate_chargeback(Terms, Chargeback, Payment, VS0, Revision) ->
+    Cost = get_payment_cost(Payment),
+    Cash = get_chargeback_cash(Chargeback),
+    case hg_cash:sub(Cost, Cash) of
+        ?cash(0, _) ->
+            validate_common_chargeback_terms(Terms, Chargeback, Payment, VS0, Revision);
+        ?cash(Amount, _) when Amount > 0 ->
+            validate_partial_chargeback(Terms, Chargeback, Payment, VS0, Revision)
+    end.
+
+validate_common_chargeback_terms(Terms, Chargeback, Payment, VS0, Revision) ->
+    VS1 = validate_payment_tool(
+        get_payment_tool(Payment),
+        Terms#domain_PaymentChargebackServiceTerms.payment_methods,
+        VS0,
+        Revision
+    ),
+    VS2 = validate_chargeback_time(
+        get_chargeback_created_at(Refund),
+        get_payment_created_at(Payment),
+        Terms#domain_PaymentChargebackServiceTerms.eligibility_time,
+        VS1,
+        Revision
+    ),
+    VS2.
+
+% validate_partial_refund(
+%     #domain_PaymentRefundsServiceTerms{partial_refunds = PRs} = Terms,
+%     Refund,
+%     Payment,
+%     VS0,
+%     Revision
+% ) when PRs /= undefined ->
+%     VS1 = validate_common_refund_terms(Terms, Refund, Payment, VS0, Revision),
+%     VS2 = validate_refund_cash(
+%         get_refund_cash(Refund),
+%         PRs#domain_PartialRefundsServiceTerms.cash_limit,
+%         VS1,
+%         Revision
+%     ),
+%     VS2;
+% validate_partial_refund(
+%     #domain_PaymentRefundsServiceTerms{partial_refunds = undefined},
+%     _Refund,
+%     _Payment,
+%     _VS0,
+%     _Revision
+% ) ->
+%     throw(#payproc_OperationNotPermitted{}).
+%
 % TODO: check for same reason code?
 % assert_no_active_chargebacks(St) ->
 %     PendingChargebacks = lists:filter(
@@ -1058,6 +1136,16 @@ make_chargeback(Params, Payment, Revision, St, Opts) ->
 %             throw(#payproc_OperationNotPermitted{})
 %     end.
 
+construct_chargeback_id(St) ->
+    PaymentID = get_payment_id(get_payment(St)),
+    InvoiceID = get_invoice_id(get_invoice(get_opts(St))),
+    SequenceID = make_chargeback_sequence_id(PaymentID, InvoiceID),
+    IntRefundID = hg_sequences:get_next(SequenceID),
+    erlang:integer_to_binary(IntRefundID).
+
+make_chargeback_sequence_id(PaymentID, InvoiceID) ->
+    <<InvoiceID/binary, <<"_">>/binary, PaymentID/binary>>.
+
 % get_refund_status(#domain_InvoicePaymentRefund{status = Status}) ->
 %     Status.
 
@@ -1067,12 +1155,16 @@ make_chargeback(Params, Payment, Revision, St, Opts) ->
 % get_refund_cashflow(#refund_st{cash_flow = CashFlow}) ->
 %     CashFlow.
 
-% define_refund_cash(undefined, #domain_InvoicePayment{cost = Cost}) ->
-%     Cost;
-% define_refund_cash(?cash(_, SymCode) = Cash, #domain_InvoicePayment{cost = ?cash(_, SymCode)}) ->
-%     Cash;
-% define_refund_cash(?cash(_, SymCode), _Payment) ->
-%     throw(#payproc_InconsistentRefundCurrency{currency = SymCode}).
+define_chargeback_cash(undefined, #domain_InvoicePayment{cost = Cost}) ->
+    Cost;
+define_chargeback_cash(?cash(_, SymCode) = Cash, #domain_InvoicePayment{cost = ?cash(_, SymCode)}) ->
+    Cash;
+define_chargeback_cash(?cash(_, SymCode), _Payment) ->
+    throw(#payproc_InconsistentRefundCurrency{currency = SymCode}).
+
+assert_chargeback_cash(Cash, St) ->
+    PaymentAmount = get_remaining_payment_amount(Cash, St),
+    assert_remaining_payment_amount(PaymentAmount, St).
 
 % get_refund_cash(#domain_InvoicePaymentRefund{cash = Cash}) ->
 %     Cash.
@@ -1150,11 +1242,11 @@ make_refund_cashflow(Refund, Payment, Revision, St, Opts) ->
 construct_refund_id(St) ->
     PaymentID = get_payment_id(get_payment(St)),
     InvoiceID = get_invoice_id(get_invoice(get_opts(St))),
-    SequenceID = make_refund_squence_id(PaymentID, InvoiceID),
+    SequenceID = make_refund_sequence_id(PaymentID, InvoiceID),
     IntRefundID = hg_sequences:get_next(SequenceID),
     erlang:integer_to_binary(IntRefundID).
 
-make_refund_squence_id(PaymentID, InvoiceID) ->
+make_refund_sequence_id(PaymentID, InvoiceID) ->
     <<InvoiceID/binary, <<"_">>/binary, PaymentID/binary>>.
 
 assert_refund_cash(Cash, St) ->

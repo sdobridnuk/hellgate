@@ -166,12 +166,12 @@
     ?chargeback_created(Chargeback, CashFlow, undefined)
 ).
 
--define(chargeback_created(Chargeback, CashFlow, TrxInfo),
-    {invoice_payment_refund_created,
-        #payproc_InvoicePaymentRefundCreated{
+-define(chargeback_created(Chargeback, CashFlow, _TrxInfo),
+    {invoice_payment_chargeback_created,
+        #payproc_InvoicePaymentChargebackCreated{
             chargeback = Chargeback,
-            cash_flow = CashFlow,
-            transaction_info = TrxInfo
+            cash_flow = CashFlow
+            % transaction_info = TrxInfo
         }
     }
 ).
@@ -185,6 +185,12 @@
 % -define(chargeback_(),
 %     {'_', #domain_InvoicePaymentChargeback_{}}).
 
+-define(chargeback_ev(ChargebackID, Payload),
+    {invoice_payment_chargeback_change, #payproc_InvoicePaymentChargebackChange{
+        id = ChargebackID,
+        payload = Payload
+    }}
+).
 %% Refunds
 
 -define(refund_ev(RefundID, Payload),
