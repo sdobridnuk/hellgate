@@ -25,6 +25,8 @@
 -export([refund_payment_manual/4]).
 -export([get_payment_refund/4]).
 
+-export([create_chargeback/4]).
+
 -export([create_adjustment/4]).
 -export([get_adjustment/4]).
 -export([capture_adjustment/4]).
@@ -61,6 +63,9 @@
 -type refund()             :: dmsl_domain_thrift:'InvoicePaymentRefund'().
 -type refund_id()          :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
 -type refund_params()      :: dmsl_payment_processing_thrift:'InvoicePaymentRefundParams'().
+-type chargeback()             :: dmsl_domain_thrift:'InvoicePaymentChargeback'().
+% -type chargeback_id()          :: dmsl_domain_thrift:'InvoicePaymentChargebackID'().
+-type chargeback_params()      :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackParams'().
 -type term_set()           :: dmsl_domain_thrift:'TermSet'().
 -type cash()               :: undefined | dmsl_domain_thrift:'Cash'().
 -type cart()               :: undefined | dmsl_domain_thrift:'InvoiceCart'().
@@ -182,6 +187,12 @@ capture_payment(InvoiceID, PaymentID, Reason, Cash, Cart, Client) ->
         ]
     },
     map_result_error(gen_server:call(Client, Call)).
+
+-spec create_chargeback(invoice_id(), payment_id(), chargeback_params(), pid()) ->
+    chargeback() | woody_error:business_error().
+
+create_chargeback(InvoiceID, PaymentID, Params, Client) ->
+    map_result_error(gen_server:call(Client, {call, 'CreateChargeback', [InvoiceID, PaymentID, Params]})).
 
 -spec refund_payment(invoice_id(), payment_id(), refund_params(), pid()) ->
     refund() | woody_error:business_error().
