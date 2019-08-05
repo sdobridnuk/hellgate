@@ -70,9 +70,10 @@
 
 %%
 
--type activity()      :: payment_activity() | refund_activity() | idle.
+-type activity()      :: payment_activity() | refund_activity() | adjustment_activity() | idle.
 -type payment_activity()  :: {payment, payment_step()}.
--type refund_activity()   :: {refund_session | refund_accounter, refund_id()}.
+-type refund_activity()   :: {refund_new | refund_session | refund_accounter, refund_id()}.
+-type adjustment_activity() :: {adjustment_new | adjustment_pending, adjustment_id()}.
 -type payment_step()      ::
     new |
     risk_scoring |
@@ -105,7 +106,8 @@
 -record(refund_st, {
     refund            :: undefined | refund(),
     cash_flow         :: undefined | cash_flow(),
-    session           :: undefined | session()
+    session           :: undefined | session(),
+    transaction_info  :: undefined | trx_info()
 }).
 
 -type refund_state() :: #refund_st{}.
@@ -139,6 +141,8 @@
 -type session_result()      :: dmsl_payment_processing_thrift:'SessionResult'().
 -type proxy_state()         :: dmsl_proxy_provider_thrift:'ProxyState'().
 -type tag()                 :: dmsl_proxy_provider_thrift:'CallbackTag'().
+-type callback()            :: dmsl_proxy_provider_thrift:'Callback'().
+-type callback_response()   :: dmsl_proxy_provider_thrift:'CallbackResponse'().
 -type make_recurrent()      :: true | false.
 -type recurrent_token()     :: dmsl_domain_thrift:'Token'().
 -type retry_strategy()      :: hg_retry:strategy().
@@ -176,10 +180,14 @@ get_party_revision(#st{activity = {payment, _}} = St) ->
     #domain_InvoicePayment{party_revision = Revision, created_at = Timestamp} = get_payment(St),
     {Revision, Timestamp};
 get_party_revision(#st{activity = {_, ID} = Activity} = St) when
+    Activity =:= {refund_new, ID} orelse
     Activity =:= {refund_session, ID} orelse
     Activity =:= {refund_accounter, ID} ->
         #domain_InvoicePaymentRefund{party_revision = Revision, created_at = Timestamp} = get_refund(ID, St),
         {Revision, Timestamp};
+get_party_revision(#st{activity = {adjustment_new, ID}} = St) ->
+    #domain_InvoicePaymentAdjustment{party_revision = Revision, created_at = Timestamp} = get_adjustment(ID, St),
+    {Revision, Timestamp};
 get_party_revision(#st{activity = Activity}) ->
     erlang:error({no_revision_for_activity, Activity}).
 
@@ -245,7 +253,7 @@ get_tags(#st{sessions = Sessions, refunds = Refunds}) ->
 -type machine_result() :: {next | done, result()}.
 
 -spec init(payment_id(), _, opts()) ->
-    {payment(), result()}.
+    {st(), result()}.
 
 init(PaymentID, PaymentParams, Opts) ->
     scoper:scope(
@@ -638,21 +646,21 @@ log_reject_context(RejectReason, RejectContext) ->
     log_reject_context(warning, RejectReason, RejectContext).
 
 log_reject_context(Level, RejectReason, RejectContext) ->
-    _ = lager:log(
+    _ = logger:log(
         Level,
-        lager:md(),
         "No route found, reason = ~p, varset: ~p",
-        [RejectReason, maps:get(varset, RejectContext)]),
-    _ = lager:log(
+        [RejectReason, maps:get(varset, RejectContext)],
+        logger:get_process_metadata()),
+    _ = logger:log(
         Level,
-        lager:md(),
         "No route found, reason = ~p, rejected providers: ~p",
-        [RejectReason, maps:get(rejected_providers, RejectContext)]),
-    _ = lager:log(
+        [RejectReason, maps:get(rejected_providers, RejectContext)],
+        logger:get_process_metadata()),
+    _ = logger:log(
         Level,
-        lager:md(),
         "No route found, reason = ~p, rejected terminals: ~p",
-        [RejectReason, maps:get(rejected_terminals, RejectContext)]),
+        [RejectReason, maps:get(rejected_terminals, RejectContext)],
+        logger:get_process_metadata()),
     ok.
 
 validate_refund_time(RefundCreatedAt, PaymentCreatedAt, TimeSpanSelector, VS, Revision) ->
@@ -993,15 +1001,12 @@ refund(Params, St0, Opts) ->
     St = St0#st{opts = Opts},
     Revision = hg_domain:head(),
     Payment = get_payment(St),
-    Refund =
-        prepare_refund(Params, Payment, Revision, St, Opts),
-    {AccountMap, FinalCashflow} =
-        prepare_refund_cashflow(Refund, Payment, Revision, St, Opts),
-    Changes = [
-        ?refund_created(Refund, FinalCashflow),
-        ?session_ev(?refunded(), ?session_started())
-    ],
-    try_commit_refund(Refund, Changes, AccountMap, St).
+    Refund = make_refund(Params, Payment, Revision, St, Opts),
+    FinalCashflow = make_refund_cashflow(Refund, Payment, Revision, St, Opts),
+    Changes = [?refund_created(Refund, FinalCashflow)],
+    Action = hg_machine_action:instant(),
+    ID = Refund#domain_InvoicePaymentRefund.id,
+    {Refund, {[?refund_ev(ID, C) || C <- Changes], Action}}.
 
 -spec manual_refund(refund_params(), st(), opts()) ->
     {refund(), result()}.
@@ -1010,27 +1015,15 @@ manual_refund(Params, St0, Opts) ->
     St = St0#st{opts = Opts},
     Revision = hg_domain:head(),
     Payment = get_payment(St),
-    Refund =
-        prepare_refund(Params, Payment, Revision, St, Opts),
-    {AccountMap, FinalCashflow} =
-        prepare_refund_cashflow(Refund, Payment, Revision, St, Opts),
+    Refund = make_refund(Params, Payment, Revision, St, Opts),
+    FinalCashflow = make_refund_cashflow(Refund, Payment, Revision, St, Opts),
     TransactionInfo = Params#payproc_InvoicePaymentRefundParams.transaction_info,
-    Changes = [
-        ?refund_created(Refund, FinalCashflow),
-        ?session_ev(?refunded(), ?session_started())
-    ]
-    ++ make_transaction_event(TransactionInfo) ++
-    [
-        ?session_ev(?refunded(), ?session_finished(?session_succeeded()))
-    ],
-    try_commit_refund(Refund, Changes, AccountMap, St).
+    Changes = [?refund_created(Refund, FinalCashflow, TransactionInfo)],
+    Action = hg_machine_action:instant(),
+    ID = Refund#domain_InvoicePaymentRefund.id,
+    {Refund, {[?refund_ev(ID, C) || C <- Changes], Action}}.
 
-make_transaction_event(undefined) ->
-    [];
-make_transaction_event(TransactionInfo) ->
-    [?session_ev(?refunded(), ?trx_bound(TransactionInfo))].
-
-prepare_refund(Params, Payment, Revision, St, Opts) ->
+make_refund(Params, Payment, Revision, St, Opts) ->
     _ = assert_payment_status(captured, Payment),
     PartyRevision = get_opts_party_revision(Opts),
     _ = assert_previous_refunds_finished(St),
@@ -1050,7 +1043,7 @@ prepare_refund(Params, Payment, Revision, St, Opts) ->
         cart            = Cart
     }.
 
-prepare_refund_cashflow(Refund, Payment, Revision, St, Opts) ->
+make_refund_cashflow(Refund, Payment, Revision, St, Opts) ->
     Route = get_route(St),
     Shop = get_shop(Opts),
     MerchantTerms = get_merchant_refunds_terms(get_merchant_payments_terms(Opts, Revision)),
@@ -1062,23 +1055,7 @@ prepare_refund_cashflow(Refund, Payment, Revision, St, Opts) ->
     PaymentInstitution = get_payment_institution(Opts, Revision),
     Provider = get_route_provider(Route, Revision),
     AccountMap = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS1, Revision),
-    FinalCashflow = construct_final_cashflow(Cashflow, collect_cash_flow_context(Refund), AccountMap),
-    {AccountMap, FinalCashflow}.
-
-try_commit_refund(Refund, Changes, AccountMap, St) ->
-    ID = Refund#domain_InvoicePaymentRefund.id,
-    RefundSt = collapse_refund_changes(Changes),
-    AffectedAccounts = prepare_refund_cashflow(RefundSt, St),
-    % NOTE we assume that posting involving merchant settlement account MUST be present in the cashflow
-    case get_available_amount(get_account_state({merchant, settlement}, AccountMap, AffectedAccounts)) of
-        % TODO we must pull this rule out of refund terms
-        Available when Available >= 0 ->
-            Action = hg_machine_action:instant(),
-            {Refund, {[?refund_ev(ID, C) || C <- Changes], Action}};
-        Available when Available < 0 ->
-            _AffectedAccounts = rollback_refund_cashflow(RefundSt, St),
-            throw(#payproc_InsufficientAccountBalance{})
-    end.
+    construct_final_cashflow(Cashflow, collect_cash_flow_context(Refund), AccountMap).
 
 construct_refund_id(St) ->
     PaymentID = get_payment_id(get_payment(St)),
@@ -1309,9 +1286,8 @@ create_adjustment(Timestamp, Params, St, Opts) ->
         old_cash_flow_inverse = hg_cashflow:revert(get_cashflow(St)),
         new_cash_flow         = FinalCashflow
     },
-    _AffectedAccounts = prepare_adjustment_cashflow(Adjustment, St, Opts),
     Event = ?adjustment_ev(ID, ?adjustment_created(Adjustment)),
-    {Adjustment, {[Event], hg_machine_action:new()}}.
+    {Adjustment, {[Event], hg_machine_action:instant()}}.
 
 get_adjustment_revision(Params) ->
     hg_utils:select_defined(
@@ -1338,7 +1314,10 @@ assert_payment_status(_, #domain_InvoicePayment{status = Status}) ->
 assert_no_adjustment_pending(#st{adjustments = As}) ->
     lists:foreach(fun assert_adjustment_finalized/1, As).
 
-assert_adjustment_finalized(#domain_InvoicePaymentAdjustment{id = ID, status = {pending, _}}) ->
+assert_adjustment_finalized(#domain_InvoicePaymentAdjustment{id = ID, status = {Status, _}}) when
+    Status =:= pending;
+    Status =:= processed
+->
     throw(#payproc_InvoicePaymentAdjustmentPending{id = ID});
 assert_adjustment_finalized(_) ->
     ok.
@@ -1362,7 +1341,7 @@ cancel_adjustment(ID, St, Options) ->
 
 finalize_adjustment(ID, Intent, St, Options) ->
     Adjustment = get_adjustment(ID, St),
-    ok = assert_adjustment_status(pending, Adjustment),
+    ok = assert_adjustment_status(processed, Adjustment),
     _AffectedAccounts = finalize_adjustment_cashflow(Intent, Adjustment, St, Options),
     Status = case Intent of
         capture ->
@@ -1447,10 +1426,14 @@ process_timeout({payment, Step}, Action, St) when
     Step =:= finalizing_accounter
 ->
     process_result(Action, St);
+process_timeout({refund_new, ID}, Action, St) ->
+    process_refund_cashflow(ID, Action, St);
 process_timeout({refund_session, _ID}, Action, St) ->
     process_session(Action, St);
 process_timeout({refund_accounter, _ID}, Action, St) ->
     process_result(Action, St);
+process_timeout({adjustment_new, ID}, Action, St) ->
+    process_adjustment_cashflow(ID, Action, St);
 process_timeout({payment, flow_waiting}, Action, St) ->
     finalize_payment(Action, St).
 
@@ -1462,8 +1445,8 @@ repair_process_timeout(Activity, Action, St = #st{repair_scenario = Scenario}) -
             process_timeout(Activity, Action, St)
     end.
 
--spec process_call({callback, tag(), _}, st(), opts()) ->
-    {_, machine_result()}. % FIXME
+-spec process_call({callback, tag(), callback()}, st(), opts()) ->
+    {callback_response(), machine_result()}.
 process_call({callback, Tag, Payload}, St, Options) ->
     scoper:scope(
         payment,
@@ -1471,6 +1454,8 @@ process_call({callback, Tag, Payload}, St, Options) ->
         fun() -> process_callback(Tag, Payload, St#st{opts = Options}) end
     ).
 
+-spec process_callback(tag(), callback(), st()) ->
+    {callback_response(), machine_result()}.
 process_callback(Tag, Payload, St) ->
     Action = hg_machine_action:new(),
     Session = get_activity_session(St),
@@ -1523,6 +1508,54 @@ process_cash_flow_building(Route, VS, Payment, PaymentInstitution, Revision, Opt
     Events1 = Events0 ++ [?route_changed(Route), ?cash_flow_changed(FinalCashflow)],
     {next, {Events1, hg_machine_action:set_timeout(0, Action)}}.
 
+%%
+
+-spec process_refund_cashflow(refund_id(), action(), st()) -> machine_result().
+process_refund_cashflow(ID, Action, St) ->
+    Opts = get_opts(St),
+    Shop = get_shop(Opts),
+    Payment = get_payment(St),
+    RefundSt = try_get_refund_state(ID, St),
+    Route = get_route(St),
+    Revision = get_refund_revision(RefundSt),
+    Provider = get_route_provider(Route, Revision),
+    VS = collect_validation_varset(St, Opts),
+    PaymentInstitution = get_payment_institution(Opts, Revision),
+    AccountMap = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS, Revision),
+    AffectedAccounts = prepare_refund_cashflow(RefundSt, St),
+    % NOTE we assume that posting involving merchant settlement account MUST be present in the cashflow
+    case get_available_amount(get_account_state({merchant, settlement}, AccountMap, AffectedAccounts)) of
+        % TODO we must pull this rule out of refund terms
+        Available when Available >= 0 ->
+            Events0 = [?session_ev(?refunded(), ?session_started())],
+            Events1 = get_manual_refund_events(RefundSt),
+            {next, {
+                [?refund_ev(ID, C) || C <- Events0 ++ Events1],
+                hg_machine_action:set_timeout(0, Action)
+            }};
+        Available when Available < 0 ->
+            Failure = {failure, payproc_errors:construct('RefundFailure',
+                {terms_violated, {insufficient_merchant_funds, #payprocerr_GeneralFailure{}}}
+            )},
+            process_failure(get_activity(St), [], Action, Failure, St, RefundSt)
+    end.
+
+get_manual_refund_events(#refund_st{transaction_info = undefined}) ->
+    [];
+get_manual_refund_events(#refund_st{transaction_info = TransactionInfo}) ->
+    [
+        ?session_ev(?refunded(), ?trx_bound(TransactionInfo)),
+        ?session_ev(?refunded(), ?session_finished(?session_succeeded()))
+    ].
+%%
+
+-spec process_adjustment_cashflow(adjustment_id(), action(), st()) -> machine_result().
+process_adjustment_cashflow(ID, _Action, St) ->
+    Opts = get_opts(St),
+    Adjustment = get_adjustment(ID, St),
+    _AffectedAccounts = prepare_adjustment_cashflow(Adjustment, St, Opts),
+    Events = [?adjustment_ev(ID, ?adjustment_status_changed(?adjustment_processed()))],
+    {done, {Events, hg_machine_action:new()}}.
 %%
 
 -spec process_session(action(), st()) -> machine_result().
@@ -1588,6 +1621,8 @@ process_callback_timeout(Action, Session, Events, St) ->
     Result = handle_proxy_callback_timeout(Action, Events, Session),
     finish_session_processing(Result, St).
 
+-spec handle_callback(callback(), action(), st()) ->
+    {callback_response(), machine_result()}.
 handle_callback(Payload, Action, St) ->
     ProxyContext = construct_proxy_context(St),
     Route        = get_route(St),
@@ -1680,17 +1715,20 @@ process_failure({payment, Step}, Events, Action, Failure, St, _RefundSt) when
     Target = get_target(St),
     case check_retry_possibility(Target, Failure, St) of
         {retry, Timeout} ->
-            _ = lager:info("Retry session after transient failure, wait ~p", [Timeout]),
+            _ = logger:info("Retry session after transient failure, wait ~p", [Timeout]),
             {SessionEvents, SessionAction} = retry_session(Action, Target, Timeout),
             {next, {Events ++ SessionEvents, SessionAction}};
         fatal ->
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
+process_failure({refund_new, ID}, Events, Action, Failure, St, RefundSt) ->
+    _AffectedAccounts = rollback_refund_cashflow(RefundSt, St),
+    {done, {Events ++ [?refund_ev(ID, ?refund_status_changed(?refund_failed(Failure)))], Action}};
 process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
     Target = ?refunded(),
     case check_retry_possibility(Target, Failure, St) of
         {retry, Timeout} ->
-            _ = lager:info("Retry session after transient failure, wait ~p", [Timeout]),
+            _ = logger:info("Retry session after transient failure, wait ~p", [Timeout]),
             {SessionEvents, SessionAction} = retry_session(Action, Target, Timeout),
             Events1 = [?refund_ev(ID, E) || E <- SessionEvents],
             {next, {Events ++ Events1, SessionAction}};
@@ -1728,26 +1766,37 @@ get_initial_retry_strategy(TargetType) ->
     St :: st(),
     Timeout :: non_neg_integer().
 check_retry_possibility(Target, Failure, St) ->
-    case check_failure_type(Failure) of
+    case check_failure_type(Target, Failure) of
         transient ->
             RetryStrategy = get_actual_retry_strategy(Target, St),
             case hg_retry:next_step(RetryStrategy) of
                 {wait, Timeout, _NewStrategy} ->
                     {retry, Timeout};
                 finish ->
-                    _ = lager:debug("Retries strategy is exceed"),
+                    _ = logger:debug("Retries strategy is exceed"),
                     fatal
             end;
         fatal ->
-            _ = lager:debug("Failure ~p is not transient", [Failure]),
+            _ = logger:debug("Failure ~p is not transient", [Failure]),
             fatal
     end.
 
--spec check_failure_type(dmsl_domain_thrift:'OperationFailure'()) -> transient | fatal.
-check_failure_type({failure, Failure}) ->
-    payproc_errors:match('PaymentFailure', Failure, fun do_check_failure_type/1);
-check_failure_type(_Other) ->
+-spec check_failure_type(target(), dmsl_domain_thrift:'OperationFailure'()) -> transient | fatal.
+check_failure_type(Target, {failure, Failure}) ->
+    payproc_errors:match(get_error_class(Target), Failure, fun do_check_failure_type/1);
+check_failure_type(_Target, _Other) ->
     fatal.
+
+get_error_class({Target, _}) when
+    Target =:= processed;
+    Target =:= captured;
+    Target =:= cancelled
+->
+    'PaymentFailure';
+get_error_class({refunded, _}) ->
+    'RefundFailure';
+get_error_class(Target) ->
+    error({unsupported_target, Target}).
 
 do_check_failure_type({authorization_failed, {temporarily_unavailable, _}}) ->
     transient;
@@ -1849,8 +1898,8 @@ handle_proxy_intent(
     Events = [?session_suspended(Tag) | try_request_interaction(UserInteraction)],
     {wrap_session_events(Events, Session), Action}.
 
-handle_proxy_capture_failure(Action, Failure, Session) ->
-    case check_failure_type({failure, Failure}) of
+handle_proxy_capture_failure(Action, Failure, Session = #{target := Target}) ->
+    case check_failure_type(Target, {failure, Failure}) of
         transient ->
             Events = [wrap_session_event(?session_finished(?session_failed({failure, Failure})), Session)],
             {Events, Action};
@@ -2249,17 +2298,20 @@ merge_change(Change = ?payment_status_changed({refunded, _} = Status), #st{payme
 
 merge_change(Change = ?refund_ev(ID, Event), St, Opts) ->
     St1 = case Event of
-        ?refund_created(_, _) ->
+        ?refund_created(_, _, _) ->
             _ = validate_transition(idle, Change, St, Opts),
-            St;
+            St#st{activity = {refund_new, ID}};
         ?session_ev(?refunded(), ?session_started()) ->
-            _ = validate_transition([idle, {refund_session, ID}], Change, St, Opts),
+            _ = validate_transition([{refund_new, ID}, {refund_session, ID}], Change, St, Opts),
             St#st{activity = {refund_session, ID}};
         ?session_ev(?refunded(), ?session_finished(?session_succeeded())) ->
             _ = validate_transition({refund_session, ID}, Change, St, Opts),
             St#st{activity = {refund_accounter, ID}};
         ?refund_status_changed(?refund_succeeded()) ->
             _ = validate_transition([{refund_accounter, ID}], Change, St, Opts),
+            St;
+        ?refund_status_changed(?refund_failed(_)) ->
+            _ = validate_transition([{refund_session, ID}, {refund_new, ID}], Change, St, Opts),
             St;
         _ ->
             _ = validate_transition([{refund_session, ID}], Change, St, Opts),
@@ -2274,15 +2326,25 @@ merge_change(Change = ?refund_ev(ID, Event), St, Opts) ->
             St2
     end;
 merge_change(Change = ?adjustment_ev(ID, Event), St, Opts) ->
-    _ = validate_transition(idle, Change, St, Opts),
-    Adjustment = merge_adjustment_change(Event, try_get_adjustment(ID, St)),
-    St1 = set_adjustment(ID, Adjustment, St),
+    St1 = case Event of
+        ?adjustment_created(_) ->
+            _ = validate_transition(idle, Change, St, Opts),
+            St#st{activity = {adjustment_new, ID}};
+        ?adjustment_status_changed(?adjustment_processed()) ->
+            _ = validate_transition({adjustment_new, ID}, Change, St, Opts),
+            St#st{activity = {adjustment_pending, ID}};
+        ?adjustment_status_changed(_) ->
+            _ = validate_transition({adjustment_pending, ID}, Change, St, Opts),
+            St#st{activity = idle}
+    end,
+    Adjustment = merge_adjustment_change(Event, try_get_adjustment(ID, St1)),
+    St2 = set_adjustment(ID, Adjustment, St1),
     % TODO new cashflow imposed implicitly on the payment state? rough
     case get_adjustment_status(Adjustment) of
         ?adjustment_captured(_) ->
-            set_cashflow(get_adjustment_cashflow(Adjustment), St1);
+            set_cashflow(get_adjustment_cashflow(Adjustment), St2);
         _ ->
-            St1
+            St2
     end;
 
 merge_change(
@@ -2319,13 +2381,15 @@ merge_change(Change = ?session_ev(Target, Event), St = #st{activity = Activity},
     St2 = set_trx(get_session_trx(Session), St1),
     case Session of
         #{status := finished, result := ?session_succeeded()} ->
-            NextStep = case Activity of
+            NextActivity = case Activity of
                 {payment, processing_session} ->
-                    processing_accounter;
+                    {payment, processing_accounter};
                 {payment, finalizing_session} ->
-                    finalizing_accounter
+                    {payment, finalizing_accounter};
+                _ ->
+                    Activity
             end,
-            St2#st{activity = {payment, NextStep}};
+            St2#st{activity = NextActivity};
         _ ->
             St2
     end.
@@ -2333,11 +2397,8 @@ merge_change(Change = ?session_ev(Target, Event), St = #st{activity = Activity},
 save_retry_attempt(Target, #st{retry_attempts = Attempts} = St) ->
     St#st{retry_attempts = maps:update_with(get_target_type(Target), fun(N) -> N + 1 end, 0, Attempts)}.
 
-collapse_refund_changes(Changes) ->
-    lists:foldl(fun merge_refund_change/2, undefined, Changes).
-
-merge_refund_change(?refund_created(Refund, Cashflow), undefined) ->
-    #refund_st{refund = Refund, cash_flow = Cashflow};
+merge_refund_change(?refund_created(Refund, Cashflow, TransactionInfo), undefined) ->
+    #refund_st{refund = Refund, cash_flow = Cashflow, transaction_info = TransactionInfo};
 merge_refund_change(?refund_status_changed(Status), RefundSt) ->
     set_refund(set_refund_status(Status, get_refund(RefundSt)), RefundSt);
 merge_refund_change(?session_ev(?refunded(), ?session_started()), St) ->
@@ -2358,7 +2419,7 @@ validate_transition(Allowed, Change, St, Opts) ->
         #{validation := strict} when not Valid ->
             erlang:error({invalid_transition, Change, St, Allowed});
         #{} when not Valid ->
-            lager:warning(
+            logger:warning(
                 "Invalid transition for change ~p in state ~p, allowed ~p",
                 [Change, St, Allowed]
             )
@@ -2528,6 +2589,9 @@ get_recurrent_token(#st{recurrent_token = Token}) ->
     Token.
 
 get_payment_revision(#st{payment = #domain_InvoicePayment{domain_revision = Revision}}) ->
+    Revision.
+
+get_refund_revision(#refund_st{refund = #domain_InvoicePaymentRefund{domain_revision = Revision}}) ->
     Revision.
 
 get_payment_payer(#st{payment = #domain_InvoicePayment{payer = Payer}}) ->

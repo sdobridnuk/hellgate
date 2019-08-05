@@ -284,7 +284,7 @@ init_per_suite(C) ->
     CowboySpec = hg_dummy_provider:get_http_cowboy_spec(),
 
     {Apps, Ret} = hg_ct_helper:start_apps([
-        lager, woody, scoper, dmt_client, party_client, hellgate, {cowboy, CowboySpec}
+        woody, scoper, dmt_client, party_client, hellgate, {cowboy, CowboySpec}
     ]),
     ok = hg_domain:insert(construct_domain_fixture()),
     RootUrl = maps:get(hellgate_root_url, Ret),
@@ -1323,6 +1323,9 @@ payment_adjustment_success(C) ->
     %% no way to create another one yet
     ?invalid_adjustment_pending(AdjustmentID) =
         hg_client_invoicing:create_adjustment(InvoiceID, PaymentID, make_adjustment_params(), Client),
+    [
+        ?payment_ev(PaymentID, ?adjustment_ev(AdjustmentID, ?adjustment_status_changed(?adjustment_processed())))
+    ] = next_event(InvoiceID, Client),
     ok =
         hg_client_invoicing:capture_adjustment(InvoiceID, PaymentID, AdjustmentID, Client),
     ?invalid_adjustment_status(?adjustment_captured(_)) =
@@ -1418,7 +1421,7 @@ get_adjustment_fixture(Revision) ->
                 name = <<"Adjustable">>,
                 description = <<>>,
                 abs_account = <<>>,
-                terminal = {value, [?trm(100)]},
+                terminal = {value, [?prvtrm(100)]},
                 proxy = #domain_Proxy{ref = ?prx(1), additional = #{}},
                 accounts = hg_ct_fixture:construct_provider_account_set([?cur(<<"RUB">>)]),
                 payment_terms = #domain_PaymentsProvisionTerms{
@@ -1642,8 +1645,15 @@ payment_refund_success(C) ->
         hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
     PaymentID = await_payment_capture(InvoiceID, PaymentID, Client),
     % not enough funds on the merchant account
-    ?insufficient_account_balance() =
+    Failure = {failure, payproc_errors:construct('RefundFailure',
+        {terms_violated, {insufficient_merchant_funds, #payprocerr_GeneralFailure{}}}
+    )},
+    Refund0 = #domain_InvoicePaymentRefund{id = RefundID0} =
         hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
+    PaymentID = refund_payment(InvoiceID, PaymentID, RefundID0, Refund0, Client),
+    [
+        ?payment_ev(PaymentID, ?refund_ev(RefundID0, ?refund_status_changed(?refund_failed(Failure))))
+    ] = next_event(InvoiceID, Client),
     % top up merchant account
     InvoiceID2 = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
     PaymentID2 = process_payment(InvoiceID2, make_payment_params(), Client),
@@ -1654,6 +1664,7 @@ payment_refund_success(C) ->
     Refund =
         hg_client_invoicing:get_payment_refund(InvoiceID, PaymentID, RefundID, Client),
     PaymentID = refund_payment(InvoiceID, PaymentID, RefundID, Refund, Client),
+    PaymentID = await_refund_session_started(InvoiceID, PaymentID, RefundID, Client),
     [
         ?payment_ev(PaymentID, ?refund_ev(ID, ?session_ev(?refunded(), ?trx_bound(_)))),
         ?payment_ev(PaymentID, ?refund_ev(ID, ?session_ev(?refunded(), ?session_finished(?session_succeeded()))))
@@ -1683,8 +1694,15 @@ payment_manual_refund(C) ->
     },
     PaymentID = await_payment_capture(InvoiceID, PaymentID, Client),
     % not enough funds on the merchant account
-    ?insufficient_account_balance() =
-        hg_client_invoicing:refund_payment_manual(InvoiceID, PaymentID, RefundParams, Client),
+    Failure = {failure, payproc_errors:construct('RefundFailure',
+        {terms_violated, {insufficient_merchant_funds, #payprocerr_GeneralFailure{}}}
+    )},
+    Refund0 = #domain_InvoicePaymentRefund{id = RefundID0} =
+        hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
+    PaymentID = refund_payment(InvoiceID, PaymentID, RefundID0, Refund0, Client),
+    [
+        ?payment_ev(PaymentID, ?refund_ev(RefundID0, ?refund_status_changed(?refund_failed(Failure))))
+    ] = next_event(InvoiceID, Client),
     % top up merchant account
     InvoiceID2 = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
     PaymentID2 = process_payment(InvoiceID2, make_payment_params(), Client),
@@ -1699,7 +1717,9 @@ payment_manual_refund(C) ->
     Refund =
         hg_client_invoicing:get_payment_refund(InvoiceID, PaymentID, RefundID, Client),
     [
-        ?payment_ev(PaymentID, ?refund_ev(RefundID, ?refund_created(Refund, _))),
+        ?payment_ev(PaymentID, ?refund_ev(RefundID, ?refund_created(Refund, _, TrxInfo)))
+    ] = next_event(InvoiceID, Client),
+    [
         ?payment_ev(PaymentID, ?refund_ev(RefundID, ?session_ev(?refunded(), ?session_started()))),
         ?payment_ev(PaymentID, ?refund_ev(RefundID, ?session_ev(?refunded(), ?trx_bound(TrxInfo)))),
         ?payment_ev(PaymentID, ?refund_ev(RefundID, ?session_ev(?refunded(), ?session_finished(?session_succeeded()))))
@@ -1737,6 +1757,7 @@ payment_partial_refunds_success(C) ->
     Refund1 = #domain_InvoicePaymentRefund{id = RefundID1} =
         hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams1, Client),
     PaymentID = refund_payment(InvoiceID, PaymentID, RefundID1, Refund1, Client),
+    PaymentID = await_refund_session_started(InvoiceID, PaymentID, RefundID1, Client),
     PaymentID = await_refund_payment_process_finish(InvoiceID, PaymentID, Client),
     % refund amount exceeds payment amount
     RefundParams2 = make_refund_params(33000, <<"RUB">>),
@@ -1747,6 +1768,7 @@ payment_partial_refunds_success(C) ->
     Refund3 = #domain_InvoicePaymentRefund{id = RefundID3} =
         hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams3, Client),
     PaymentID = refund_payment(InvoiceID, PaymentID, RefundID3, Refund3, Client),
+    PaymentID = await_refund_session_started(InvoiceID, PaymentID, RefundID3, Client),
     PaymentID = await_refund_payment_process_finish(InvoiceID, PaymentID, Client),
     % check payment status = captured
     #payproc_InvoicePayment{
@@ -1762,6 +1784,7 @@ payment_partial_refunds_success(C) ->
     Refund4 = #domain_InvoicePaymentRefund{id = RefundID4} =
         hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams4, Client),
     PaymentID = refund_payment(InvoiceID, PaymentID, RefundID4, Refund4, Client),
+    PaymentID = await_refund_session_started(InvoiceID, PaymentID, RefundID4, Client),
     [
         ?payment_ev(PaymentID, ?refund_ev(_, ?session_ev(?refunded(), ?trx_bound(_)))),
         ?payment_ev(PaymentID, ?refund_ev(_, ?session_ev(?refunded(), ?session_finished(?session_succeeded()))))
@@ -1871,10 +1894,12 @@ cant_start_simultaneous_partial_refunds(C) ->
     ?operation_not_permitted() =
         hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
     PaymentID = refund_payment(InvoiceID, PaymentID, RefundID1, Refund1, Client),
+    PaymentID = await_refund_session_started(InvoiceID, PaymentID, RefundID1, Client),
     PaymentID = await_refund_payment_process_finish(InvoiceID, PaymentID, Client),
     Refund2 = #domain_InvoicePaymentRefund{id = RefundID2} =
         hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
     PaymentID = refund_payment(InvoiceID, PaymentID, RefundID2, Refund2, Client),
+    PaymentID = await_refund_session_started(InvoiceID, PaymentID, RefundID2, Client),
     PaymentID = await_refund_payment_process_finish(InvoiceID, PaymentID, Client),
     #payproc_InvoicePayment{
         payment = #domain_InvoicePayment{status = ?captured()},
@@ -1905,7 +1930,6 @@ retry_temporary_unavailability_refund(C) ->
     PartyClient = cfg(party_client, C),
     ShopID = hg_ct_helper:create_battle_ready_shop(?cat(2), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
     InvoiceID = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
-
     PaymentParams = make_scenario_payment_params([good, good, temp, temp]),
     PaymentID = process_payment(InvoiceID, PaymentParams, Client),
     PaymentID = await_payment_capture(InvoiceID, PaymentID, Client),
@@ -1913,6 +1937,7 @@ retry_temporary_unavailability_refund(C) ->
     Refund1 = #domain_InvoicePaymentRefund{id = RefundID1} =
         hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams1, Client),
     PaymentID = refund_payment(InvoiceID, PaymentID, RefundID1, Refund1, Client),
+    PaymentID = await_refund_session_started(InvoiceID, PaymentID, RefundID1, Client),
     PaymentID = await_refund_payment_process_finish(InvoiceID, PaymentID, Client, 2),
     % check payment status still captured and all refunds
     #payproc_InvoicePayment{
@@ -2126,7 +2151,7 @@ get_cashflow_rounding_fixture(Revision) ->
                 name = <<"Rounding">>,
                 description = <<>>,
                 abs_account = <<>>,
-                terminal = {value, [?trm(100)]},
+                terminal = {value, [?prvtrm(100)]},
                 proxy = #domain_Proxy{ref = ?prx(1), additional = #{}},
                 accounts = hg_ct_fixture:construct_provider_account_set([?cur(<<"RUB">>)]),
                 payment_terms = #domain_PaymentsProvisionTerms{
@@ -2977,7 +3002,12 @@ await_payment_process_failure(InvoiceID, PaymentID, Client, Restarts, Target) ->
 
 refund_payment(InvoiceID, PaymentID, RefundID, Refund, Client) ->
     [
-        ?payment_ev(PaymentID, ?refund_ev(RefundID, ?refund_created(Refund, _))),
+        ?payment_ev(PaymentID, ?refund_ev(RefundID, ?refund_created(Refund, _)))
+    ] = next_event(InvoiceID, Client),
+    PaymentID.
+
+await_refund_session_started(InvoiceID, PaymentID, RefundID, Client) ->
+    [
         ?payment_ev(PaymentID, ?refund_ev(RefundID, ?session_ev(?refunded(), ?session_started())))
     ] = next_event(InvoiceID, Client),
     PaymentID.
@@ -3113,6 +3143,9 @@ make_payment_adjustment_and_get_revision(PaymentID, InvoiceID, Client) ->
     [
         ?payment_ev(PaymentID, ?adjustment_ev(AdjustmentID, ?adjustment_created(Adjustment)))
     ] = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?adjustment_ev(AdjustmentID, ?adjustment_status_changed(?adjustment_processed())))
+    ] = next_event(InvoiceID, Client),
     ok =
         hg_client_invoicing:capture_adjustment(InvoiceID, PaymentID, AdjustmentID, Client),
     [
@@ -3128,6 +3161,7 @@ make_payment_refund_and_get_revision(PaymentID, InvoiceID, Client) ->
     Refund =
         hg_client_invoicing:get_payment_refund(InvoiceID, PaymentID, RefundID, Client),
     PaymentID = refund_payment(InvoiceID, PaymentID, RefundID, Refund, Client),
+    PaymentID = await_refund_session_started(InvoiceID, PaymentID, RefundID, Client),
     [
         ?payment_ev(PaymentID, ?refund_ev(ID, ?session_ev(?refunded(), ?trx_bound(_)))),
         ?payment_ev(PaymentID, ?refund_ev(ID, ?session_ev(?refunded(), ?session_finished(?session_succeeded()))))
@@ -3565,7 +3599,7 @@ construct_domain_fixture() ->
                 name = <<"Brovider">>,
                 description = <<"A provider but bro">>,
                 terminal = {value, ?ordset([
-                    ?trm(1)
+                    ?prvtrm(1)
                 ])},
                 proxy = #domain_Proxy{
                     ref = ?prx(1),
@@ -3734,7 +3768,7 @@ construct_domain_fixture() ->
             data = #domain_Provider{
                 name = <<"Drovider">>,
                 description = <<"I'm out of ideas of what to write here">>,
-                terminal = {value, [?trm(6), ?trm(7)]},
+                terminal = {value, [?prvtrm(6), ?prvtrm(7)]},
                 proxy = #domain_Proxy{
                     ref = ?prx(1),
                     additional = #{
@@ -3866,7 +3900,7 @@ construct_domain_fixture() ->
             data = #domain_Provider{
                 name = <<"Crovider">>,
                 description = <<"Payment terminal provider">>,
-                terminal = {value, [?trm(10)]},
+                terminal = {value, [?prvtrm(10)]},
                 proxy = #domain_Proxy{
                     ref = ?prx(1),
                     additional = #{
@@ -3986,7 +4020,7 @@ payments_w_bank_card_issuer_conditions_fixture(Revision) ->
                 name = <<"VTB21">>,
                 description = <<>>,
                 abs_account = <<>>,
-                terminal = {value, [?trm(100)]},
+                terminal = {value, [?prvtrm(100)]},
                 proxy = #domain_Proxy{ref = ?prx(1), additional = #{}},
                 accounts = hg_ct_fixture:construct_provider_account_set([?cur(<<"RUB">>)]),
                 payment_terms = #domain_PaymentsProvisionTerms{
@@ -4224,7 +4258,7 @@ construct_term_set_for_partial_capture_provider_permit(Revision) ->
                 name = <<"Brovider">>,
                 description = <<"A provider but bro">>,
                 terminal = {value, ?ordset([
-                    ?trm(1)
+                    ?prvtrm(1)
                 ])},
                 proxy = #domain_Proxy{
                     ref = ?prx(1),
