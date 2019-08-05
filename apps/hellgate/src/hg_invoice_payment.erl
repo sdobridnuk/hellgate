@@ -28,6 +28,8 @@
 
 -export([get_payment/1]).
 -export([get_refunds/1]).
+-export([get_chargebacks/1]).
+-export([get_chargeback/2]).
 -export([get_refund/2]).
 -export([get_adjustments/1]).
 -export([get_adjustment/2]).
@@ -72,20 +74,26 @@
 
 %%
 
--type activity()      :: payment_activity() | refund_activity() | adjustment_activity() | idle.
+-type activity() :: payment_activity()
+                  | refund_activity()
+                  % | chargeback_activity()
+                  | adjustment_activity()
+                  | idle.
+
 -type payment_activity()  :: {payment, payment_step()}.
+% -type chargeback_activity()  :: {chargeback, chargeback_id()}.
 -type refund_activity()   :: {refund_new | refund_session | refund_accounter, refund_id()}.
 -type adjustment_activity() :: {adjustment_new | adjustment_pending, adjustment_id()}.
--type payment_step()      ::
-    new |
-    risk_scoring |
-    routing |
-    cash_flow_building |
-    processing_session |
-    processing_accounter |
-    flow_waiting |
-    finalizing_session |
-    finalizing_accounter.
+
+-type payment_step() :: new
+                      | risk_scoring
+                      | routing
+                      | cash_flow_building
+                      | processing_session
+                      | processing_accounter
+                      | flow_waiting
+                      | finalizing_session
+                      | finalizing_accounter.
 
 -record(st, {
     activity               :: activity(),
@@ -116,8 +124,8 @@
 -record(chargeback_st, {
     chargeback        :: undefined | chargeback(),
     cash_flow         :: undefined | cash_flow(),
-    session           :: undefined | session(),
-    transaction_info  :: undefined | trx_info()
+    session           :: undefined | session()
+    % transaction_info  :: undefined | trx_info()
 }).
 
 -type refund_state() :: #refund_st{}.
@@ -200,6 +208,12 @@ get_party_revision(#st{activity = {payment, _}} = St) ->
     #domain_InvoicePayment{party_revision = Revision, created_at = Timestamp} = get_payment(St),
     {Revision, Timestamp};
 get_party_revision(#st{activity = {_, ID} = Activity} = St) when
+    Activity =:= {chargeback_new, ID} -> %orelse
+    % Activity =:= {refund_session, ID} orelse
+    % Activity =:= {refund_accounter, ID} ->
+        #domain_InvoicePaymentChargeback{party_revision = Revision, created_at = Timestamp} = get_chargeback(ID, St),
+        {Revision, Timestamp};
+get_party_revision(#st{activity = {_, ID} = Activity} = St) when
     Activity =:= {refund_new, ID} orelse
     Activity =:= {refund_session, ID} orelse
     Activity =:= {refund_accounter, ID} ->
@@ -230,6 +244,27 @@ get_adjustment(ID, St) ->
         undefined ->
             throw(#payproc_InvoicePaymentAdjustmentNotFound{})
     end.
+
+-spec get_chargeback(chargeback_id(), st()) -> chargeback() | no_return().
+
+get_chargeback(ID, St) ->
+    case try_get_chargeback_state(ID, St) of
+        #chargeback_st{chargeback = Chargeback} ->
+            enrich_chargeback_with_cash(Chargeback, St);
+        undefined ->
+            % FIXME: add CBNOTFOUND
+            throw(#payproc_InvoicePaymentRefundNotFound{})
+    end.
+
+-spec get_chargebacks(st()) -> [chargeback()].
+
+get_chargebacks(#st{chargebacks = CBs} = St) ->
+    ct:print("GET CBS STATE ~p", [St]),
+    ct:print("GET CBS CBS ~p", [CBs]),
+    lists:keysort(
+        #domain_InvoicePaymentChargeback.id,
+        [enrich_chargeback_with_cash(CB#chargeback_st.chargeback, St) || CB <- maps:values(CBs)]
+    ).
 
 -spec get_refunds(st()) -> [refund()].
 
@@ -313,6 +348,7 @@ get_merchant_payments_terms(Opts, Revision) ->
 
 get_merchant_payments_terms(Opts, Revision, Timestamp) ->
     TermSet = get_merchant_terms(Opts, Revision, Timestamp),
+    ct:print("MERCH CB TERMS\n~p", [TermSet]),
     TermSet#domain_TermSet.payments.
 
 get_merchant_terms(Opts, Revision) ->
@@ -1024,17 +1060,21 @@ create_chargeback(Params, St0, Opts) ->
     Revision = hg_domain:head(),
     Payment = get_payment(St),
     Chargeback = make_chargeback(Params, Payment, Revision, St, Opts),
+    % TODO: CF
     FinalCashflow = make_chargeback_cashflow(Chargeback, Payment, Revision, St, Opts),
     % TODO: HISTORY
+    ct:print("~p", [Chargeback]),
     Changes = [?chargeback_created(Chargeback, FinalCashflow)],
     Action = hg_machine_action:instant(),
     ID = Chargeback#domain_InvoicePaymentChargeback.id,
-    {Chargeback, {[?refund_ev(ID, C) || C <- Changes], Action}}.
+    Result = {Chargeback, {[?chargeback_ev(ID, C) || C <- Changes], Action}},
+    ct:print("CREATE CHARGEBACK RESULT ~p", [Result]),
+    Result.
 
 make_chargeback(Params, Payment, Revision, St, Opts) ->
     _ = assert_payment_status(captured, Payment),
     PartyRevision = get_opts_party_revision(Opts),
-    % _ = assert_no_active_chargebacks(St),
+    _ = assert_no_active_chargebacks(St),
     Cash = define_chargeback_cash(Params#payproc_InvoicePaymentChargebackParams.cash, Payment),
     _ = assert_chargeback_cash(Cash, St),
     % Cart = Params#payproc_InvoicePaymentRefundParams.cart,
@@ -1047,68 +1087,70 @@ make_chargeback(Params, Payment, Revision, St, Opts) ->
         created_at      = hg_datetime:format_now(),
         domain_revision = Revision,
         party_revision  = PartyRevision,
-        status          = #domain_InvoicePaymentChargebackCreated{}, % ?refund_pending(),
+        status          = {chargeback_created, #domain_InvoicePaymentChargebackCreated{}}, % ?refund_pending(),
         reason_code     = Params#payproc_InvoicePaymentChargebackParams.reason_code,
         history         = [],
         cash            = Cash
         % cart            = Cart
     }.
 
-make_chargeback_cashflow(_, _, _, _, _) -> [].
-% make_chargeback_cashflow(Chargeback, Payment, Revision, St, Opts) ->
-%     Route = get_route(St),
-%     Shop = get_shop(Opts),
-%     MerchantTerms = get_merchant_chargeback_terms(get_merchant_payments_terms(Opts, Revision)),
-%     VS0 = collect_validation_varset(St, Opts),
-%     VS1 = validate_chargeback(MerchantTerms, Chargeback, Payment, VS0, Revision),
-%     ProviderPaymentsTerms = get_provider_payments_terms(Route, Revision),
-%     ProviderTerms = get_provider_chargeback_terms(ProviderPaymentsTerms, Chargeback, Payment, VS1, Revision),
-%     Cashflow = collect_chargeback_cashflow(MerchantTerms, ProviderTerms, VS1, Revision),
-%     PaymentInstitution = get_payment_institution(Opts, Revision),
-%     Provider = get_route_provider(Route, Revision),
-%     AccountMap = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS1, Revision),
-%     construct_final_cashflow(Cashflow, collect_cash_flow_context(Chargeback), AccountMap).
+% make_chargeback_cashflow(_, _, _, _, _) -> [].
+make_chargeback_cashflow(Chargeback, Payment, Revision, St, Opts) ->
+    Route         = get_route(St),
+    Shop          = get_shop(Opts),
+    MerchantTerms = get_merchant_chargeback_terms(get_merchant_payments_terms(Opts, Revision)),
+    VS0           = collect_validation_varset(St, Opts),
+    VS1           = validate_chargeback(MerchantTerms, Chargeback, Payment, VS0, Revision),
+    % ProviderPaymentsTerms = get_provider_payments_terms(Route, Revision),
+    % ProviderTerms = get_provider_chargeback_terms(ProviderPaymentsTerms, Chargeback, Payment, VS1, Revision),
+    Cashflow      = collect_chargeback_cashflow(MerchantTerms, VS1, Revision),
+    PaymentInstitution = get_payment_institution(Opts, Revision),
+    Provider = get_route_provider(Route, Revision),
+    AccountMap = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS1, Revision),
+    construct_final_cashflow(Cashflow, collect_cash_flow_context(Chargeback), AccountMap).
 
-% get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{refunds = Terms}) when Terms /= undefined ->
-%     Terms;
-% get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{refunds = undefined}) ->
-%     throw(#payproc_OperationNotPermitted{}).
+get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{chargeback = Terms}) when Terms /= undefined ->
+    Terms;
+get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{chargeback = undefined}) ->
+    % [].
+    % TODO: 0 by default
+    throw(#payproc_OperationNotPermitted{}).
 
-% validate_chargeback(Terms, Chargeback, Payment, VS0, Revision) ->
-%     Cost = get_payment_cost(Payment),
-%     Cash = get_chargeback_cash(Chargeback),
-%     case hg_cash:sub(Cost, Cash) of
-%         ?cash(0, _) ->
-%             validate_common_chargeback_terms(Terms, Chargeback, Payment, VS0, Revision)
-%         % ?cash(Amount, _) when Amount > 0 ->
-%         %     validate_partial_chargeback(Terms, Chargeback, Payment, VS0, Revision)
-%     end.
+validate_chargeback(Terms, Chargeback, Payment, VS0, Revision) ->
+    Cost = get_payment_cost(Payment),
+    Cash = get_chargeback_cash(Chargeback),
+    case hg_cash:sub(Cost, Cash) of
+        ?cash(0, _) ->
+            validate_common_chargeback_terms(Terms, Chargeback, Payment, VS0, Revision)
+        % ?cash(Amount, _) when Amount > 0 ->
+        %     validate_partial_chargeback(Terms, Chargeback, Payment, VS0, Revision)
+    end.
 
-% validate_common_chargeback_terms(Terms, Chargeback, Payment, VS0, Revision) ->
-%     VS1 = validate_payment_tool(
-%         get_payment_tool(Payment),
-%         Terms#domain_PaymentChargebackServiceTerms.payment_methods,
-%         VS0,
-%         Revision
-%     ),
-%     VS2 = validate_chargeback_time(
-%         get_chargeback_created_at(Chargeback),
-%         get_payment_created_at(Payment),
-%         Terms#domain_PaymentChargebackServiceTerms.eligibility_time,
-%         VS1,
-%         Revision
-%     ),
-%     VS2.
+validate_common_chargeback_terms(Terms, Chargeback, Payment, VS0, Revision) ->
+    VS1 = validate_payment_tool(
+        get_payment_tool(Payment),
+        Terms#domain_PaymentChargebackServiceTerms.payment_methods,
+        VS0,
+        Revision
+    ),
+    VS2 = validate_chargeback_time(
+        get_chargeback_created_at(Chargeback),
+        get_payment_created_at(Payment),
+        Terms#domain_PaymentChargebackServiceTerms.eligibility_time,
+        VS1,
+        Revision
+    ),
+    VS2.
 
-% validate_chargeback_time(ChargebackCreatedAt, PaymentCreatedAt, TimeSpanSelector, VS, Revision) ->
-%     EligibilityTime = reduce_selector(eligibility_time, TimeSpanSelector, VS, Revision),
-%     ChargebackEndTime = hg_datetime:add_time_span(EligibilityTime, PaymentCreatedAt),
-%     case hg_datetime:compare(ChargebackCreatedAt, ChargebackEndTime) of
-%         Result when Result == earlier; Result == simultaneously ->
-%             VS;
-%         later ->
-%             throw(#payproc_OperationNotPermitted{})
-%     end.
+validate_chargeback_time(ChargebackCreatedAt, PaymentCreatedAt, TimeSpanSelector, VS, Revision) ->
+    EligibilityTime = reduce_selector(eligibility_time, TimeSpanSelector, VS, Revision),
+    ChargebackEndTime = hg_datetime:add_time_span(EligibilityTime, PaymentCreatedAt),
+    case hg_datetime:compare(ChargebackCreatedAt, ChargebackEndTime) of
+        Result when Result == earlier; Result == simultaneously ->
+            VS;
+        later ->
+            throw(#payproc_OperationNotPermitted{})
+    end.
 
 % validate_partial_refund(
 %     #domain_PaymentRefundsServiceTerms{partial_refunds = PRs} = Terms,
@@ -1135,18 +1177,23 @@ make_chargeback_cashflow(_, _, _, _, _) -> [].
 %     throw(#payproc_OperationNotPermitted{}).
 %
 % TODO: check for same reason code?
-% assert_no_active_chargebacks(St) ->
-%     PendingChargebacks = lists:filter(
-%         fun
-%             _ -> false
-%         end,
-%         get_chargebacks(St)),
-%     case PendingChargebacks of
-%         [] ->
-%             ok;
-%         [_R|_] ->
-%             throw(#payproc_OperationNotPermitted{})
-%     end.
+assert_no_active_chargebacks(St) ->
+    CBs = get_chargebacks(St),
+    ct:print("CHARGEBACKS ~p", [CBs]),
+    ActiveChargebacks = lists:filter(
+        fun
+            (#domain_InvoicePaymentChargeback{status = ?chargeback_status_won()}) -> false;
+            (#domain_InvoicePaymentChargeback{status = ?chargeback_status_lost()}) -> false;
+            (#domain_InvoicePaymentChargeback{}) -> true
+        end,
+        CBs
+    ),
+    case ActiveChargebacks of
+        [] ->
+            ok;
+        [_R|_] ->
+            throw(#payproc_OperationNotPermitted{})
+    end.
 
 construct_chargeback_id(St) ->
     PaymentID = get_payment_id(get_payment(St)),
@@ -1178,11 +1225,11 @@ assert_chargeback_cash(Cash, St) ->
     PaymentAmount = get_remaining_payment_amount(Cash, St),
     assert_remaining_payment_amount(PaymentAmount, St).
 
-% get_chargeback_cash(#domain_InvoicePaymentChargeback{cash = Cash}) ->
-%     Cash.
+get_chargeback_cash(#domain_InvoicePaymentChargeback{cash = Cash}) ->
+    Cash.
 
-% get_chargeback_created_at(#domain_InvoicePaymentChargeback{created_at = CreatedAt}) ->
-%     CreatedAt.
+get_chargeback_created_at(#domain_InvoicePaymentChargeback{created_at = CreatedAt}) ->
+    CreatedAt.
 
 
 %% TODO: CHARGEBACKS WIP
@@ -1191,6 +1238,7 @@ assert_chargeback_cash(Cash, St) ->
     {refund(), result()}.
 
 refund(Params, St0, Opts) ->
+    ct:print("REFUND HANDLER ~p", [Params]),
     St = St0#st{opts = Opts},
     Revision = hg_domain:head(),
     Payment = get_payment(St),
@@ -1217,9 +1265,10 @@ manual_refund(Params, St0, Opts) ->
     {Refund, {[?refund_ev(ID, C) || C <- Changes], Action}}.
 
 make_refund(Params, Payment, Revision, St, Opts) ->
+    ct:print("MAKE REFUND ~p", [Params]),
     _ = assert_payment_status(captured, Payment),
     PartyRevision = get_opts_party_revision(Opts),
-    % _ = assert_no_active_chargebacks(St),
+    _ = assert_no_active_chargebacks(St),
     _ = assert_previous_refunds_finished(St),
     Cash = define_refund_cash(Params#payproc_InvoicePaymentRefundParams.cash, Payment),
     _ = assert_refund_cash(Cash, St),
@@ -1430,6 +1479,29 @@ collect_refund_cashflow(
     ProviderCashflow = reduce_selector(provider_refund_cash_flow, ProviderCashflowSelector, VS, Revision),
     MerchantCashflow ++ ProviderCashflow.
 
+% TODO: CHARGEBACKS WIP
+collect_chargeback_cashflow(
+    #domain_PaymentChargebackServiceTerms{fees = MerchantCashflowSelector},
+    % #domain_PaymentChargebackProvisionTerms{cash_flow = ProviderCashflowSelector},
+    VS,
+    Revision
+) ->
+    MerchantCashflow = reduce_selector(merchant_chargeback_fees     , MerchantCashflowSelector, VS, Revision),
+    % ProviderCashflow = reduce_selector(provider_chargeback_cash_flow, ProviderCashflowSelector, VS, Revision),
+    MerchantCashflow.
+
+prepare_chargeback_cashflow(ChargebackSt, St) ->
+    hg_accounting:plan(construct_chargeback_plan_id(ChargebackSt, St), get_chargeback_cashflow_plan(ChargebackSt)).
+
+construct_chargeback_plan_id(ChargebackSt, St) ->
+    hg_utils:construct_complex_id([
+        get_invoice_id(get_invoice(get_opts(St))),
+        get_payment_id(get_payment(St)),
+        {chargeback_session, get_chargeback_id(get_chargeback(ChargebackSt))}
+    ]).
+get_chargeback_cashflow_plan(ChargebackSt) ->
+    {1, get_chargeback_cashflow(ChargebackSt)}.
+
 prepare_refund_cashflow(RefundSt, St) ->
     hg_accounting:plan(construct_refund_plan_id(RefundSt, St), get_refund_cashflow_plan(RefundSt)).
 
@@ -1620,6 +1692,10 @@ process_timeout({payment, Step}, Action, St) when
     Step =:= finalizing_accounter
 ->
     process_result(Action, St);
+% TODO: WIP CHARGEBACKS
+process_timeout({chargeback_new, ID}, Action, St) ->
+    process_chargeback_cashflow(ID, Action, St);
+% TODO: WIP CHARGEBACKS
 process_timeout({refund_new, ID}, Action, St) ->
     process_refund_cashflow(ID, Action, St);
 process_timeout({refund_session, _ID}, Action, St) ->
@@ -1703,6 +1779,38 @@ process_cash_flow_building(Route, VS, Payment, PaymentInstitution, Revision, Opt
     {next, {Events1, hg_machine_action:set_timeout(0, Action)}}.
 
 %%
+
+% TODO: WIP CHARGEBACKS
+-spec process_chargeback_cashflow(chargeback_id(), action(), st()) -> machine_result().
+process_chargeback_cashflow(ID, Action, St) ->
+    Opts = get_opts(St),
+    Shop = get_shop(Opts),
+    Payment = get_payment(St),
+    ChargebackSt = try_get_chargeback_state(ID, St),
+    Route = get_route(St),
+    Revision = get_chargeback_revision(ChargebackSt),
+    Provider = get_route_provider(Route, Revision),
+    VS = collect_validation_varset(St, Opts),
+    PaymentInstitution = get_payment_institution(Opts, Revision),
+    AccountMap = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS, Revision),
+    AffectedAccounts = prepare_chargeback_cashflow(ChargebackSt, St),
+    % NOTE we assume that posting involving merchant settlement account MUST be present in the cashflow
+    case get_available_amount(get_account_state({merchant, settlement}, AccountMap, AffectedAccounts)) of
+        % TODO we must pull this rule out of refund terms
+        Available when Available >= 0 ->
+            Events0 = [?session_ev(?refunded(), ?session_started())],
+            % Events1 = get_manual_refund_events(RefundSt),
+            {next, {
+                [?chargeback_ev(ID, C) || C <- Events0],% ++ Events1],
+                hg_machine_action:set_timeout(0, Action)
+            }};
+        Available when Available < 0 ->
+            Failure = {failure, payproc_errors:construct('ChargebackFailure',
+                {terms_violated, {insufficient_merchant_funds, #payprocerr_GeneralFailure{}}}
+            )},
+            process_failure(get_activity(St), [], Action, Failure, St, ChargebackSt)
+    end.
+% TODO: WIP CHARGEBACKS
 
 -spec process_refund_cashflow(refund_id(), action(), st()) -> machine_result().
 process_refund_cashflow(ID, Action, St) ->
@@ -2490,6 +2598,48 @@ merge_change(Change = ?payment_status_changed({refunded, _} = Status), #st{payme
         payment    = Payment#domain_InvoicePayment{status = Status}
     };
 
+merge_change(Change = ?chargeback_ev(ID, Event), St, Opts) ->
+    %% WIP
+    ct:print("MERGE CHANGE CB EVENT ~p", [Event]),
+    St1 = case Event of
+        ?chargeback_created(_, _) ->
+            _ = validate_transition(idle, Change, St, Opts),
+            St#st{activity = {chargeback_new, ID}};
+    %     ?session_ev(?refunded(), ?session_started()) ->
+    %         _ = validate_transition([{refund_new, ID}, {refund_session, ID}], Change, St, Opts),
+    %         St#st{activity = {refund_session, ID}};
+    %     ?session_ev(?refunded(), ?session_finished(?session_succeeded())) ->
+    %         _ = validate_transition({refund_session, ID}, Change, St, Opts),
+    %         St#st{activity = {refund_accounter, ID}};
+    %     ?refund_status_changed(?refund_succeeded()) ->
+    %         _ = validate_transition([{refund_accounter, ID}], Change, St, Opts),
+    %         St;
+    %     ?refund_status_changed(?refund_failed(_)) ->
+    %         _ = validate_transition([{refund_session, ID}, {refund_new, ID}], Change, St, Opts),
+    %         St;
+        _ ->
+            % _ = validate_transition([{refund_session, ID}], Change, St, Opts),
+            St
+    end,
+    ChargebackSt = merge_chargeback_change(Event, try_get_chargeback_state(ID, St)),
+    St2 = set_chargeback_state(ID, ChargebackSt, St1),
+    case get_chargeback_status(get_chargeback(ChargebackSt)) of
+        {S, _} when S == succeeded; S == failed ->
+            St2#st{activity = idle};
+        _ ->
+            St2
+    end;
+    % RefundSt = merge_refund_change(Event, try_get_refund_state(ID, St1)),
+    % St2 = set_refund_state(ID, RefundSt, St1),
+    % case get_refund_status(get_refund(RefundSt)) of
+    %     {S, _} when S == succeeded; S == failed ->
+    %         St2#st{activity = idle};
+    %     _ ->
+    %         St2
+    % end;
+    % St#st{chargebacks = #{ID => #chargeback_st{chargeback =  }}};
+    % ChargebackSt = merge_refund_change(Event, try_get_chargeback_state(ID, St)),
+
 merge_change(Change = ?refund_ev(ID, Event), St, Opts) ->
     St1 = case Event of
         ?refund_created(_, _, _) ->
@@ -2591,6 +2741,15 @@ merge_change(Change = ?session_ev(Target, Event), St = #st{activity = Activity},
 save_retry_attempt(Target, #st{retry_attempts = Attempts} = St) ->
     St#st{retry_attempts = maps:update_with(get_target_type(Target), fun(N) -> N + 1 end, 0, Attempts)}.
 
+merge_chargeback_change(?chargeback_created(Refund, Cashflow), undefined) ->
+    #chargeback_st{chargeback = Refund, cash_flow = Cashflow}.
+% merge_chargeback_change(?refund_status_changed(Status), RefundSt) ->
+%     set_refund(set_refund_status(Status, get_refund(RefundSt)), RefundSt);
+% merge_refund_change(?session_ev(?refunded(), ?session_started()), St) ->
+%     set_refund_session(create_session(?refunded(), undefined), St);
+% merge_refund_change(?session_ev(?refunded(), Change), St) ->
+%     set_refund_session(merge_session_change(Change, get_refund_session(St)), St).
+
 merge_refund_change(?refund_created(Refund, Cashflow, TransactionInfo), undefined) ->
     #refund_st{refund = Refund, cash_flow = Cashflow, transaction_info = TransactionInfo};
 merge_refund_change(?refund_status_changed(Status), RefundSt) ->
@@ -2636,6 +2795,14 @@ get_trx(#st{trx = Trx}) ->
 set_trx(Trx, St = #st{}) ->
     St#st{trx = Trx}.
 
+try_get_chargeback_state(ID, #st{chargebacks = Rs}) ->
+    case Rs of
+        #{ID := ChargebackSt} ->
+            ChargebackSt;
+        #{} ->
+            undefined
+    end.
+
 try_get_refund_state(ID, #st{refunds = Rs}) ->
     case Rs of
         #{ID := RefundSt} ->
@@ -2643,6 +2810,15 @@ try_get_refund_state(ID, #st{refunds = Rs}) ->
         #{} ->
             undefined
     end.
+
+set_chargeback_state(ID, ChargebackSt, St = #st{chargebacks = CBs}) ->
+    St#st{chargebacks = CBs#{ID => ChargebackSt}}.
+
+get_chargeback_status(#domain_InvoicePaymentChargeback{status = Status}) ->
+    Status.
+
+get_chargeback(#chargeback_st{chargeback = Chargeback}) ->
+    Chargeback.
 
 set_refund_state(ID, RefundSt, St = #st{refunds = Rs}) ->
     St#st{refunds = Rs#{ID => RefundSt}}.
@@ -2669,6 +2845,9 @@ set_refund(Refund, RefundSt = #refund_st{}) ->
 get_refund_id(#domain_InvoicePaymentRefund{id = ID}) ->
     ID.
 
+get_chargeback_id(#domain_InvoicePaymentChargeback{id = ID}) ->
+    ID.
+
 get_refund_status(#domain_InvoicePaymentRefund{status = Status}) ->
     Status.
 
@@ -2676,6 +2855,9 @@ set_refund_status(Status, Refund = #domain_InvoicePaymentRefund{}) ->
     Refund#domain_InvoicePaymentRefund{status = Status}.
 
 get_refund_cashflow(#refund_st{cash_flow = CashFlow}) ->
+    CashFlow.
+
+get_chargeback_cashflow(#chargeback_st{cash_flow = CashFlow}) ->
     CashFlow.
 
 define_refund_cash(undefined, #domain_InvoicePayment{cost = Cost}) ->
@@ -2688,8 +2870,19 @@ define_refund_cash(?cash(_, SymCode), _Payment) ->
 get_refund_cash(#domain_InvoicePaymentRefund{cash = Cash}) ->
     Cash.
 
+% get_chargeback_cash(#domain_InvoicePaymentChargeback{cash = Cash}) ->
+%     Cash.
+
 get_refund_created_at(#domain_InvoicePaymentRefund{created_at = CreatedAt}) ->
     CreatedAt.
+
+% get_chargeback_created_at(#domain_InvoicePaymentChargeback{created_at = CreatedAt}) ->
+%     CreatedAt.
+
+enrich_chargeback_with_cash(Chargeback, #st{payment = Payment}) ->
+    ct:print("ENRICH CHARGEBACK CASH ~p", [Chargeback]),
+    Cash = define_chargeback_cash(Chargeback#domain_InvoicePaymentChargeback.cash, Payment),
+    Chargeback#domain_InvoicePaymentChargeback{cash = Cash}.
 
 enrich_refund_with_cash(Refund, #st{payment = Payment}) ->
     Cash = define_refund_cash(Refund#domain_InvoicePaymentRefund.cash, Payment),
@@ -2786,6 +2979,9 @@ get_payment_revision(#st{payment = #domain_InvoicePayment{domain_revision = Revi
     Revision.
 
 get_refund_revision(#refund_st{refund = #domain_InvoicePaymentRefund{domain_revision = Revision}}) ->
+    Revision.
+
+get_chargeback_revision(#chargeback_st{chargeback = #domain_InvoicePaymentChargeback{domain_revision = Revision}}) ->
     Revision.
 
 get_payment_payer(#st{payment = #domain_InvoicePayment{payer = Payer}}) ->
