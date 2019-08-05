@@ -14,7 +14,7 @@
   1},
  {<<"dmsl">>,
   {git,"git@github.com:rbkmoney/damsel.git",
-       {ref,"708acbadc55d977ec48ba5920c28dee63a432171"}},
+       {ref,"3ae00edbf1948c50f126157cce4d5806b9ab775f"}},
   0},
  {<<"dmt_client">>,
   {git,"git@github.com:rbkmoney/dmt_client.git",
