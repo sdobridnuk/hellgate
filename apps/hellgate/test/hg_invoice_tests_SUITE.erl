@@ -1625,21 +1625,26 @@ payment_chargeback_success(C) ->
     ?invalid_payment_status(?processed()) =
         hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, ChargebackParams, Client),
     PaymentID = await_payment_capture(InvoiceID, PaymentID, Client),
-    Failure = {failure, payproc_errors:construct('ChargebackFailure',
-        {terms_violated, {insufficient_merchant_funds, #payprocerr_GeneralFailure{}}}
-    )},
+    Chargeback0 = #domain_InvoicePaymentChargeback{id = ChargebackID0} =
+        hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, ChargebackParams, Client),
+    % ct:print("TEST CB CB\n~p", [Chargeback0]),
+    % PaymentID = chargeback_payment(InvoiceID, PaymentID, ChargebackID0, Chargeback0, Client),
+    % Result = next_event(InvoiceID, Client),
+    % ct:print("TEST CB RESULT\n~p", [Result]),
+    % TODO: test cashflow?
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(ChargebackID0, ?chargeback_created(Chargeback0, _)))
+    ] = next_event(InvoiceID, Client),
+    % not finished yet
+    RefundParams = make_refund_params(),
+    ?operation_not_permitted() = hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
+    % Refund0 = #domain_InvoicePaymentRefund{id = RefundID0} =
+    % ?operation_not_permitted() =
+    %     hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
     ok.
+    % ok.
 %     % not finished yet
 %     % not enough funds on the merchant account
-%     Failure = {failure, payproc_errors:construct('ChargebackFailure',
-%         {terms_violated, {insufficient_merchant_funds, #payprocerr_GeneralFailure{}}}
-%     )},
-%     Chargeback0 = #domain_InvoicePaymentChargeback{id = ChargebackID0} =
-%         hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, ChargebackParams, Client),
-%     PaymentID = chargeback_payment(InvoiceID, PaymentID, ChargebackID0, Chargeback0, Client),
-%     [
-%         ?payment_ev(PaymentID, ?chargeback_ev(ChargebackID0, ?chargeback_status_changed(?chargeback_failed(Failure))))
-%     ] = next_event(InvoiceID, Client),
 %     % top up merchant account
 %     InvoiceID2 = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
 %     PaymentID2 = process_payment(InvoiceID2, make_payment_params(), Client),
@@ -2669,11 +2674,13 @@ next_event(InvoiceID, Timeout, Client) ->
         {ok, ?invoice_ev(Changes)} ->
             case filter_changes(Changes) of
                 L when length(L) > 0 ->
+		    % ct:print("NEXT EVENT ok\n~p", [L]),
                     L;
                 [] ->
                     next_event(InvoiceID, Timeout, Client)
             end;
         Result ->
+	    % ct:print("NEXT EVENT ANY\n~p", [Result]),
             Result
     end.
 
@@ -2953,7 +2960,8 @@ start_invoice(ShopID, Product, Due, Amount, C) ->
     InvoiceID.
 
 start_payment(InvoiceID, PaymentParams, Client) ->
-    ?payment_state(?payment(PaymentID)) = hg_client_invoicing:start_payment(InvoiceID, PaymentParams, Client),
+    ?payment_state(Payment = ?payment(PaymentID)) = hg_client_invoicing:start_payment(InvoiceID, PaymentParams, Client),
+    ct:print("PAYMENT\n~p", [Payment]),
     [
         ?payment_ev(PaymentID, ?payment_started(?payment_w_status(?pending())))
     ] = next_event(InvoiceID, Client),
@@ -3085,6 +3093,12 @@ refund_payment(InvoiceID, PaymentID, RefundID, Refund, Client) ->
         ?payment_ev(PaymentID, ?refund_ev(RefundID, ?refund_created(Refund, _)))
     ] = next_event(InvoiceID, Client),
     PaymentID.
+
+% chargeback_payment(InvoiceID, PaymentID, ChargebackID, Chargeback, Client) ->
+%     [
+%         ?payment_ev(PaymentID, ?chargeback_ev(ChargebackID, ?chargeback_created(Chargeback, _)))
+%     ] = next_event(InvoiceID, Client),
+%     PaymentID.
 
 await_refund_session_started(InvoiceID, PaymentID, RefundID, Client) ->
     [
@@ -3455,6 +3469,15 @@ construct_domain_fixture() ->
                         then_ = {value, #domain_HoldLifetime{seconds = 3}}
                     }
                 ]}
+            },
+            chargeback = #domain_PaymentChargebackServiceTerms{
+                payment_methods = {value, ?ordset([
+                    ?pmt(bank_card, visa),
+                    ?pmt(bank_card, mastercard)
+                ])},
+                fees = {value, [
+                ]},
+                eligibility_time = {value, #'TimeSpan'{minutes = 1}}
             },
             refunds = #domain_PaymentRefundsServiceTerms{
                 payment_methods = {value, ?ordset([
