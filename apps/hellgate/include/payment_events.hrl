@@ -155,23 +155,18 @@
 
 %% Chargebacks
 
-% -define(Chargeback_ev(ChargebackID, Payload),
-%     {invoice_payment_refund_change, #payproc_InvoicePaymentChargebackChange{
-%         id = RefundID,
-%         payload = Payload
-%     }}
-% ).
-
--define(chargeback_created(Chargeback, CashFlow),
-    ?chargeback_created(Chargeback, CashFlow, undefined)
+-define(chargeback_ev(ChargebackID, Payload),
+    {invoice_payment_chargeback_change, #payproc_InvoicePaymentChargebackChange{
+        id = ChargebackID,
+        payload = Payload
+    }}
 ).
 
--define(chargeback_created(Chargeback, CashFlow, _TrxInfo),
+-define(chargeback_created(Chargeback, CashFlow),
     {invoice_payment_chargeback_created,
         #payproc_InvoicePaymentChargebackCreated{
             chargeback = Chargeback,
             cash_flow = CashFlow
-            % transaction_info = TrxInfo
         }
     }
 ).
@@ -182,15 +177,15 @@
     }
 ).
 
-% -define(chargeback_(),
-%     {'_', #domain_InvoicePaymentChargeback_{}}).
+-define(chargeback_status_created(),
+    {won, #domain_InvoicePaymentChargebackCreated{}}).
+% -define(chargeback_status_(),
+%     {won, #domain_InvoicePaymentChargeback_{}}).
+-define(chargeback_status_won(),
+    {won, #domain_InvoicePaymentChargebackWon{}}).
+-define(chargeback_status_lost(),
+    {lost, #domain_InvoicePaymentChargebackLost{}}).
 
--define(chargeback_ev(ChargebackID, Payload),
-    {invoice_payment_chargeback_change, #payproc_InvoicePaymentChargebackChange{
-        id = ChargebackID,
-        payload = Payload
-    }}
-).
 %% Refunds
 
 -define(refund_ev(RefundID, Payload),
