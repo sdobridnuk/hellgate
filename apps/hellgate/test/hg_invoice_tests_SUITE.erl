@@ -1659,7 +1659,8 @@ payment_chargeback_success(C) ->
 %     PaymentID = await_chargeback_session_started(InvoiceID, PaymentID, ChargebackID, Client),
 %     [
 %         ?payment_ev(PaymentID, ?chargeback_ev(ID, ?session_ev(?charged_back(), ?trx_bound(_)))),
-%         ?payment_ev(PaymentID, ?chargeback_ev(ID, ?session_ev(?charged_back(), ?session_finished(?session_succeeded()))))
+%         ?payment_ev(PaymentID,
+%             ?chargeback_ev(ID, ?session_ev(?charged_back(), ?session_finished(?session_succeeded()))))
 %     ] = next_event(InvoiceID, Client),
 %     [
 %         ?payment_ev(PaymentID, ?chargeback_ev(ID, ?chargeback_status_changed(?chargeback_succeeded()))),
@@ -2675,13 +2676,13 @@ next_event(InvoiceID, Timeout, Client) ->
         {ok, ?invoice_ev(Changes)} ->
             case filter_changes(Changes) of
                 L when length(L) > 0 ->
-		    % ct:print("NEXT EVENT ok\n~p", [L]),
+                    % ct:print("NEXT EVENT ok\n~p", [L]),
                     L;
                 [] ->
                     next_event(InvoiceID, Timeout, Client)
             end;
         Result ->
-	    % ct:print("NEXT EVENT ANY\n~p", [Result]),
+            % ct:print("NEXT EVENT ANY\n~p", [Result]),
             Result
     end.
 
