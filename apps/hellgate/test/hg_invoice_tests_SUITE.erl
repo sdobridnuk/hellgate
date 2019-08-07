@@ -1635,12 +1635,13 @@ payment_chargeback_success(C) ->
     [
         ?payment_ev(PaymentID, ?chargeback_ev(ChargebackID0, ?chargeback_created(Chargeback0, _)))
     ] = next_event(InvoiceID, Client),
-    % not finished yet
-    RefundParams = make_refund_params(),
-    ?operation_not_permitted() = hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
-    % Refund0 = #domain_InvoicePaymentRefund{id = RefundID0} =
-    % ?operation_not_permitted() =
-    %     hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
+    % chargebacks block refunds
+    RefundParams      = make_refund_params(),
+    ChargebackParams1 = make_chargeback_params(),
+    ?operation_not_permitted() =
+        hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
+    ?operation_not_permitted() =
+        hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, ChargebackParams1, Client),
     ok.
     % ok.
 %     % not finished yet
@@ -2882,7 +2883,7 @@ set_payment_context(Context, Params = #payproc_InvoicePaymentParams{}) ->
 
 make_chargeback_params() ->
     #payproc_InvoicePaymentChargebackParams{
-        reason_code = <<"ZANOZED">>
+        reason_code = <<"CB.C0DE">>
     }.
 
 make_refund_params() ->
@@ -3470,15 +3471,6 @@ construct_domain_fixture() ->
                     }
                 ]}
             },
-            chargeback = #domain_PaymentChargebackServiceTerms{
-                payment_methods = {value, ?ordset([
-                    ?pmt(bank_card, visa),
-                    ?pmt(bank_card, mastercard)
-                ])},
-                fees = {value, [
-                ]},
-                eligibility_time = {value, #'TimeSpan'{minutes = 1}}
-            },
             refunds = #domain_PaymentRefundsServiceTerms{
                 payment_methods = {value, ?ordset([
                     ?pmt(bank_card, visa),
@@ -3493,6 +3485,15 @@ construct_domain_fixture() ->
                         {exclusive, ?cash(40000, <<"RUB">>)}
                     )}
                 }
+            },
+            chargeback = #domain_PaymentChargebackServiceTerms{
+                payment_methods = {value, ?ordset([
+                    ?pmt(bank_card, visa),
+                    ?pmt(bank_card, mastercard)
+                ])},
+                fees = {value, [
+                ]},
+                eligibility_time = {value, #'TimeSpan'{minutes = 1}}
             }
         }
     },
