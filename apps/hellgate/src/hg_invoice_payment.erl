@@ -829,6 +829,12 @@ collect_cash_flow_context(
         operation_amount => Cost
     };
 collect_cash_flow_context(
+    #domain_InvoicePaymentChargeback{cash = Cash}
+) ->
+    #{
+        operation_amount => Cash
+    };
+collect_cash_flow_context(
     #domain_InvoicePaymentRefund{cash = Cash}
 ) ->
     #{
@@ -1063,12 +1069,12 @@ create_chargeback(Params, St0, Opts) ->
     % TODO: CF
     FinalCashflow = make_chargeback_cashflow(Chargeback, Payment, Revision, St, Opts),
     % TODO: HISTORY
-    ct:print("~p", [Chargeback]),
+    % ct:print("~p", [Chargeback]),
     Changes = [?chargeback_created(Chargeback, FinalCashflow)],
     Action = hg_machine_action:instant(),
     ID = Chargeback#domain_InvoicePaymentChargeback.id,
     Result = {Chargeback, {[?chargeback_ev(ID, C) || C <- Changes], Action}},
-    ct:print("CREATE CHARGEBACK RESULT ~p", [Result]),
+    % ct:print("CREATE CHARGEBACK RESULT ~p", [Result]),
     Result.
 
 make_chargeback(Params, Payment, Revision, St, Opts) ->
@@ -1100,21 +1106,28 @@ make_chargeback_cashflow(Chargeback, Payment, Revision, St, Opts) ->
     Shop          = get_shop(Opts),
     MerchantTerms = get_merchant_chargeback_terms(get_merchant_payments_terms(Opts, Revision)),
     VS0           = collect_validation_varset(St, Opts),
+    ct:print("VALIDATION VARSET\n~p", [VS0]),
     VS1           = validate_chargeback(MerchantTerms, Chargeback, Payment, VS0, Revision),
-    % ProviderPaymentsTerms = get_provider_payments_terms(Route, Revision),
-    % ProviderTerms = get_provider_chargeback_terms(ProviderPaymentsTerms, Chargeback, Payment, VS1, Revision),
     Cashflow      = collect_chargeback_cashflow(MerchantTerms, VS1, Revision),
     PaymentInstitution = get_payment_institution(Opts, Revision),
-    Provider = get_route_provider(Route, Revision),
-    AccountMap = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS1, Revision),
+    Provider      = get_route_provider(Route, Revision),
+    AccountMap    = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS1, Revision),
     construct_final_cashflow(Cashflow, collect_cash_flow_context(Chargeback), AccountMap).
 
 get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{chargeback = Terms}) when Terms /= undefined ->
     Terms;
 get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{chargeback = undefined}) ->
+    #domain_PaymentChargebackServiceTerms{
+        payment_methods = {value, [
+            #domain_PaymentMethodRef{id = {bank_card, visa}},
+            #domain_PaymentMethodRef{id = {bank_card, mastercard}}
+        ]},
+        fees = {value, [ ]},
+        eligibility_time = {value, #'TimeSpan'{minutes = 1}}
+    }.
     % [].
-    % TODO: 0 by default
-    throw(#payproc_OperationNotPermitted{}).
+    % % TODO: 0 by default
+    % throw(#payproc_OperationNotPermitted{}).
 
 validate_chargeback(Terms, Chargeback, Payment, VS0, Revision) ->
     Cost = get_payment_cost(Payment),
