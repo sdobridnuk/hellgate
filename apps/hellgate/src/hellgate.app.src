@@ -17,7 +17,6 @@
         gproc,
         hg_proto,
         dmt_client,
-        damsel,
         party_client,
         woody_user_identity,
         scoper,
