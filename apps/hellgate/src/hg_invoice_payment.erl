@@ -1622,18 +1622,15 @@ finalize_payment(Action, St) ->
 -spec process_callback_timeout(action(), session(), events(), st()) -> machine_result().
 process_callback_timeout(Action, Session, Events, St) ->
     case get_session_timeout_behaviour(Session) of
-        {Type, Failure} when
-            Type =:= operation_timeout orelse
-            Type =:= failure
-        ->
-            SessionEvents = [?session_finished(?session_failed({Type, Failure}))],
-            Result = {Events ++ wrap_session_events(SessionEvents, Session), Action},
-            finish_session_processing(Result, St);
         {callback, Payload} ->
             ProxyContext = construct_proxy_context(St),
             Route = get_route(St),
             {ok, CallbackResult} = hg_proxy_provider:handle_payment_callback(Payload, ProxyContext, Route),
             {_Response, Result} = handle_callback_result(CallbackResult, Action, get_activity_session(St)),
+            finish_session_processing(Result, St);
+        OperationFailure ->
+            SessionEvents = [?session_finished(?session_failed(OperationFailure))],
+            Result = {Events ++ wrap_session_events(SessionEvents, Session), Action},
             finish_session_processing(Result, St)
     end.
 
@@ -2592,8 +2589,8 @@ get_session_status(#{status := Status}) ->
 get_session_trx(#{trx := Trx}) ->
     Trx.
 
-get_session_timeout_behaviour(#{timeout_behaviour := TimeoutBehaviour}) ->
-    TimeoutBehaviour.
+get_session_timeout_behaviour(Session) ->
+    maps:get(timeout_behaviour, Session, ?operation_timeout()).
 
 get_session_proxy_state(Session) ->
     maps:get(proxy_state, Session, undefined).
