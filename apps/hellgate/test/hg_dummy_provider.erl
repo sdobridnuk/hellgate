@@ -1,6 +1,6 @@
 -module(hg_dummy_provider).
 
--include_lib("dmsl/include/dmsl_payment_processing_errors_thrift.hrl").
+-include_lib("damsel/include/dmsl_payment_processing_errors_thrift.hrl").
 
 -behaviour(hg_woody_wrapper).
 
@@ -78,7 +78,7 @@ construct_silent_callback(Form) ->
 -type failure_scenario() :: [failure_scenario_step()].
 %%
 
--include_lib("dmsl/include/dmsl_proxy_provider_thrift.hrl").
+-include_lib("damsel/include/dmsl_proxy_provider_thrift.hrl").
 -include_lib("hellgate/include/payment_events.hrl").
 
 -spec handle_function(woody:func(), woody:args(), hg_woody_wrapper:handler_opts()) ->
@@ -559,7 +559,8 @@ make_payment_tool(digital_wallet) ->
     {
         {digital_wallet, #domain_DigitalWallet{
             provider = qiwi,
-            id       = <<"+79876543210">>
+            id       = <<"+79876543210">>,
+            token    = <<"some_token">>
         }},
         <<>>
     };

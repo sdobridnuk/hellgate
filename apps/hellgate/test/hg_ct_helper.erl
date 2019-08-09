@@ -64,8 +64,8 @@
 -include("hg_ct_domain.hrl").
 -include("hg_ct_json.hrl").
 -include_lib("hellgate/include/domain.hrl").
--include_lib("dmsl/include/dmsl_base_thrift.hrl").
--include_lib("dmsl/include/dmsl_domain_thrift.hrl").
+-include_lib("damsel/include/dmsl_base_thrift.hrl").
+-include_lib("damsel/include/dmsl_domain_thrift.hrl").
 
 -export_type([config/0]).
 -export_type([test_case_name/0]).
@@ -130,7 +130,7 @@ start_app(hellgate = AppName) ->
         {inspect_timeout, 1000},
         {fault_detector, #{
             critical_fail_rate   => 0.7,
-            timeout              => 10, % very low to speed up tests
+            timeout              => 20, % very low to speed up tests
             sliding_window       => 60000,
             operation_time_limit => 10000,
             pre_aggregation_size => 2
@@ -223,7 +223,7 @@ make_user_identity(UserID) ->
 
 %%
 
--include_lib("dmsl/include/dmsl_payment_processing_thrift.hrl").
+-include_lib("damsel/include/dmsl_payment_processing_thrift.hrl").
 -include_lib("hellgate/include/party_events.hrl").
 
 -type party_id()                  :: dmsl_domain_thrift:'PartyID'().

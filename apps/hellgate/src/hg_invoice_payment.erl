@@ -15,10 +15,10 @@
 %%%    finishes, which could have happened in the past, not just now
 
 -module(hg_invoice_payment).
--include_lib("dmsl/include/dmsl_proxy_provider_thrift.hrl").
--include_lib("dmsl/include/dmsl_payment_processing_thrift.hrl").
--include_lib("dmsl/include/dmsl_payment_processing_errors_thrift.hrl").
--include_lib("dmsl/include/dmsl_msgpack_thrift.hrl").
+-include_lib("damsel/include/dmsl_proxy_provider_thrift.hrl").
+-include_lib("damsel/include/dmsl_payment_processing_thrift.hrl").
+-include_lib("damsel/include/dmsl_payment_processing_errors_thrift.hrl").
+-include_lib("damsel/include/dmsl_msgpack_thrift.hrl").
 
 -include_lib("fault_detector_proto/include/fd_proto_fault_detector_thrift.hrl").
 
@@ -2395,13 +2395,15 @@ merge_change(Change = ?session_ev(Target, Event), St = #st{activity = Activity},
     St2 = set_trx(get_session_trx(Session), St1),
     case Session of
         #{status := finished, result := ?session_succeeded()} ->
-            NextStep = case Activity of
+            NextActivity = case Activity of
                 {payment, processing_session} ->
-                    processing_accounter;
+                    {payment, processing_accounter};
                 {payment, finalizing_session} ->
-                    finalizing_accounter
+                    {payment, finalizing_accounter};
+                _ ->
+                    Activity
             end,
-            St2#st{activity = {payment, NextStep}};
+            St2#st{activity = NextActivity};
         _ ->
             St2
     end.

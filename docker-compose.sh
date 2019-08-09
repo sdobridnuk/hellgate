@@ -19,6 +19,7 @@ services:
 
   dominant:
     image: dr2.rbkmoney.com/rbkmoney/dominant:15fd6bca5c7297c67504d1f079b53c1b25ca4006
+    # image: dr2.rbkmoney.com/rbkmoney/dominant:d5789336735502b0bdb3a37c641125b859750e07
     command: /opt/dominant/bin/dominant foreground
     depends_on:
       machinegun:
@@ -44,7 +45,7 @@ services:
 
   shumway:
     image: dr.rbkmoney.com/rbkmoney/shumway:7a5f95ee1e8baa42fdee9c08cc0ae96cd7187d55
-    restart: always
+    restart: unless-stopped
     entrypoint:
       - java
       - -Xmx512m
