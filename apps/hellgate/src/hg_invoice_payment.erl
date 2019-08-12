@@ -1086,7 +1086,7 @@ make_chargeback(Params, Payment, Revision, St, Opts) ->
     _ = assert_chargeback_cash(Cash, St),
     % Cart = Params#payproc_InvoicePaymentRefundParams.cart,
     % _ = assert_refund_cart(Params#payproc_InvoicePaymentRefundParams.cash, Cart, St),
-    ID = construct_chargeback_id(St),
+    ID = construct_chargeback_id(get_chargebacks(St)),
     % TODO: add history
     % History = [],
     #domain_InvoicePaymentChargeback{
@@ -1205,15 +1205,14 @@ assert_no_active_chargebacks(St) ->
             throw(#payproc_ChargebackInProgress{})
     end.
 
-construct_chargeback_id(St) ->
-    PaymentID = get_payment_id(get_payment(St)),
-    InvoiceID = get_invoice_id(get_invoice(get_opts(St))),
-    SequenceID = make_chargeback_sequence_id(PaymentID, InvoiceID),
-    IntRefundID = hg_sequences:get_next(SequenceID),
-    erlang:integer_to_binary(IntRefundID).
+construct_chargeback_id(Chargebacks) ->
+    % we can't be sure that old ids were constructed in strict increasing order, so we need to find max ID
+    MaxID = lists:foldl(fun find_max_chargeback_id/2, 0, Chargebacks),
+    genlib:to_binary(MaxID + 1).
 
-make_chargeback_sequence_id(PaymentID, InvoiceID) ->
-    <<InvoiceID/binary, <<"_">>/binary, PaymentID/binary>>.
+find_max_chargeback_id(#domain_InvoicePaymentChargeback{id = ID}, Max) ->
+    IntID = genlib:to_int(ID),
+    erlang:max(IntID, Max).
 
 % get_refund_status(#domain_InvoicePaymentRefund{status = Status}) ->
 %     Status.
