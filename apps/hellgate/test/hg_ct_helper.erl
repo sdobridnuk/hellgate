@@ -64,8 +64,8 @@
 -include("hg_ct_domain.hrl").
 -include("hg_ct_json.hrl").
 -include_lib("hellgate/include/domain.hrl").
--include_lib("dmsl/include/dmsl_base_thrift.hrl").
--include_lib("dmsl/include/dmsl_domain_thrift.hrl").
+-include_lib("damsel/include/dmsl_base_thrift.hrl").
+-include_lib("damsel/include/dmsl_domain_thrift.hrl").
 
 -export_type([config/0]).
 -export_type([test_case_name/0]).
@@ -115,7 +115,6 @@ start_app(hellgate = AppName) ->
             party_management    => <<"http://hellgate:8022/v1/processing/partymgmt">>,
             customer_management => <<"http://hellgate:8022/v1/processing/customer_management">>,
             recurrent_paytool   => <<"http://hellgate:8022/v1/processing/recpaytool">>,
-            sequences           => <<"http://sequences:8022/v1/sequences">>,
             fault_detector      => <<"http://127.0.0.1:20001/">>
         }},
         {proxy_opts, #{
@@ -223,7 +222,7 @@ make_user_identity(UserID) ->
 
 %%
 
--include_lib("dmsl/include/dmsl_payment_processing_thrift.hrl").
+-include_lib("damsel/include/dmsl_payment_processing_thrift.hrl").
 -include_lib("hellgate/include/party_events.hrl").
 
 -type party_id()                  :: dmsl_domain_thrift:'PartyID'().
