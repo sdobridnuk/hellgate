@@ -383,6 +383,8 @@ end_per_suite(C) ->
     {exception, #payproc_InvoicePaymentAdjustmentPending{id = ID}}).
 -define(operation_not_permitted(),
     {exception, #payproc_OperationNotPermitted{}}).
+-define(chargeback_in_progress(),
+    {exception, #payproc_ChargebackInProgress{}}).
 -define(insufficient_account_balance(),
     {exception, #payproc_InsufficientAccountBalance{}}).
 -define(invoice_payment_amount_exceeded(Maximum),
@@ -1475,6 +1477,15 @@ get_adjustment_fixture(Revision) ->
                                 {exclusive, ?cash(1000000000, <<"RUB">>)}
                             )}
                         }
+                    },
+                    chargebacks = #domain_PaymentChargebackProvisionTerms{
+                        cash_flow = {value, [
+                            ?cfpost(
+                                {merchant, settlement},
+                                {provider, settlement},
+                                ?share(1, 1, operation_amount)
+                            )
+                        ]}
                     }
                 }
             }
@@ -1627,6 +1638,9 @@ payment_chargeback_success(C) ->
     PaymentID = await_payment_capture(InvoiceID, PaymentID, Client),
     Chargeback0 = #domain_InvoicePaymentChargeback{id = ChargebackID0} =
         hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, ChargebackParams, Client),
+    % InvoiceID2 = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+    % PaymentID2 = process_payment(InvoiceID2, make_payment_params(), Client),
+    % PaymentID2 = await_payment_capture(InvoiceID2, PaymentID2, Client),
     % ct:print("TEST CB CB\n~p", [Chargeback0]),
     % PaymentID = chargeback_payment(InvoiceID, PaymentID, ChargebackID0, Chargeback0, Client),
     % Result = next_event(InvoiceID, Client),
@@ -1634,14 +1648,19 @@ payment_chargeback_success(C) ->
     % TODO: test cashflow?
     [
         ?payment_ev(PaymentID, ?chargeback_ev(ChargebackID0, ?chargeback_created(Chargeback0, _)))
-    ] = next_event(InvoiceID, Client),
+    ] = D = next_event(InvoiceID, Client),
+    ct:print("TEST NEXT EVENT\n~p", [D]),
     % chargebacks block refunds
     RefundParams      = make_refund_params(),
     ChargebackParams1 = make_chargeback_params(),
-    ?operation_not_permitted() =
+    ?chargeback_in_progress() = A =
         hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
-    ?operation_not_permitted() =
+    ct:print("OPNOTPERMITTED REFUND\n~p", [A]),
+    ?chargeback_in_progress() = B =
         hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, ChargebackParams1, Client),
+    ct:print("OPNOTPERMITTED CHARGEBACK\n~p", [B]),
+    % ?invalid_payment_status(_) =
+    %     hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, ChargebackParams, Client),
     ok.
     % ok.
 %     % not finished yet
@@ -2286,6 +2305,15 @@ get_cashflow_rounding_fixture(Revision) ->
                                 {exclusive, ?cash(1000000000, <<"RUB">>)}
                             )}
                         }
+                    },
+                    chargebacks = #domain_PaymentChargebackProvisionTerms{
+                        cash_flow = {value, [
+                            ?cfpost(
+                                {merchant, settlement},
+                                {provider, settlement},
+                                ?share(1, 1, operation_amount)
+                            )
+                        ]}
                     }
                 }
             }
@@ -2691,6 +2719,8 @@ filter_changes(Changes) ->
 
 filter_change(?payment_ev(_, C)) ->
     filter_change(C);
+% filter_change(?chargeback_ev(_, C)) ->
+%     filter_change(C);
 filter_change(?refund_ev(_, C)) ->
     filter_change(C);
 filter_change(?session_ev(_, ?proxy_st_changed(_))) ->
@@ -3487,14 +3517,19 @@ construct_domain_fixture() ->
                     )}
                 }
             },
-            chargeback = #domain_PaymentChargebackServiceTerms{
+            chargebacks = #domain_PaymentChargebackServiceTerms{
                 payment_methods = {value, ?ordset([
                     ?pmt(bank_card, visa),
                     ?pmt(bank_card, mastercard)
                 ])},
                 fees = {value, [
-                ]},
-                eligibility_time = {value, #'TimeSpan'{minutes = 1}}
+                    ?cfpost(
+                        {merchant, settlement},
+                        {system, settlement},
+                        ?fixed(5000, <<"RUB">>),
+                        <<"Chargeback fee">>
+                    )
+                ]}
             }
         }
     },
@@ -3847,6 +3882,15 @@ construct_domain_fixture() ->
                                 {exclusive, ?cash(1000000000, <<"RUB">>)}
                             )}
                         }
+                    },
+                    chargebacks = #domain_PaymentChargebackProvisionTerms{
+                        cash_flow = {value, [
+                            ?cfpost(
+                                {merchant, settlement},
+                                {provider, settlement},
+                                ?share(1, 1, operation_amount)
+                            )
+                        ]}
                     }
                 },
                 recurrent_paytool_terms = #domain_RecurrentPaytoolsProvisionTerms{
@@ -3926,6 +3970,15 @@ construct_domain_fixture() ->
                                 {exclusive, ?cash(1000000000, <<"RUB">>)}
                             )}
                         }
+                    },
+                    chargebacks = #domain_PaymentChargebackProvisionTerms{
+                        cash_flow = {value, [
+                            ?cfpost(
+                                {merchant, settlement},
+                                {provider, settlement},
+                                ?share(1, 1, operation_amount)
+                            )
+                        ]}
                     }
                 }
             }
@@ -4194,6 +4247,15 @@ payments_w_bank_card_issuer_conditions_fixture(Revision) ->
                                 {exclusive, ?cash(1000000000, <<"RUB">>)}
                             )}
                         }
+                    },
+                    chargebacks = #domain_PaymentChargebackProvisionTerms{
+                        cash_flow = {value, [
+                            ?cfpost(
+                                {merchant, settlement},
+                                {provider, settlement},
+                                ?share(1, 1, operation_amount)
+                            )
+                        ]}
                     }
                 }
             }
@@ -4420,6 +4482,15 @@ construct_term_set_for_partial_capture_provider_permit(Revision) ->
                                 {exclusive, ?cash(1000000000, <<"RUB">>)}
                             )}
                         }
+                    },
+                    chargebacks = #domain_PaymentChargebackProvisionTerms{
+                        cash_flow = {value, [
+                            ?cfpost(
+                                {merchant, settlement},
+                                {provider, settlement},
+                                ?share(1, 1, operation_amount)
+                            )
+                        ]}
                     },
                     holds = #domain_PaymentHoldsProvisionTerms{
                         lifetime = {decisions, [
