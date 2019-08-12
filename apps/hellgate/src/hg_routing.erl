@@ -274,7 +274,10 @@ build_fd_service_id(#domain_ProviderRef{id = ID}) ->
 
 get_payments_terms(?route(ProviderRef, TerminalRef), Revision) ->
     #domain_Provider{payment_terms = Terms0} = hg_domain:get(Revision, {provider, ProviderRef}),
+    ct:print("TERMS PROV\n~p", [Terms0]),
     #domain_Terminal{terms = Terms1} = hg_domain:get(Revision, {terminal, TerminalRef}),
+    ct:print("TERMS TERM\n~p", [Terms1]),
+    ct:print("TERMS MERGE\n~p", [merge_payment_terms(Terms0, Terms1)]),
     merge_payment_terms(Terms0, Terms1).
 
 -spec get_rec_paytools_terms(route(), hg_domain:revision()) -> terms().
@@ -457,7 +460,8 @@ merge_payment_terms(
         cash_limit      = PCashLimit,
         cash_flow       = PCashflow,
         holds           = PHolds,
-        refunds         = PRefunds
+        refunds         = PRefunds,
+        chargebacks     = PChargebacks
     },
     #domain_PaymentsProvisionTerms{
         currencies      = TCurrencies,
@@ -466,7 +470,8 @@ merge_payment_terms(
         cash_limit      = TCashLimit,
         cash_flow       = TCashflow,
         holds           = THolds,
-        refunds         = TRefunds
+        refunds         = TRefunds,
+        chargebacks     = TChargebacks
     }
 ) ->
     #domain_PaymentsProvisionTerms{
@@ -476,7 +481,8 @@ merge_payment_terms(
         cash_limit      = hg_utils:select_defined(TCashLimit,      PCashLimit),
         cash_flow       = hg_utils:select_defined(TCashflow,       PCashflow),
         holds           = hg_utils:select_defined(THolds,          PHolds),
-        refunds         = hg_utils:select_defined(TRefunds,        PRefunds)
+        refunds         = hg_utils:select_defined(TRefunds,        PRefunds),
+        chargebacks     = hg_utils:select_defined(TChargebacks,    PChargebacks)
     };
 merge_payment_terms(ProviderTerms, TerminalTerms) ->
     hg_utils:select_defined(TerminalTerms, ProviderTerms).
