@@ -36,7 +36,7 @@ get_method({digital_wallet, #domain_DigitalWallet{provider = Provider}}) ->
 get_method({crypto_currency, CC}) ->
     #domain_PaymentMethodRef{id = {crypto_currency, CC}};
 get_method({mobile_commerce, #domain_MobileCommerce{operator = Operator}}) ->
-    #domain_PaymentMethodRef{id = {mobile_commerce, Operator}}.
+    #domain_PaymentMethodRef{id = {mobile, Operator}}.
 
 -spec create_from_method(method()) -> t().
 

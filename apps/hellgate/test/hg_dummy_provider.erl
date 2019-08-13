@@ -338,7 +338,7 @@ handle_payment_callback(<<"mobile_commerce failure">>, ?processed(), <<"start">>
         code = <<"authorization_failed">>,
         reason = <<"test">>,
         sub = #domain_SubFailure{code = <<"unknown">>}},
-    TimeoutBehaviour = {failure, Failure},
+    TimeoutBehaviour = {operation_failure, {failure, Failure}},
     respond(<<"sure">>, #prxprv_PaymentCallbackProxyResult{
         intent     = ?suspend(<<InvoiceID/binary, "/", PaymentID/binary>>, 1, undefined, TimeoutBehaviour),
         next_state = <<"start">>
@@ -348,9 +348,6 @@ handle_payment_callback(<<"mobile_commerce finish success">>, ?processed(), <<"s
         intent     = ?finish(?success(undefined)),
         next_state = <<"finish">>
     });
-handle_payment_callback(<<"throw excep [Failure]">>, ?processed(), _, _PaymentInfo, _Opts) ->
-    throw({?MODULE, "suspend timeout_behaviour(failure) never call provider."});
-
 handle_payment_callback(Tag, ?processed(), <<"suspended">>, PaymentInfo, _Opts) ->
     {{ok, PaymentInfo}, _} = get_payment_info(Tag),
     respond(<<"sure">>, #prxprv_PaymentCallbackProxyResult{

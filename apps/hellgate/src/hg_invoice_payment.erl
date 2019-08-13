@@ -143,8 +143,7 @@
 -type tag()                 :: dmsl_proxy_provider_thrift:'CallbackTag'().
 -type callback()            :: dmsl_proxy_provider_thrift:'Callback'().
 -type callback_response()   :: dmsl_proxy_provider_thrift:'CallbackResponse'().
--type timeout_behaviour()   :: {operation_timeout, #domain_OperationTimeout{}} |
-                               dmsl_timeout_behaviour_thrift:'TimeoutBehaviour'().
+-type timeout_behaviour()   :: dmsl_timeout_behaviour_thrift:'TimeoutBehaviour'().
 -type make_recurrent()      :: true | false.
 -type recurrent_token()     :: dmsl_domain_thrift:'Token'().
 -type retry_strategy()      :: hg_retry:strategy().
@@ -1628,7 +1627,7 @@ process_callback_timeout(Action, Session, Events, St) ->
             {ok, CallbackResult} = hg_proxy_provider:handle_payment_callback(Payload, ProxyContext, Route),
             {_Response, Result} = handle_callback_result(CallbackResult, Action, get_activity_session(St)),
             finish_session_processing(Result, St);
-        OperationFailure ->
+        {operation_failure, OperationFailure} ->
             SessionEvents = [?session_finished(?session_failed(OperationFailure))],
             Result = {Events ++ wrap_session_events(SessionEvents, Session), Action},
             finish_session_processing(Result, St)
@@ -2544,7 +2543,7 @@ merge_session_change(?interaction_requested(_), Session) ->
     Session.
 
 set_timeout_behaviour(undefined, Session) ->
-    Session#{timeout_behaviour => ?operation_timeout()};
+    Session#{timeout_behaviour => {operation_failure, ?operation_timeout()}};
 set_timeout_behaviour(TimeoutBehaviour, Session) ->
     Session#{timeout_behaviour => TimeoutBehaviour}.
 
@@ -2592,7 +2591,7 @@ get_session_trx(#{trx := Trx}) ->
     Trx.
 
 get_session_timeout_behaviour(Session) ->
-    maps:get(timeout_behaviour, Session, ?operation_timeout()).
+    maps:get(timeout_behaviour, Session, {operation_failure, ?operation_timeout()}).
 
 get_session_proxy_state(Session) ->
     maps:get(proxy_state, Session, undefined).

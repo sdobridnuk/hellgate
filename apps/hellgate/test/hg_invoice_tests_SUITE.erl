@@ -135,9 +135,6 @@ cfg(Key, C) ->
 
 all() ->
     [
-        payment_w_customer_success,
-        payment_capture_retries_exceeded,
-
         invalid_party_status,
         invalid_shop_status,
 
@@ -2294,7 +2291,7 @@ terms_retrieval(C) ->
             ?pmt(crypto_currency, bitcoin),
             ?pmt(digital_wallet, qiwi),
             ?pmt(empty_cvv_bank_card, visa),
-            ?pmt(mobile_commerce, mts),
+            ?pmt(mobile, mts),
             ?pmt(payment_terminal, euroset),
             ?pmt(tokenized_bank_card, ?tkz_bank_card(visa, applepay))
         ]}
@@ -3287,7 +3284,7 @@ construct_domain_fixture() ->
                         ?pmt(empty_cvv_bank_card, visa),
                         ?pmt(tokenized_bank_card, ?tkz_bank_card(visa, applepay)),
                         ?pmt(crypto_currency, bitcoin),
-                        ?pmt(mobile_commerce, mts)
+                        ?pmt(mobile, mts)
                     ])}
                 }
             ]},
@@ -3472,7 +3469,7 @@ construct_domain_fixture() ->
         hg_ct_fixture:construct_payment_method(?pmt(digital_wallet, qiwi)),
         hg_ct_fixture:construct_payment_method(?pmt(empty_cvv_bank_card, visa)),
         hg_ct_fixture:construct_payment_method(?pmt(crypto_currency, bitcoin)),
-        hg_ct_fixture:construct_payment_method(?pmt(mobile_commerce, mts)),
+        hg_ct_fixture:construct_payment_method(?pmt(mobile, mts)),
         hg_ct_fixture:construct_payment_method(?pmt(tokenized_bank_card, ?tkz_bank_card(visa, applepay))),
 
         hg_ct_fixture:construct_proxy(?prx(1), <<"Dummy proxy">>),
@@ -3685,7 +3682,6 @@ construct_domain_fixture() ->
                         ?pmt(bank_card, jcb),
                         ?pmt(empty_cvv_bank_card, visa),
                         ?pmt(crypto_currency, bitcoin),
-                        ?pmt(mobile_commerce, mts),
                         ?pmt(tokenized_bank_card, ?tkz_bank_card(visa, applepay))
                     ])},
                     cash_limit = {value, ?cashrng(
@@ -3767,23 +3763,6 @@ construct_domain_fixture() ->
                         #domain_CashFlowDecision{
                             if_   = {condition, {payment_tool, {crypto_currency, #domain_CryptoCurrencyCondition{
                                 definition = {crypto_currency_is, bitcoin}
-                            }}}},
-                            then_ = {value, [
-                                ?cfpost(
-                                    {provider, settlement},
-                                    {merchant, settlement},
-                                    ?share(1, 1, operation_amount)
-                                ),
-                                ?cfpost(
-                                    {system, settlement},
-                                    {provider, settlement},
-                                    ?share(20, 1000, operation_amount)
-                                )
-                            ]}
-                        },
-                        #domain_CashFlowDecision{
-                            if_   = {condition, {payment_tool, {mobile_commerce, #domain_MobileCommerceCondition{
-                                definition = {operator_is, mts}
                             }}}},
                             then_ = {value, [
                                 ?cfpost(
@@ -4034,17 +4013,16 @@ construct_domain_fixture() ->
             data = #domain_Provider{
                 name = <<"UnionTelecom">>,
                 description = <<"Mobile commerce terminal provider">>,
-                terminal = {value, [?prvtrm(11)]},
-                % terminal = {decisions, [
-                %     #domain_TerminalDecision{
-                %         if_ = {condition,
-                %                 {payment_tool, {mobile_commerce, #domain_MobileCommerceCondition{
-                %                     definition = {operator_is, mts}
-                %                 }}}
-                %             },
-                %         then_ = {value, [?prvtrm(11)]}
-                %     }
-                % ]},
+                terminal = {decisions, [
+                    #domain_TerminalDecision{
+                        if_ = {condition,
+                                {payment_tool, {mobile_commerce, #domain_MobileCommerceCondition{
+                                    definition = {operator_is, mts}
+                                }}}
+                            },
+                        then_ = {value, [?prvtrm(11)]}
+                    }
+                ]},
                 proxy = #domain_Proxy{
                     ref = ?prx(1),
                     additional = #{
@@ -4061,7 +4039,7 @@ construct_domain_fixture() ->
                         ?cat(1)
                     ])},
                     payment_methods = {value, ?ordset([
-                        ?pmt(mobile_commerce, mts)
+                        ?pmt(mobile, mts)
                     ])},
                     cash_limit = {value, ?cashrng(
                         {inclusive, ?cash(    1000, <<"RUB">>)},
