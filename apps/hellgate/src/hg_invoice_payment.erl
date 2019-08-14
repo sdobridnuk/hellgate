@@ -150,13 +150,13 @@
 
 -type session_status()      :: active | suspended | finished.
 -type session() :: #{
-    target      := target(),
-    status      := session_status(),
-    trx         := trx_info(),
-    tags        := [tag()],
-    result      => session_result(),
-    proxy_state => proxy_state(),
-    timeout_behaviour => timeout_behaviour()
+    target            := target(),
+    status            := session_status(),
+    trx               := trx_info(),
+    tags              := [tag()],
+    timeout_behaviour := timeout_behaviour(),
+    result            => session_result(),
+    proxy_state       => proxy_state()
 }.
 
 -type opts() :: #{
@@ -2590,8 +2590,8 @@ get_session_status(#{status := Status}) ->
 get_session_trx(#{trx := Trx}) ->
     Trx.
 
-get_session_timeout_behaviour(Session) ->
-    maps:get(timeout_behaviour, Session, {operation_failure, ?operation_timeout()}).
+get_session_timeout_behaviour(#{timeout_behaviour := TimeoutBehaviour}) ->
+    TimeoutBehaviour.
 
 get_session_proxy_state(Session) ->
     maps:get(proxy_state, Session, undefined).
@@ -3040,9 +3040,7 @@ unmarshal(capture, Reason) ->
 
 %% Session change
 unmarshal(session_change, [3, [<<"suspended">>, Tag]]) ->
-    unmarshal(session_change, [3, [<<"suspended">>, Tag, undefined]]);
-unmarshal(session_change, [3, [<<"suspended">>, Tag, TimeoutBehaviour]]) ->
-    ?session_suspended(unmarshal(str, Tag), TimeoutBehaviour);
+    ?session_suspended(unmarshal(str, Tag), undefined);
 unmarshal(session_change, [3, Change]) ->
     unmarshal(session_change, [2, Change]);
 

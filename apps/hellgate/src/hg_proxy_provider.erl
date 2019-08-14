@@ -174,12 +174,13 @@ handle_proxy_intent(#'prxprv_SleepIntent'{timer = Timer, user_interaction = User
     Action = hg_machine_action:set_timer(Timer, Action0),
     Events = try_request_interaction(UserInteraction),
     {Events, Action};
-handle_proxy_intent(#'prxprv_SuspendIntent'{
-    tag = Tag,
-    timeout = Timer,
-    user_interaction = UserInteraction,
-    timeout_behaviour = TimeoutBehaviour
-}, Action0) ->
+handle_proxy_intent(#'prxprv_SuspendIntent'{} = Intent, Action0) ->
+    #'prxprv_SuspendIntent'{
+        tag = Tag,
+        timeout = Timer,
+        user_interaction = UserInteraction,
+        timeout_behaviour = TimeoutBehaviour
+    } = Intent,
     Action = hg_machine_action:set_timer(Timer, hg_machine_action:set_tag(Tag, Action0)),
     Events = [?session_suspended(Tag, TimeoutBehaviour) | try_request_interaction(UserInteraction)],
     {Events, Action}.
