@@ -2557,7 +2557,8 @@ create_session(Target, Trx) ->
         target => Target,
         status => active,
         trx    => Trx,
-        tags   => []
+        tags   => [],
+        timeout_behaviour => {operation_failure, ?operation_timeout()}
     }.
 
 get_invoice_state(InvoiceID) ->
