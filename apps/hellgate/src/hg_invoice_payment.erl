@@ -1033,7 +1033,7 @@ make_refund(Params, Payment, Revision, St, Opts) ->
     _ = assert_refund_cash(Cash, St),
     Cart = Params#payproc_InvoicePaymentRefundParams.cart,
     _ = assert_refund_cart(Params#payproc_InvoicePaymentRefundParams.cash, Cart, St),
-    ID = construct_refund_id(St),
+    ID = construct_refund_id(get_refunds(St)),
     #domain_InvoicePaymentRefund {
         id              = ID,
         created_at      = hg_datetime:format_now(),
@@ -1059,15 +1059,14 @@ make_refund_cashflow(Refund, Payment, Revision, St, Opts) ->
     AccountMap = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS1, Revision),
     construct_final_cashflow(Cashflow, collect_cash_flow_context(Refund), AccountMap).
 
-construct_refund_id(St) ->
-    PaymentID = get_payment_id(get_payment(St)),
-    InvoiceID = get_invoice_id(get_invoice(get_opts(St))),
-    SequenceID = make_refund_squence_id(PaymentID, InvoiceID),
-    IntRefundID = hg_sequences:get_next(SequenceID),
-    erlang:integer_to_binary(IntRefundID).
+construct_refund_id(Refunds) ->
+    % we can't be sure that old ids were constructed in strict increasing order, so we need to find max ID
+    MaxID = lists:foldl(fun find_max_refund_id/2, 0, Refunds),
+    genlib:to_binary(MaxID + 1).
 
-make_refund_squence_id(PaymentID, InvoiceID) ->
-    <<InvoiceID/binary, <<"_">>/binary, PaymentID/binary>>.
+find_max_refund_id(#domain_InvoicePaymentRefund{id = ID}, Max) ->
+    IntID = genlib:to_int(ID),
+    erlang:max(IntID, Max).
 
 assert_refund_cash(Cash, St) ->
     PaymentAmount = get_remaining_payment_amount(Cash, St),
@@ -3419,3 +3418,27 @@ unmarshal(risk_score, RiskScore) when is_atom(RiskScore) ->
 
 unmarshal(_, Other) ->
     Other.
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+-spec test() -> _.
+
+create_dummy_refund_with_id(ID) ->
+    #domain_InvoicePaymentRefund{
+        id              = genlib:to_binary(ID),
+        created_at      = hg_datetime:format_now(),
+        domain_revision = 42,
+        party_revision  = 42,
+        status          = ?refund_pending(),
+        reason          = <<"No reason">>,
+        cash            = 1000,
+        cart            = unefined
+    }.
+
+-spec construct_refund_id_test() -> _.
+construct_refund_id_test() ->
+    IDs = [X||{_, X} <- lists:sort([ {rand:uniform(), N} || N <- lists:seq(1, 10)])], % 10 IDs shuffled
+    Refunds = lists:map(fun create_dummy_refund_with_id/1, IDs),
+    ?assert(<<"11">> =:= construct_refund_id(Refunds)).
+-endif.
