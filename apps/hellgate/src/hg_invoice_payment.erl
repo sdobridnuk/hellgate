@@ -281,9 +281,10 @@ init_(PaymentID, Params, Opts) ->
     MerchantTerms = get_merchant_terms(Opts, Revision),
     VS1 = collect_validation_varset(Party, Shop, VS0),
     Context = get_context_params(Params),
+    Deadline = get_payment_deadline(Params),
     Payment = construct_payment(
         PaymentID, CreatedAt, Cost, Payer, Flow, MerchantTerms, Party, Shop,
-        VS1, Revision, MakeRecurrent, Context, ExternalID
+        VS1, Revision, MakeRecurrent, Context, ExternalID, Deadline
     ),
     Events = [?payment_started(Payment)],
     {collapse_changes(Events, undefined), {Events, hg_machine_action:instant()}}.
@@ -330,6 +331,9 @@ get_context_params(#payproc_InvoicePaymentParams{context = Context}) ->
 
 get_external_id(#payproc_InvoicePaymentParams{external_id = ExternalID}) ->
     ExternalID.
+
+get_payment_deadline(#payproc_InvoicePaymentParams{payment_deadline = Deadline}) ->
+    Deadline.
 
 construct_payer({payment_resource, #payproc_PaymentResourcePayerParams{
     resource = Resource,
@@ -399,7 +403,8 @@ construct_payment(
     Revision,
     MakeRecurrent,
     Context,
-    ExternalID
+    ExternalID,
+    Deadline
 ) ->
     #domain_TermSet{payments = PaymentTerms, recurrent_paytools = RecurrentTerms} = Terms,
     PaymentTool = get_payer_payment_tool(Payer),
@@ -435,19 +440,20 @@ construct_payment(
     },
     ok = validate_recurrent_intention(RecurrentValidationVarset, MakeRecurrent),
     #domain_InvoicePayment{
-        id              = PaymentID,
-        created_at      = CreatedAt,
-        owner_id        = Party#domain_Party.id,
-        shop_id         = Shop#domain_Shop.id,
-        domain_revision = Revision,
-        party_revision  = Party#domain_Party.revision,
-        status          = ?pending(),
-        cost            = Cost,
-        payer           = Payer,
-        flow            = Flow,
-        make_recurrent  = MakeRecurrent,
-        context         = Context,
-        external_id     = ExternalID
+        id               = PaymentID,
+        created_at       = CreatedAt,
+        owner_id         = Party#domain_Party.id,
+        shop_id          = Shop#domain_Shop.id,
+        domain_revision  = Revision,
+        party_revision   = Party#domain_Party.revision,
+        status           = ?pending(),
+        cost             = Cost,
+        payer            = Payer,
+        flow             = Flow,
+        make_recurrent   = MakeRecurrent,
+        context          = Context,
+        external_id      = ExternalID,
+        payment_deadline = Deadline
     }.
 
 construct_payment_flow({instant, _}, _CreatedAt, _Terms, _VS, _Revision) ->
@@ -2004,7 +2010,8 @@ construct_proxy_payment(
         created_at = CreatedAt,
         payer = Payer,
         cost = Cost,
-        make_recurrent = MakeRecurrent
+        make_recurrent = MakeRecurrent,
+        payment_deadline = Deadline
     },
     Trx
 ) ->
@@ -2016,7 +2023,8 @@ construct_proxy_payment(
         payment_resource = construct_payment_resource(Payer),
         cost = construct_proxy_cash(Cost),
         contact_info = ContactInfo,
-        make_recurrent = MakeRecurrent
+        make_recurrent = MakeRecurrent,
+        payment_deadline = Deadline
     }.
 
 construct_payment_resource(?payment_resource_payer(Resource, _)) ->
