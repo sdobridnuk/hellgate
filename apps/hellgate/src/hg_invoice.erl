@@ -259,7 +259,8 @@ get_payment_state(PaymentSession) ->
     #payproc_InvoicePayment{
         payment     = hg_invoice_payment:get_payment(PaymentSession),
         adjustments = hg_invoice_payment:get_adjustments(PaymentSession),
-        refunds     = hg_invoice_payment:get_refunds(PaymentSession)
+        refunds     = hg_invoice_payment:get_refunds(PaymentSession),
+        chargebacks = hg_invoice_payment:get_chargebacks(PaymentSession)
     }.
 
 set_invoicing_meta(InvoiceID) ->
@@ -606,6 +607,16 @@ handle_call({{'Invoicing', 'CreateChargeback'}, [_UserInfo, _InvoiceID, PaymentI
     wrap_payment_impact(
         PaymentID,
         hg_invoice_payment:create_chargeback(Params, PaymentSession, get_payment_opts(St)),
+        St
+    );
+
+handle_call({{'Invoicing', 'UpdateChargeback'}, [_UserInfo, _InvoiceID, PaymentID, ChargebackID, Params]}, St) ->
+    _ = assert_invoice_accessible(St),
+    _ = assert_invoice_operable(St),
+    PaymentSession = get_payment_session(PaymentID, St),
+    wrap_payment_impact(
+        PaymentID,
+        hg_invoice_payment:update_chargeback(ChargebackID, Params, PaymentSession, get_payment_opts(St)),
         St
     );
 
