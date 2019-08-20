@@ -27,6 +27,7 @@
 
 -export([create_chargeback/4]).
 -export([get_payment_chargeback/4]).
+-export([update_chargeback/5]).
 
 -export([create_adjustment/4]).
 -export([get_adjustment/4]).
@@ -50,32 +51,33 @@
 
 %%
 
--type user_info()          :: dmsl_payment_processing_thrift:'UserInfo'().
+-type user_info()                 :: dmsl_payment_processing_thrift:'UserInfo'().
 
--type invoice_id()         :: dmsl_domain_thrift:'InvoiceID'().
--type invoice_state()      :: dmsl_payment_processing_thrift:'Invoice'().
--type invoice_params()     :: dmsl_payment_processing_thrift:'InvoiceParams'().
--type invoice_params_tpl() :: dmsl_payment_processing_thrift:'InvoiceWithTemplateParams'().
+-type invoice_id()                :: dmsl_domain_thrift:'InvoiceID'().
+-type invoice_state()             :: dmsl_payment_processing_thrift:'Invoice'().
+-type invoice_params()            :: dmsl_payment_processing_thrift:'InvoiceParams'().
+-type invoice_params_tpl()        :: dmsl_payment_processing_thrift:'InvoiceWithTemplateParams'().
 
--type payment()            :: dmsl_domain_thrift:'InvoicePayment'().
--type payment_id()         :: dmsl_domain_thrift:'InvoicePaymentID'().
--type payment_params()     :: dmsl_payment_processing_thrift:'InvoicePaymentParams'().
+-type payment()                   :: dmsl_domain_thrift:'InvoicePayment'().
+-type payment_id()                :: dmsl_domain_thrift:'InvoicePaymentID'().
+-type payment_params()            :: dmsl_payment_processing_thrift:'InvoicePaymentParams'().
 
--type adjustment()         :: dmsl_domain_thrift:'InvoicePaymentAdjustment'().
--type adjustment_id()      :: dmsl_domain_thrift:'InvoicePaymentAdjustmentID'().
--type adjustment_params()  :: dmsl_payment_processing_thrift:'InvoicePaymentAdjustmentParams'().
+-type adjustment()                :: dmsl_domain_thrift:'InvoicePaymentAdjustment'().
+-type adjustment_id()             :: dmsl_domain_thrift:'InvoicePaymentAdjustmentID'().
+-type adjustment_params()         :: dmsl_payment_processing_thrift:'InvoicePaymentAdjustmentParams'().
 
--type refund()             :: dmsl_domain_thrift:'InvoicePaymentRefund'().
--type refund_id()          :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
--type refund_params()      :: dmsl_payment_processing_thrift:'InvoicePaymentRefundParams'().
+-type refund()                    :: dmsl_domain_thrift:'InvoicePaymentRefund'().
+-type refund_id()                 :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
+-type refund_params()             :: dmsl_payment_processing_thrift:'InvoicePaymentRefundParams'().
 
--type chargeback()         :: dmsl_domain_thrift:'InvoicePaymentChargeback'().
--type chargeback_id()      :: dmsl_domain_thrift:'InvoicePaymentChargebackID'().
--type chargeback_params()  :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackParams'().
+-type chargeback()                :: dmsl_domain_thrift:'InvoicePaymentChargeback'().
+-type chargeback_id()             :: dmsl_domain_thrift:'InvoicePaymentChargebackID'().
+-type chargeback_create_params()  :: dmsl_payment_processing_thrift:'InvoicePaymentCreateChargebackParams'().
+-type chargeback_update_params()  :: dmsl_payment_processing_thrift:'InvoicePaymentUpdateChargebackParams'().
 
--type term_set()           :: dmsl_domain_thrift:'TermSet'().
--type cash()               :: undefined | dmsl_domain_thrift:'Cash'().
--type cart()               :: undefined | dmsl_domain_thrift:'InvoiceCart'().
+-type term_set()                  :: dmsl_domain_thrift:'TermSet'().
+-type cash()                      :: undefined | dmsl_domain_thrift:'Cash'().
+-type cart()                      :: undefined | dmsl_domain_thrift:'InvoiceCart'().
 
 -spec start(hg_client_api:t()) -> pid().
 
@@ -195,7 +197,7 @@ capture_payment(InvoiceID, PaymentID, Reason, Cash, Cart, Client) ->
     },
     map_result_error(gen_server:call(Client, Call)).
 
--spec create_chargeback(invoice_id(), payment_id(), chargeback_params(), pid()) ->
+-spec create_chargeback(invoice_id(), payment_id(), chargeback_create_params(), pid()) ->
     chargeback() | woody_error:business_error().
 
 create_chargeback(InvoiceID, PaymentID, Params, Client) ->
@@ -206,6 +208,12 @@ create_chargeback(InvoiceID, PaymentID, Params, Client) ->
 
 get_payment_chargeback(InvoiceID, PaymentID, ChargebackID, Client) ->
     map_result_error(gen_server:call(Client, {call, 'GetPaymentChargeback', [InvoiceID, PaymentID, ChargebackID]})).
+
+-spec update_chargeback(invoice_id(), payment_id(), chargeback_id(), chargeback_update_params(), pid()) ->
+    chargeback() | woody_error:business_error().
+
+update_chargeback(InvoiceID, PaymentID, ChargebackID, Params, Client) ->
+    map_result_error(gen_server:call(Client, {call, 'UpdateChargeback', [InvoiceID, PaymentID, ChargebackID, Params]})).
 
 -spec refund_payment(invoice_id(), payment_id(), refund_params(), pid()) ->
     refund() | woody_error:business_error().
