@@ -172,6 +172,7 @@
 -type change() ::
     dmsl_payment_processing_thrift:'InvoicePaymentChangePayload'().
 
+-define(DEFAULT_PROCESSING_DEADLINE_MINUTES, 30).
 %%
 
 -spec get_party_revision(st()) -> {hg_party:party_revision(), hg_datetime:timestamp()}.
@@ -281,7 +282,7 @@ init_(PaymentID, Params, Opts) ->
     MerchantTerms = get_merchant_terms(Opts, Revision),
     VS1 = collect_validation_varset(Party, Shop, VS0),
     Context = get_context_params(Params),
-    Deadline = get_payment_deadline(Params),
+    Deadline = get_processing_deadline(Params),
     Payment = construct_payment(
         PaymentID, CreatedAt, Cost, Payer, Flow, MerchantTerms, Party, Shop,
         VS1, Revision, MakeRecurrent, Context, ExternalID, Deadline
@@ -332,7 +333,7 @@ get_context_params(#payproc_InvoicePaymentParams{context = Context}) ->
 get_external_id(#payproc_InvoicePaymentParams{external_id = ExternalID}) ->
     ExternalID.
 
-get_payment_deadline(#payproc_InvoicePaymentParams{payment_deadline = Deadline}) ->
+get_processing_deadline(#payproc_InvoicePaymentParams{processing_deadline = Deadline}) ->
     Deadline.
 
 construct_payer({payment_resource, #payproc_PaymentResourcePayerParams{
@@ -378,6 +379,11 @@ validate_customer_shop(#payproc_Customer{shop_id = ShopID}, #domain_Shop{id = Sh
     ok;
 validate_customer_shop(_, _) ->
     throw_invalid_request(<<"Invalid customer">>).
+
+create_default_deadline() ->
+    Now = genlib_time:now(),
+    DefaultDeadline = ?DEFAULT_PROCESSING_DEADLINE_MINUTES,
+    genlib:to_binary(genlib_time:add_minutes(Now, DefaultDeadline)).
 
 get_active_binding(#payproc_Customer{bindings = Bindings, active_binding_id = BindingID}) ->
     case lists:keysearch(BindingID, #payproc_CustomerBinding.id, Bindings) of
@@ -453,7 +459,7 @@ construct_payment(
         make_recurrent   = MakeRecurrent,
         context          = Context,
         external_id      = ExternalID,
-        payment_deadline = Deadline
+        processing_deadline = Deadline
     }.
 
 construct_payment_flow({instant, _}, _CreatedAt, _Terms, _VS, _Revision) ->
@@ -1588,9 +1594,19 @@ process_session(suspended, Session, Action, Events, St) ->
 
 -spec process_active_session(action(), session(), events(), st()) -> machine_result().
 process_active_session(Action, Session, Events, St) ->
-    {ok, ProxyResult} = repair_session(St),
-    Result = handle_proxy_result(ProxyResult, Action, Events, Session),
-    finish_session_processing(Result, St).
+    Payment = get_payment(St),
+    Deadline = genlib:define(Payment#domain_InvoicePayment.processing_deadline, create_default_deadline()),
+    case woody_deadline:is_reached(woody_deadline:from_binary(Deadline)) of
+        false ->
+            {ok, ProxyResult} = repair_session(St),
+            Result = handle_proxy_result(ProxyResult, Action, Events, Session),
+            finish_session_processing(Result, St);
+        true ->
+            Failure = {failure, payproc_errors:construct('PaymentFailure',
+                {authorization_failed, {processing_deadline_reached, #payprocerr_GeneralFailure{}}}
+            )},
+            process_failure(get_activity(St), Events, Action, Failure, St)
+    end.
 
 repair_session(St = #st{repair_scenario = Scenario}) ->
     case hg_invoice_repair:check_for_action(fail_session, Scenario) of
@@ -2011,7 +2027,7 @@ construct_proxy_payment(
         payer = Payer,
         cost = Cost,
         make_recurrent = MakeRecurrent,
-        payment_deadline = Deadline
+        processing_deadline = Deadline
     },
     Trx
 ) ->
@@ -2024,7 +2040,7 @@ construct_proxy_payment(
         cost = construct_proxy_cash(Cost),
         contact_info = ContactInfo,
         make_recurrent = MakeRecurrent,
-        payment_deadline = Deadline
+        processing_deadline = Deadline
     }.
 
 construct_payment_resource(?payment_resource_payer(Resource, _)) ->
