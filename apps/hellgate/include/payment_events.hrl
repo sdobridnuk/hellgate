@@ -60,6 +60,8 @@
     {captured, #domain_InvoicePaymentCaptured{}}).
 -define(refunded(),
     {refunded, #domain_InvoicePaymentRefunded{}}).
+-define(charged_back(),
+    {charged_back, #domain_InvoicePaymentChargedBack{}}).
 -define(failed(Failure),
     {failed, #domain_InvoicePaymentFailed{failure = Failure}}).
 -define(captured_with_reason(Reason),
@@ -157,16 +159,15 @@
 
 -define(chargeback_ev(ChargebackID, Payload),
     {invoice_payment_chargeback_change, #payproc_InvoicePaymentChargebackChange{
-        id = ChargebackID,
+        id      = ChargebackID,
         payload = Payload
     }}
 ).
 
--define(chargeback_created(Chargeback, CashFlow),
+-define(chargeback_created(Chargeback),
     {invoice_payment_chargeback_created,
         #payproc_InvoicePaymentChargebackCreated{
-            chargeback = Chargeback,
-            cash_flow = CashFlow
+            chargeback = Chargeback
         }
     }
 ).
@@ -177,14 +178,37 @@
     }
 ).
 
--define(chargeback_status_created(),
-    {won, #domain_InvoicePaymentChargebackCreated{}}).
-% -define(chargeback_status_(),
-%     {won, #domain_InvoicePaymentChargeback_{}}).
--define(chargeback_status_won(),
-    {won, #domain_InvoicePaymentChargebackWon{}}).
--define(chargeback_status_lost(),
-    {lost, #domain_InvoicePaymentChargebackLost{}}).
+-define(chargeback_cash_flow_created(CashFlow),
+    {invoice_payment_chargeback_cash_flow_created,
+        #payproc_InvoicePaymentChargebackCashFlowCreated{cash_flow = CashFlow}
+    }
+).
+
+-define(chargeback_cash_flow_changed(CashFlow),
+    {invoice_payment_chargeback_cash_flow_changed,
+        #payproc_InvoicePaymentChargebackCashFlowChanged{cash_flow = CashFlow}
+    }
+).
+
+-define(chargeback_status_pending(),
+    {pending,  #domain_InvoicePaymentChargebackPending{}}).
+-define(chargeback_status_accepted(),
+    {accepted, #domain_InvoicePaymentChargebackAccepted{}}).
+-define(chargeback_status_rejected(),
+    {rejected, #domain_InvoicePaymentChargebackRejected{}}).
+-define(chargeback_status_cancelled(),
+    {cancelled, #domain_InvoicePaymentChargebackCancelled{}}).
+-define(chargeback_status_failed(Failure),
+    {failed, #domain_InvoicePaymentChargebackFailed{failure = Failure}}).
+
+% -define(chargeback_status_pending(At),
+%     {pending,  #domain_InvoicePaymentChargebackPending{at = At}}).
+% -define(chargeback_status_accepted(At),
+%     {accepted, #domain_InvoicePaymentChargebackAccepted{at = At}}).
+% -define(chargeback_status_rejected(At),
+%     {rejected, #domain_InvoicePaymentChargebackRejected{at = At}}).
+% -define(chargeback_status_cancelled(At),
+%     {cancelled, #domain_InvoicePaymentChargebackCancelled{at = At}}).
 
 %% Refunds
 
