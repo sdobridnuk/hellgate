@@ -232,26 +232,14 @@ groups() ->
 
         % {chargebacks, [], [
         {chargebacks, [parallel], [
-                % create_payment_chargeback,
-                % create_payment_chargeback_hold_funds
-                cancel_payment_chargeback
-                % reject_payment_chargeback,
-                % reject_payment_chargeback_hold_funds,
-                % accept_payment_chargeback,
-                % accept_payment_chargeback_hold_funds,
-                % reopen_payment_chargeback
-            % invalid_refund_party_status,
-            % invalid_refund_shop_status,
-            % {chargebacks, [parallel], [
-                % retry_temporary_unavailability_refund,
-                % payment_partial_refunds_success,
-                % invalid_amount_payment_partial_refund,
-                % invalid_amount_partial_capture_and_refund,
-                % invalid_currency_payment_partial_refund,
-                % cant_start_simultaneous_partial_refunds
-            % ]}
-            % ineligible_payment_partial_refund,
-            % payment_manual_refund
+            % create_payment_chargeback,
+            % create_payment_chargeback_hold_funds,
+            cancel_payment_chargeback
+            % reject_payment_chargeback,
+            % reject_payment_chargeback_hold_funds,
+            % accept_payment_chargeback,
+            % accept_payment_chargeback_hold_funds,
+            % reopen_payment_chargeback
         ]},
 
         {refunds, [], [
@@ -1714,7 +1702,7 @@ cancel_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
     ]            = next_event(InvoiceID, Client),
     [
-        ?payment_ev(PaymentID, ?chargeback_ev(_CBID1, ?chargeback_cash_flow_created(_)))
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_)))
     ]            = next_event(InvoiceID, Client),
     ok           = hg_client_invoicing:cancel_chargeback(InvoiceID, PaymentID, CBID, Client),
     [
@@ -1722,22 +1710,8 @@ cancel_payment_chargeback(C) ->
     ]            = next_event(InvoiceID, Client),
     % cancelled chargebacks do not block refunds
     RefundParams = make_refund_params(),
-    Refund       = #domain_InvoicePaymentRefund{id = RefundID} =
-        hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
-    Refund       =
-        hg_client_invoicing:get_payment_refund(InvoiceID, PaymentID, RefundID, Client),
-    PaymentID    = refund_payment(InvoiceID, PaymentID, RefundID, Refund, Client),
-    PaymentID    = await_refund_session_started(InvoiceID, PaymentID, RefundID, Client),
-    [
-        ?payment_ev(PaymentID, ?refund_ev(ID, ?session_ev(?refunded(), ?trx_bound(_)))),
-        ?payment_ev(PaymentID, ?refund_ev(ID, ?session_ev(?refunded(), ?session_finished(?session_succeeded()))))
-    ]            = next_event(InvoiceID, Client),
-    [
-        ?payment_ev(PaymentID, ?refund_ev(ID, ?refund_status_changed(?refund_succeeded()))),
-        ?payment_ev(PaymentID, ?payment_status_changed(?refunded()))
-    ]            = next_event(InvoiceID, Client),
-    #domain_InvoicePaymentRefund{status = ?refund_succeeded()} =
-        hg_client_invoicing:get_payment_refund(InvoiceID, PaymentID, RefundID, Client).
+    #domain_InvoicePaymentRefund{} =
+        hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client).
 
 -spec reject_payment_chargeback(config()) -> _ | no_return().
 
@@ -2872,12 +2846,14 @@ next_event(InvoiceID, Timeout, Client) ->
     case hg_client_invoicing:pull_event(InvoiceID, Timeout, Client) of
         {ok, ?invoice_ev(Changes)} ->
             ct:print("CHANGES\n~p", [Changes]),
-            case filter_changes(Changes) of
+            R = case filter_changes(Changes) of
                 L when length(L) > 0 ->
                     L;
                 [] ->
                     next_event(InvoiceID, Timeout, Client)
-            end;
+                end,
+            % ct:print("CHANGES FILTERED\n~p", [R]),
+            R;
         Result ->
             Result
     end.
