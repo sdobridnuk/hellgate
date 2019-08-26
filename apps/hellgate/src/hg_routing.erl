@@ -274,10 +274,7 @@ build_fd_service_id(#domain_ProviderRef{id = ID}) ->
 
 get_payments_terms(?route(ProviderRef, TerminalRef), Revision) ->
     #domain_Provider{payment_terms = Terms0} = hg_domain:get(Revision, {provider, ProviderRef}),
-    ct:print("TERMS PROV\n~p", [Terms0]),
     #domain_Terminal{terms = Terms1} = hg_domain:get(Revision, {terminal, TerminalRef}),
-    ct:print("TERMS TERM\n~p", [Terms1]),
-    ct:print("TERMS MERGE\n~p", [merge_payment_terms(Terms0, Terms1)]),
     merge_payment_terms(Terms0, Terms1).
 
 -spec get_rec_paytools_terms(route(), hg_domain:revision()) -> terms().
