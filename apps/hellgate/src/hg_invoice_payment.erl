@@ -182,13 +182,15 @@
 -type retry_strategy()           :: hg_retry:strategy().
 
 -type session_status()           :: active | suspended | finished.
+
 -type session() :: #{
-    target      := target(),
-    status      := session_status(),
-    trx         := trx_info(),
-    tags        := [tag()],
-    result      => session_result(),
-    proxy_state => proxy_state()
+    target            := target(),
+    status            := session_status(),
+    trx               := trx_info(),
+    tags              := [tag()],
+    timeout_behaviour := timeout_behaviour(),
+    result            => session_result(),
+    proxy_state       => proxy_state()
 }.
 
 -type opts() :: #{
@@ -2096,8 +2098,18 @@ finalize_payment(Action, St) ->
 
 -spec process_callback_timeout(action(), session(), events(), st()) -> machine_result().
 process_callback_timeout(Action, Session, Events, St) ->
-    Result = handle_proxy_callback_timeout(Action, Events, Session),
-    finish_session_processing(Result, St).
+    case get_session_timeout_behaviour(Session) of
+        {callback, Payload} ->
+            ProxyContext = construct_proxy_context(St),
+            Route = get_route(St),
+            {ok, CallbackResult} = hg_proxy_provider:handle_payment_callback(Payload, ProxyContext, Route),
+            {_Response, Result} = handle_callback_result(CallbackResult, Action, get_activity_session(St)),
+            finish_session_processing(Result, St);
+        {operation_failure, OperationFailure} ->
+            SessionEvents = [?session_finished(?session_failed(OperationFailure))],
+            Result = {Events ++ wrap_session_events(SessionEvents, Session), Action},
+            finish_session_processing(Result, St)
+    end.
 
 -spec handle_callback(callback(), action(), st()) ->
     {callback_response(), machine_result()}.
@@ -2348,10 +2360,6 @@ handle_proxy_callback_result(
     Events2 = update_proxy_state(ProxyState, Session),
     {wrap_session_events(Events1 ++ Events2, Session), Action0}.
 
-handle_proxy_callback_timeout(Action, Events, Session) ->
-    SessionEvents = [?session_finished(?session_failed(?operation_timeout()))],
-    {Events ++ wrap_session_events(SessionEvents, Session), Action}.
-
 wrap_session_events(SessionEvents, #{target := Target}) ->
     [?session_ev(Target, Ev) || Ev <- SessionEvents].
 
@@ -2388,12 +2396,17 @@ handle_proxy_intent(#prxprv_SleepIntent{timer = Timer, user_interaction = UserIn
     Events = wrap_session_events(try_request_interaction(UserInteraction), Session),
     {Events, Action};
 handle_proxy_intent(
-    #prxprv_SuspendIntent{tag = Tag, timeout = Timer, user_interaction = UserInteraction},
+    #prxprv_SuspendIntent{
+        tag = Tag,
+        timeout = Timer,
+        user_interaction = UserInteraction,
+        timeout_behaviour = TimeoutBehaviour
+    },
     Action0,
     Session
 ) ->
     Action = set_timer(Timer, hg_machine_action:set_tag(Tag, Action0)),
-    Events = [?session_suspended(Tag) | try_request_interaction(UserInteraction)],
+    Events = [?session_suspended(Tag, TimeoutBehaviour) | try_request_interaction(UserInteraction)],
     {wrap_session_events(Events, Session), Action}.
 
 handle_proxy_capture_failure(Action, Failure, Session = #{target := Target}) ->
@@ -3109,10 +3122,12 @@ merge_session_change(?session_finished(Result), Session) ->
     Session#{status := finished, result => Result};
 merge_session_change(?session_activated(), Session) ->
     Session#{status := active};
-merge_session_change(?session_suspended(undefined), Session) ->
-    Session#{status := suspended};
-merge_session_change(?session_suspended(Tag), Session) ->
-    Session#{status := suspended, tags := [Tag | get_session_tags(Session)]};
+
+merge_session_change(?session_suspended(Tag, TimeoutBehaviour), Session) ->
+    Session2 = set_session_tag(Tag, Session),
+    Session3 = set_timeout_behaviour(TimeoutBehaviour, Session2),
+    Session3#{status := suspended};
+
 merge_session_change(?trx_bound(Trx), Session) ->
     Session#{trx := Trx};
 merge_session_change(?proxy_st_changed(ProxyState), Session) ->
@@ -3120,12 +3135,23 @@ merge_session_change(?proxy_st_changed(ProxyState), Session) ->
 merge_session_change(?interaction_requested(_), Session) ->
     Session.
 
+set_timeout_behaviour(undefined, Session) ->
+    Session#{timeout_behaviour => {operation_failure, ?operation_timeout()}};
+set_timeout_behaviour(TimeoutBehaviour, Session) ->
+    Session#{timeout_behaviour => TimeoutBehaviour}.
+
+set_session_tag(undefined, Session) ->
+    Session;
+set_session_tag(Tag, Session) ->
+    Session#{tags := [Tag | get_session_tags(Session)]}.
+
 create_session(Target, Trx) ->
     #{
         target => Target,
         status => active,
         trx    => Trx,
-        tags   => []
+        tags   => [],
+        timeout_behaviour => {operation_failure, ?operation_timeout()}
     }.
 
 get_invoice_state(InvoiceID) ->
@@ -3157,6 +3183,9 @@ get_session_status(#{status := Status}) ->
 
 get_session_trx(#{trx := Trx}) ->
     Trx.
+
+get_session_timeout_behaviour(#{timeout_behaviour := TimeoutBehaviour}) ->
+    TimeoutBehaviour.
 
 get_session_proxy_state(Session) ->
     maps:get(proxy_state, Session, undefined).
@@ -3211,7 +3240,13 @@ collapse_changes(Changes, St) ->
     collapse_changes(Changes, St, #{}).
 
 collapse_changes(Changes, St, Opts) ->
-    lists:foldl(fun (C, St1) -> merge_change(C, St1, Opts) end, St, Changes).
+    lists:foldl(
+        fun (C, St1) ->
+            merge_change(C, St1, Opts)
+        end,
+        St,
+        Changes
+    ).
 
 %%
 
@@ -3598,9 +3633,8 @@ unmarshal(capture, Reason) ->
     ?captured_with_reason(unmarshal(str, Reason));
 
 %% Session change
-
 unmarshal(session_change, [3, [<<"suspended">>, Tag]]) ->
-    ?session_suspended(unmarshal(str, Tag));
+    ?session_suspended(unmarshal(str, Tag), undefined);
 unmarshal(session_change, [3, Change]) ->
     unmarshal(session_change, [2, Change]);
 
@@ -3609,7 +3643,7 @@ unmarshal(session_change, [2, <<"started">>]) ->
 unmarshal(session_change, [2, [<<"finished">>, Result]]) ->
     ?session_finished(unmarshal(session_status, Result));
 unmarshal(session_change, [2, <<"suspended">>]) ->
-    ?session_suspended(undefined);
+    ?session_suspended(undefined, undefined);
 unmarshal(session_change, [2, <<"activated">>]) ->
     ?session_activated();
 unmarshal(session_change, [2, [<<"transaction_bound">>, Trx]]) ->
@@ -3624,7 +3658,7 @@ unmarshal(session_change, [1, ?legacy_session_started()]) ->
 unmarshal(session_change, [1, ?legacy_session_finished(Result)]) ->
     ?session_finished(unmarshal(session_status, Result));
 unmarshal(session_change, [1, ?legacy_session_suspended()]) ->
-    ?session_suspended(undefined);
+    ?session_suspended(undefined, undefined);
 unmarshal(session_change, [1, ?legacy_session_activated()]) ->
     ?session_activated();
 unmarshal(session_change, [1, ?legacy_trx_bound(Trx)]) ->
