@@ -1069,10 +1069,8 @@ create_chargeback(Params, St0, Opts) ->
     Payment       = get_payment(St),
     HoldFunds     = Params#payproc_InvoicePaymentChargebackParams.hold_funds,
     Chargeback    = make_chargeback(Params, HoldFunds, Payment, Revision, St, Opts),
-    % FinalCashflow = make_chargeback_cashflow(Chargeback, Payment, Revision, St, Opts),
     Action        = hg_machine_action:instant(),
-    % Action        = hg_machine_action:new(),
-    ID            = Chargeback#domain_InvoicePaymentChargeback.id,
+    ID            = get_chargeback_id(Chargeback),
     Change        = ?chargeback_created(Chargeback),
     Events        = [?chargeback_ev(ID, Change)],
     Result        = {Events, Action},
@@ -1410,6 +1408,7 @@ make_refund_cashflow(Refund, Payment, Revision, St, Opts) ->
     ProviderPaymentsTerms = get_provider_payments_terms(Route, Revision),
     ProviderTerms = get_provider_refunds_terms(ProviderPaymentsTerms, Refund, Payment, VS1, Revision),
     Cashflow = collect_refund_cashflow(MerchantTerms, ProviderTerms, VS1, Revision),
+    ct:print("REFUNDCF\n~p", [Cashflow]),
     PaymentInstitution = get_payment_institution(Opts, Revision),
     Provider = get_route_provider(Route, Revision),
     AccountMap = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS1, Revision),
@@ -1913,6 +1912,7 @@ process_cash_flow_building(Route, VS, Payment, PaymentInstitution, Revision, Opt
 %     Events = [?adjustment_ev(ID, ?chargeback_status_changed(?chargeback_processed()))],
 %     {done, {Events, hg_machine_action:new()}}.
 
+% FIXME: requires rework
 -spec process_chargeback_cashflow(chargeback_id(), action(), st()) -> machine_result().
 process_chargeback_cashflow(ChargebackID, Action, St) ->
     ChargebackSt       = try_get_chargeback_state(ChargebackID, St),
@@ -2012,6 +2012,7 @@ process_refund_cashflow(ID, Action, St) ->
                 hg_machine_action:set_timeout(0, Action)
             }};
         Available when Available < 0 ->
+            ct:print("AvailableAmount\n~p", [Available]),
             Failure = {failure, payproc_errors:construct('RefundFailure',
                 {terms_violated, {insufficient_merchant_funds, #payprocerr_GeneralFailure{}}}
             )},
@@ -2797,29 +2798,33 @@ merge_change(Change = ?payment_status_changed({refunded, _} = Status), #st{payme
 merge_change(Change = ?chargeback_ev(ID, Event), St, Opts) ->
     %% WIP
     St1 = case Event of
-        ?chargeback_created(_) -> % funds_held = false}) ->
+        ?chargeback_created(_) ->
             ct:print("CREATED"),
             _ = validate_transition(idle, Change, St, Opts),
             St#st{activity = {chargeback_accounter, ID}};
-        ?chargeback_cash_flow_created(_) ->
-            ct:print("CF CREATED"),
-            _ = validate_transition({chargeback_accounter, ID}, Change, St, Opts),
-            St#st{activity = idle};
         ?chargeback_status_changed(?chargeback_status_rejected()) ->
             ct:print("REJECTED"),
             _ = validate_transition(idle, Change, St, Opts),
-            St#st{activity = {chargeback_accounter, ID}};
+            St#st{activity = idle};
         ?chargeback_status_changed(?chargeback_status_accepted()) ->
             ct:print("ACCEPTED"),
             _ = validate_transition(idle, Change, St, Opts),
-            St#st{activity = {chargeback_accounter, ID}};
+            St#st{activity = idle};
         ?chargeback_status_changed(?chargeback_status_cancelled()) ->
             ct:print("CANCELLED"),
             _ = validate_transition(idle, Change, St, Opts),
             St#st{activity = idle};
+        ?chargeback_status_changed(?chargeback_status_pending()) ->
+            ct:print("PENDING"),
+            _ = validate_transition(idle, Change, St, Opts),
+            St#st{activity = idle};
         ?chargeback_status_changed(?chargeback_status_failed(_)) ->
             ct:print("FAILED"),
-            _ = validate_transition(idle, Change, St, Opts),
+            _ = validate_transition({chargeback_accounter, ID}, Change, St, Opts),
+            St#st{activity = idle};
+        ?chargeback_cash_flow_created(_) ->
+            ct:print("CF CREATED"),
+            _ = validate_transition({chargeback_accounter, ID}, Change, St, Opts),
             St#st{activity = idle};
         ?chargeback_cash_flow_changed(_) ->
             ct:print("CF CHANGED"),
@@ -2830,11 +2835,12 @@ merge_change(Change = ?chargeback_ev(ID, Event), St, Opts) ->
     end,
     ChargebackSt = merge_chargeback_change(Event, try_get_chargeback_state(ID, St1)),
     St2 = set_chargeback_state(ID, ChargebackSt, St1),
-    % ct:print("MERGE RESULT\n~p", [St2]),
+    ct:print("MERGE RESULT\n~p", [St2]),
     St2;
     % case get_chargeback_status(get_chargeback(ChargebackSt)) of
     %     {S, _} when S == cancelled orelse
     %                 S == rejected orelse
+    %                 % S == pending orelse
     %                 S == failed orelse
     %                 S == accepted ->
     %         St2#st{activity = idle};
@@ -3211,6 +3217,7 @@ collapse_changes(Changes, St) ->
     collapse_changes(Changes, St, #{}).
 
 collapse_changes(Changes, St, Opts) ->
+    % ct:print("COLLAPSE CHANGES\n~p", [Changes]),
     lists:foldl(fun (C, St1) -> merge_change(C, St1, Opts) end, St, Changes).
 
 %%
