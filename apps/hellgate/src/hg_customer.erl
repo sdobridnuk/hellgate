@@ -207,7 +207,9 @@ process_signal(Signal, #{history := History,  aux_state := AuxSt}) ->
     handle_result(handle_signal(Signal, collapse_history(unmarshal_history(History)), unmarshal(auxst, AuxSt))).
 
 handle_signal(timeout, St0, AuxSt0) ->
-    {Changes, AuxSt1} = sync_pending_bindings(St0, AuxSt0),
+    Changes0 = process_creating_bindings(St0),
+    {Changes1, AuxSt1} = sync_pending_bindings(St0, AuxSt0),
+    Changes = Changes0 ++ Changes1,
     St1 = merge_changes(Changes, St0),
     Action = case detect_binding_status(St1) of
         all_ready ->
@@ -222,6 +224,26 @@ handle_signal(timeout, St0, AuxSt0) ->
         action  => Action,
         auxst   => AuxSt1
     }.
+
+process_creating_bindings(St) ->
+    Bindings = get_creating_bindings(St),
+    process_creating_bindings(Bindings, St).
+
+process_creating_bindings([Binding | Rest], St) ->
+    #payproc_CustomerBinding{
+        id = BindingID,
+        rec_payment_tool_id = PaytoolID,
+        payment_resource = PaymentResource,
+        party_revision = PartyRevision,
+        domain_revision = DomainRevision
+    } = Binding,
+    PartyID = get_party_id(St),
+    Params = create_paytool_params(PaytoolID, PartyID, PartyRevision, DomainRevision, PaymentResource, St),
+    Changes0 = create_recurrent_paytool(BindingID, Params),
+    Changes1 = process_creating_bindings(Rest, St),
+    Changes0 ++ Changes1;
+process_creating_bindings([], _St) ->
+    [].
 
 detect_binding_status(St) ->
     case get_pending_binding_set(St) of
@@ -310,21 +332,47 @@ handle_result_action(#{}, Acc) ->
 start_binding(BindingParams, St) ->
     BindingID = create_binding_id(St),
     PaymentResource = BindingParams#payproc_CustomerBindingParams.payment_resource,
-    RecurrentPaytoolID = create_recurrent_paytool(PaymentResource, St),
-    Binding = construct_binding(BindingID, RecurrentPaytoolID, PaymentResource),
-    Changes = [?customer_binding_changed(BindingID, ?customer_binding_started(Binding, hg_datetime:format_now()))],
+    PaytoolID = hg_utils:unique_id(),
+    DomainRevision = hg_domain:head(),
+    PartyID = get_party_id(St),
+    PartyRevision = hg_party:get_party_revision(PartyID),
+    Binding = construct_binding(BindingID, PaytoolID, PaymentResource, PartyRevision, DomainRevision),
+    PaytoolParams = create_paytool_params(PaytoolID, PartyID, PartyRevision, DomainRevision, PaymentResource, St),
+    _ = validate_paytool_params(PaytoolParams),
+    Changes0 = [?customer_binding_changed(BindingID, ?customer_binding_started(Binding, hg_datetime:format_now()))],
+    Changes1 = create_recurrent_paytool(BindingID, PaytoolParams), %% @TODO: Remove after migration
     #{
         response => {ok, Binding},
-        changes  => Changes,
-        action   => set_event_poll_timer(actual)
+        changes  => Changes0 ++ Changes1,
+        action   => hg_machine_action:instant()
     }.
 
-construct_binding(BindingID, RecPaymentToolID, PaymentResource) ->
+validate_paytool_params(PaytoolParams) ->
+    try
+        ok = hg_recurrent_paytool:validate_paytool_params(PaytoolParams)
+    catch
+        throw:(Exception = #payproc_InvalidUser{}) ->
+            throw(Exception);
+        throw:(Exception = #payproc_InvalidPartyStatus{}) ->
+            throw(Exception);
+        throw:(Exception = #payproc_InvalidShopStatus{}) ->
+            throw(Exception);
+        throw:(Exception = #payproc_InvalidContractStatus{}) ->
+            throw(Exception);
+        throw:(Exception = #payproc_OperationNotPermitted{}) ->
+            throw(Exception);
+        throw:(#payproc_InvalidPaymentMethod{}) ->
+            throw(#payproc_OperationNotPermitted{})
+    end.
+
+construct_binding(BindingID, RecPaymentToolID, PaymentResource, PartyRevision, DomainRevision) ->
     #payproc_CustomerBinding{
         id                  = BindingID,
         rec_payment_tool_id = RecPaymentToolID,
         payment_resource    = PaymentResource,
-        status              = ?customer_binding_pending()
+        status              = ?customer_binding_pending(), %% @TODO: `creating` after migration
+        party_revision      = PartyRevision,
+        domain_revision     = DomainRevision
     }.
 
 create_binding_id(St) ->
@@ -379,33 +427,19 @@ produce_binding_changes_(?recurrent_payment_tool_has_abandoned() = Change, _Bind
 produce_binding_changes_(?session_ev(_), _Binding) ->
     [].
 
-create_recurrent_paytool(PaymentResource, St) ->
-    create_recurrent_paytool(#payproc_RecurrentPaymentToolParams{
-        party_id         = get_party_id(St),
+create_paytool_params(ID, PartyID, PartyRevision, DomainRevision, PaymentResource, St) ->
+    #payproc_RecurrentPaymentToolParams{
+        id               = ID,
+        party_id         = PartyID,
+        party_revision   = PartyRevision,
+        domain_revision  = DomainRevision,
         shop_id          = get_shop_id(St),
         payment_resource = PaymentResource
-    }).
+    }.
 
-create_recurrent_paytool(Params) ->
-    case issue_recurrent_paytools_call('Create', [Params]) of
-        {ok, RecurrentPaytool} ->
-            RecurrentPaytool#payproc_RecurrentPaymentTool.id;
-        {exception, Exception = #payproc_InvalidUser{}} ->
-            throw(Exception);
-        {exception, Exception = #payproc_InvalidPartyStatus{}} ->
-            throw(Exception);
-        {exception, Exception = #payproc_InvalidShopStatus{}} ->
-            throw(Exception);
-        {exception, Exception = #payproc_InvalidContractStatus{}} ->
-            throw(Exception);
-        {exception, Exception = #payproc_OperationNotPermitted{}} ->
-            throw(Exception);
-        % TODO
-        % These are essentially the same, we should probably decide on some kind
-        % of exception encompassing both.
-        {exception, #payproc_InvalidPaymentMethod{}} ->
-            throw(#payproc_OperationNotPermitted{})
-    end.
+create_recurrent_paytool(BindingID, Params) ->
+    {ok, _} = issue_recurrent_paytools_call('Create', [Params]),
+    [?customer_binding_changed(BindingID, ?customer_binding_status_changed(?customer_binding_pending()))].
 
 get_recurrent_paytool_changes(RecurrentPaytoolID, LastEventID) ->
     EventRange = construct_event_range(LastEventID),
@@ -552,6 +586,12 @@ set_binding(Binding, Customer = #payproc_Customer{bindings = Bindings}) ->
         bindings = lists:keystore(BindingID, #payproc_CustomerBinding.id, Bindings, Binding)
     }.
 
+get_creating_bindings(St) ->
+    Bindings = get_bindings(get_customer(St)),
+    [Binding ||
+        Binding <- Bindings, get_binding_status(Binding) == ?customer_binding_creating()
+    ].
+
 get_pending_binding_set(St) ->
     Bindings = get_bindings(get_customer(St)),
     [get_binding_id(Binding) ||
@@ -661,6 +701,11 @@ assert_shop_operable(Shop) ->
 %% Marshalling
 %%
 
+-define(BINARY_BINDING_STATUS_CREATING, <<"creating">>).
+-define(BINARY_BINDING_STATUS_PENDING, <<"pending">>).
+-define(BINARY_BINDING_STATUS_SUCCEEDED, <<"succeeded">>).
+-define(BINARY_BINDING_STATUS_FAILED(Failure), [<<"failed">>, Failure]).
+
 -spec marshal_event_payload([customer_change()]) ->
     hg_machine:event_payload().
 marshal_event_payload(Changes) ->
@@ -749,13 +794,19 @@ marshal(
     #payproc_CustomerBinding{
         id                  = ID,
         rec_payment_tool_id = RecPaymentToolID,
-        payment_resource    = PaymentResource
+        payment_resource    = PaymentResource,
+        status              = Status,
+        party_revision      = PartyRevision,
+        domain_revision     = DomainRevision
     }
 ) ->
     #{
-        <<"id">>            => marshal(str              , ID),
-        <<"recpaytool_id">> => marshal(str              , RecPaymentToolID),
-        <<"payresource">>   => marshal(payment_resource , PaymentResource)
+        <<"id">>              => marshal(str              , ID),
+        <<"recpaytool_id">>   => marshal(str              , RecPaymentToolID),
+        <<"payresource">>     => marshal(payment_resource , PaymentResource),
+        <<"status">>          => marshal(binding_status   , Status),
+        <<"party_revision">>  => marshal(int              , PartyRevision),
+        <<"domain_revision">> => marshal(int              , DomainRevision)
     };
 
 marshal(
@@ -796,15 +847,16 @@ marshal(
         <<"fingerprint">> => marshal(str, Fingerprint)
     });
 
+marshal(binding_status, ?customer_binding_creating()) ->
+    ?BINARY_BINDING_STATUS_CREATING;
 marshal(binding_status, ?customer_binding_pending()) ->
-    <<"pending">>;
+    ?BINARY_BINDING_STATUS_PENDING;
 marshal(binding_status, ?customer_binding_succeeded()) ->
-    <<"succeeded">>;
+    ?BINARY_BINDING_STATUS_SUCCEEDED;
 marshal(binding_status, ?customer_binding_failed(Failure)) ->
-    [
-        <<"failed">>,
+    ?BINARY_BINDING_STATUS_FAILED(
         marshal(failure, Failure)
-    ];
+    );
 
 marshal(binding_change_payload, ?customer_binding_started(CustomerBinding, Timestamp)) ->
     [
@@ -989,16 +1041,21 @@ unmarshal(customer_status, <<"ready">>) ->
 unmarshal(
     binding,
     #{
-        <<"id">>             := ID,
-        <<"recpaytool_id">>  := RecPaymentToolID,
-        <<"payresource">>    := PaymentResource
-    }
+        <<"id">>              := ID,
+        <<"recpaytool_id">>   := RecPaymentToolID,
+        <<"payresource">>     := PaymentResource
+    } = Binding
 ) ->
+    Status = maps:get(<<"status">>, Binding, ?BINARY_BINDING_STATUS_PENDING),
+    PartyRevision = maps:get(<<"party_revision">>, Binding, undefined),
+    DomainRevision = maps:get(<<"domain_revision">>, Binding, undefined),
     #payproc_CustomerBinding{
-        id                  = unmarshal(str              , ID),
-        rec_payment_tool_id = unmarshal(str              , RecPaymentToolID),
-        payment_resource    = unmarshal(payment_resource , PaymentResource),
-        status              = ?customer_binding_pending()
+        id                  = unmarshal(str             , ID),
+        rec_payment_tool_id = unmarshal(str             , RecPaymentToolID),
+        payment_resource    = unmarshal(payment_resource, PaymentResource),
+        status              = unmarshal(binding_status  , Status),
+        party_revision      = unmarshal(int             , PartyRevision),
+        domain_revision     = unmarshal(int             , DomainRevision)
     };
 
 unmarshal(
@@ -1021,11 +1078,13 @@ unmarshal(client_info, ClientInfo) ->
         fingerprint     = unmarshal(str, genlib_map:get(<<"fingerprint">>, ClientInfo))
     };
 
-unmarshal(binding_status, <<"pending">>) ->
+unmarshal(binding_status, ?BINARY_BINDING_STATUS_CREATING) ->
+    ?customer_binding_creating();
+unmarshal(binding_status, ?BINARY_BINDING_STATUS_PENDING) ->
     ?customer_binding_pending();
-unmarshal(binding_status, <<"succeeded">>) ->
+unmarshal(binding_status, ?BINARY_BINDING_STATUS_SUCCEEDED) ->
     ?customer_binding_succeeded();
-unmarshal(binding_status, [<<"failed">>, Failure]) ->
+unmarshal(binding_status, ?BINARY_BINDING_STATUS_FAILED(Failure)) ->
     ?customer_binding_failed(unmarshal(failure, Failure));
 
 unmarshal(binding_change_payload, [<<"started">>, Binding]) ->
