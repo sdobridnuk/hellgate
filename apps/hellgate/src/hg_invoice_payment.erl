@@ -382,7 +382,7 @@ validate_customer_shop(_, _) ->
 
 create_default_deadline() ->
     Now = genlib_time:now(),
-    DefaultDeadline = ?DEFAULT_PROCESSING_DEADLINE_MINUTES,
+    DefaultDeadline = genlib_app:env(hellgate, processing_deadline, ?DEFAULT_PROCESSING_DEADLINE_MINUTES),
     genlib:to_binary(genlib_time:add_minutes(Now, DefaultDeadline)).
 
 get_active_binding(#payproc_Customer{bindings = Bindings, active_binding_id = BindingID}) ->
@@ -1596,12 +1596,12 @@ process_session(suspended, Session, Action, Events, St) ->
 process_active_session(Action, Session, Events, St) ->
     Payment = get_payment(St),
     Deadline = genlib:define(Payment#domain_InvoicePayment.processing_deadline, create_default_deadline()),
-    case woody_deadline:is_reached(woody_deadline:from_binary(Deadline)) of
-        false ->
+    case hg_invoice_utils:check_deadline(Deadline) of
+        ok ->
             {ok, ProxyResult} = repair_session(St),
             Result = handle_proxy_result(ProxyResult, Action, Events, Session),
             finish_session_processing(Result, St);
-        true ->
+        {error, deadline_reached} ->
             Failure = {failure, payproc_errors:construct('PaymentFailure',
                 {authorization_failed, {processing_deadline_reached, #payprocerr_GeneralFailure{}}}
             )},
