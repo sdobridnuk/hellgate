@@ -133,8 +133,10 @@ get_line_amount(#domain_InvoiceLine{
 }) ->
     #domain_Cash{amount = Amount * Quantity, currency = Currency}.
 
--spec check_deadline(Deadline :: binary()) ->
+-spec check_deadline(Deadline :: binary() | undefined) ->
     ok | {error, deadline_reached}.
+check_deadline(undefined) ->
+    ok;
 check_deadline(Deadline) ->
     case hg_datetime:compare(Deadline, hg_datetime:format_now()) of
         later ->

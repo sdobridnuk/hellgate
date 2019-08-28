@@ -172,7 +172,6 @@
 -type change() ::
     dmsl_payment_processing_thrift:'InvoicePaymentChangePayload'().
 
--define(DEFAULT_PROCESSING_DEADLINE_MINUTES, 30).
 %%
 
 -spec get_party_revision(st()) -> {hg_party:party_revision(), hg_datetime:timestamp()}.
@@ -333,6 +332,8 @@ get_context_params(#payproc_InvoicePaymentParams{context = Context}) ->
 get_external_id(#payproc_InvoicePaymentParams{external_id = ExternalID}) ->
     ExternalID.
 
+get_processing_deadline(#domain_InvoicePayment{processing_deadline = Deadline}) ->
+    Deadline;
 get_processing_deadline(#payproc_InvoicePaymentParams{processing_deadline = Deadline}) ->
     Deadline.
 
@@ -380,10 +381,6 @@ validate_customer_shop(#payproc_Customer{shop_id = ShopID}, #domain_Shop{id = Sh
 validate_customer_shop(_, _) ->
     throw_invalid_request(<<"Invalid customer">>).
 
-create_default_deadline() ->
-    Now = genlib_time:now(),
-    DefaultDeadline = genlib_app:env(hellgate, processing_deadline, ?DEFAULT_PROCESSING_DEADLINE_MINUTES),
-    genlib:to_binary(genlib_time:add_minutes(Now, DefaultDeadline)).
 
 get_active_binding(#payproc_Customer{bindings = Bindings, active_binding_id = BindingID}) ->
     case lists:keysearch(BindingID, #payproc_CustomerBinding.id, Bindings) of
@@ -1595,7 +1592,7 @@ process_session(suspended, Session, Action, Events, St) ->
 -spec process_active_session(action(), session(), events(), st()) -> machine_result().
 process_active_session(Action, Session, Events, St) ->
     Payment = get_payment(St),
-    Deadline = genlib:define(Payment#domain_InvoicePayment.processing_deadline, create_default_deadline()),
+    Deadline = get_processing_deadline(Payment),
     case hg_invoice_utils:check_deadline(Deadline) of
         ok ->
             {ok, ProxyResult} = repair_session(St),
