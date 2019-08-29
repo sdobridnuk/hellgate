@@ -2289,10 +2289,10 @@ process_result({chargeback_accounter_finalise, ID}, Action, St) ->
     ChargebackSt       = try_get_chargeback_state(ID, St),
     TargetStatus       = get_chargeback_target_status(ChargebackSt),
     ct:print("CB ACCOUNTER FINALISE TARGET STATUS\n~p", [TargetStatus]),
-    CashFlowPlan       = get_chargeback_cashflow(ChargebackSt),
-    case CashFlowPlan of
+    CashFlow = get_chargeback_cashflow(ChargebackSt),
+    case CashFlow of
         [] -> ok;
-        _  -> _ = commit_chargeback_cashflow(ChargebackSt, CashFlowPlan, St)
+        CashFlow -> _ = commit_chargeback_cashflow(ChargebackSt, {1, CashFlow}, St)
     end,
     StatusEvent        = [
         ?chargeback_ev(ID, ?chargeback_status_changed(TargetStatus))

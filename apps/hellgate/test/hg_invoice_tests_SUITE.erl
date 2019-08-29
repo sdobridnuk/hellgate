@@ -239,20 +239,18 @@ groups() ->
 
         % {chargebacks, [], [
         {chargebacks, [parallel], [
-            % create_payment_chargeback,
-            % create_payment_chargeback_hold_funds,
-            % cancel_payment_chargeback,
-            % reject_payment_chargeback,
-            % reject_payment_chargeback_hold_funds,
-            % accept_payment_chargeback,
-            % accept_payment_chargeback_hold_funds,
-            % accept_partial_payment_chargeback_hold_funds
-            % reopen_payment_chargeback
-            % reopen_reject_payment_chargeback
-            % reopen_accept_payment_chargeback
+            create_payment_chargeback,
+            create_payment_chargeback_hold_funds,
+            cancel_payment_chargeback,
+            reject_payment_chargeback,
+            reject_payment_chargeback_hold_funds,
+            accept_payment_chargeback,
+            accept_payment_chargeback_hold_funds,
+            accept_partial_payment_chargeback_hold_funds,
+            reopen_payment_chargeback,
+            reopen_reject_payment_chargeback,
+            reopen_accept_payment_chargeback,
             fail_reopen_after_arbitration_payment_chargeback
-            % accept_reopened_payment_chargeback
-            % reject_reopened_payment_chargeback
         ]},
 
         {refunds, [], [
@@ -2058,7 +2056,8 @@ reopen_accept_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
     ]            = next_event(InvoiceID, Client),
     [
-        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted())))
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted()))),
+        ?payment_ev(PaymentID, ?payment_status_changed(?charged_back()))
     ]            = next_event(InvoiceID, Client).
 
 -spec fail_reopen_after_arbitration_payment_chargeback(config()) -> _ | no_return().
