@@ -332,8 +332,6 @@ get_context_params(#payproc_InvoicePaymentParams{context = Context}) ->
 get_external_id(#payproc_InvoicePaymentParams{external_id = ExternalID}) ->
     ExternalID.
 
-get_processing_deadline(#domain_InvoicePayment{processing_deadline = Deadline}) ->
-    Deadline;
 get_processing_deadline(#payproc_InvoicePaymentParams{processing_deadline = Deadline}) ->
     Deadline.
 
