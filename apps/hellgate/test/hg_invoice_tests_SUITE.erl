@@ -80,7 +80,11 @@
 -export([reject_payment_chargeback_hold_funds/1]).
 -export([accept_payment_chargeback/1]).
 -export([accept_payment_chargeback_hold_funds/1]).
+-export([accept_partial_payment_chargeback_hold_funds/1]).
 -export([reopen_payment_chargeback/1]).
+-export([reopen_reject_payment_chargeback/1]).
+-export([reopen_accept_payment_chargeback/1]).
+-export([fail_reopen_after_arbitration_payment_chargeback/1]).
 
 -export([invalid_refund_party_status/1]).
 -export([invalid_refund_shop_status/1]).
@@ -237,12 +241,18 @@ groups() ->
         {chargebacks, [parallel], [
             % create_payment_chargeback,
             % create_payment_chargeback_hold_funds,
-            cancel_payment_chargeback
+            % cancel_payment_chargeback,
             % reject_payment_chargeback,
             % reject_payment_chargeback_hold_funds,
             % accept_payment_chargeback,
             % accept_payment_chargeback_hold_funds,
+            % accept_partial_payment_chargeback_hold_funds
             % reopen_payment_chargeback
+            % reopen_reject_payment_chargeback
+            % reopen_accept_payment_chargeback
+            fail_reopen_after_arbitration_payment_chargeback
+            % accept_reopened_payment_chargeback
+            % reject_reopened_payment_chargeback
         ]},
 
         {refunds, [], [
@@ -389,6 +399,8 @@ end_per_suite(C) ->
     {exception, #payproc_InvoicePaymentAdjustmentPending{id = ID}}).
 -define(operation_not_permitted(),
     {exception, #payproc_OperationNotPermitted{}}).
+-define(chargeback_cannot_reopen_arbitration(),
+    {exception, #payproc_InvoicePaymentChargebackCannotReopenAfterArbitration{}}).
 -define(chargeback_pending(),
     {exception, #payproc_InvoicePaymentChargebackPending{}}).
 -define(invalid_chargeback_status(Status),
@@ -1536,10 +1548,16 @@ get_adjustment_fixture(Revision) ->
                         cash_flow = {value, [
                             ?cfpost(
                                 {merchant, settlement},
-                                {provider, settlement},
+                                {system, settlement},
                                 ?share(1, 1, operation_amount)
                             )
-                        ]}
+                        ]},
+                        partial_chargebacks = #domain_PartialChargebackProvisionTerms{
+                            cash_limit = {value, ?cashrng(
+                                {inclusive, ?cash(        10, <<"RUB">>)},
+                                {exclusive, ?cash(1000000000, <<"RUB">>)}
+                            )}
+                        }
                     }
                 }
             }
@@ -1726,14 +1744,14 @@ create_payment_chargeback_hold_funds(C) ->
     InvoiceID1  = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
     PaymentID1  = process_payment(InvoiceID1, make_payment_params(), Client),
     PaymentID1  = await_payment_capture(InvoiceID1, PaymentID1, Client),
-    CB1          = #domain_InvoicePaymentChargeback{id = CBID1} =
+    CB1         = #domain_InvoicePaymentChargeback{id = CBID1} =
         hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID1, ?chargeback_created(CB1)))
-    ]            = next_event(InvoiceID, Client),
+    ]           = next_event(InvoiceID, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID1, ?chargeback_cash_flow_created(_)))
-    ]            = next_event(InvoiceID, Client).
+    ]           = next_event(InvoiceID, Client).
 
 -spec cancel_payment_chargeback(config()) -> _ | no_return().
 
@@ -1777,6 +1795,9 @@ reject_payment_chargeback(C) ->
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
     ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_)))
+    ]            = next_event(InvoiceID, Client),
     ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
@@ -1791,18 +1812,28 @@ reject_payment_chargeback_hold_funds(C) ->
     InvoiceID    = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
     PaymentID    = process_payment(InvoiceID, make_payment_params(), Client),
     PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
+    InvoiceID1   = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentID1   = process_payment(InvoiceID1, make_payment_params(), Client),
+    PaymentID1   = await_payment_capture(InvoiceID1, PaymentID1, Client),
     CBParams     = make_chargeback_params(hold_funds),
     CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     CBID         = CB#domain_InvoicePaymentChargeback.id,
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
     ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(CF0)))
+    ]            = next_event(InvoiceID, Client),
     ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
     [
-        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
     ]            = next_event(InvoiceID, Client),
     [
-        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(CF1)))
+    ]            = next_event(InvoiceID, Client),
+    ?assertNotEqual(CF0, CF1),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ]            = next_event(InvoiceID, Client).
 
 -spec accept_payment_chargeback(config()) -> _ | no_return().
@@ -1823,13 +1854,23 @@ accept_payment_chargeback(C) ->
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
     ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_)))
+    ]            = next_event(InvoiceID, Client),
+    ExceedParams = make_chargeback_accept_params(?cash(200000, <<"RUB">>)),
+    ?invoice_payment_amount_exceeded(_)
+                 = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, ExceedParams, Client),
     AcceptParams = make_chargeback_accept_params(),
     ok           = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, AcceptParams, Client),
     [
-        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted())))
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
     ]            = next_event(InvoiceID, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted()))),
+        ?payment_ev(PaymentID, ?payment_status_changed(?charged_back()))
     ]            = next_event(InvoiceID, Client).
 
 -spec accept_payment_chargeback_hold_funds(config()) -> _ | no_return().
@@ -1850,8 +1891,46 @@ accept_payment_chargeback_hold_funds(C) ->
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
     ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_)))
+    ]            = next_event(InvoiceID, Client),
     AcceptParams = make_chargeback_accept_params(),
     ok           = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, AcceptParams, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted()))),
+        ?payment_ev(PaymentID, ?payment_status_changed(?charged_back()))
+    ]            = next_event(InvoiceID, Client).
+
+-spec accept_partial_payment_chargeback_hold_funds(config()) -> _ | no_return().
+
+accept_partial_payment_chargeback_hold_funds(C) ->
+    Client       = cfg(client, C),
+    PartyClient  = cfg(party_client, C),
+    ShopID       = hg_ct_helper:create_battle_ready_shop(?cat(2), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
+    InvoiceID    = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentID    = process_payment(InvoiceID, make_payment_params(), Client),
+    PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
+    InvoiceID1   = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentID1   = process_payment(InvoiceID1, make_payment_params(), Client),
+    PaymentID1   = await_payment_capture(InvoiceID1, PaymentID1, Client),
+    CBParams     = make_chargeback_params(hold_funds),
+    CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
+    CBID         = CB#domain_InvoicePaymentChargeback.id,
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(CF0)))
+    ]            = next_event(InvoiceID, Client),
+    AcceptParams = make_chargeback_accept_params(?cash(20000, <<"RUB">>)),
+    ok           = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, AcceptParams, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(CF1)))
+    ]            = next_event(InvoiceID, Client),
+    ?assertNotEqual(CF0, CF1),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted())))
     ]            = next_event(InvoiceID, Client).
@@ -1871,6 +1950,9 @@ reopen_payment_chargeback(C) ->
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
     ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_CF0)))
+    ]            = next_event(InvoiceID, Client),
     ReopenParams = make_chargeback_reopen_params(),
     ?invalid_chargeback_status(_) =
         hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
@@ -1880,9 +1962,160 @@ reopen_payment_chargeback(C) ->
     ]            = next_event(InvoiceID, Client),
     ok = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
     [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed([])))
+    ]            = next_event(InvoiceID, Client),
+    [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
     ]            = next_event(InvoiceID, Client).
 
+-spec reopen_reject_payment_chargeback(config()) -> _ | no_return().
+
+reopen_reject_payment_chargeback(C) ->
+    Client       = cfg(client, C),
+    PartyClient  = cfg(party_client, C),
+    ShopID       = hg_ct_helper:create_battle_ready_shop(?cat(2), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
+    InvoiceID    = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentID    = process_payment(InvoiceID, make_payment_params(), Client),
+    PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
+    CBParams     = make_chargeback_params(no_hold),
+    CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
+    CBID         = CB#domain_InvoicePaymentChargeback.id,
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_CF0)))
+    ]            = next_event(InvoiceID, Client),
+    ReopenParams = make_chargeback_reopen_params(),
+    ?invalid_chargeback_status(_) =
+        hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
+    ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
+    ]            = next_event(InvoiceID, Client),
+    ok = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed([])))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
+    ]            = next_event(InvoiceID, Client),
+    ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
+    ]            = next_event(InvoiceID, Client).
+
+-spec reopen_accept_payment_chargeback(config()) -> _ | no_return().
+
+reopen_accept_payment_chargeback(C) ->
+    Client       = cfg(client, C),
+    PartyClient  = cfg(party_client, C),
+    ShopID       = hg_ct_helper:create_battle_ready_shop(?cat(2), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
+    InvoiceID    = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentID    = process_payment(InvoiceID, make_payment_params(), Client),
+    PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
+    InvoiceID1   = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentID1   = process_payment(InvoiceID1, make_payment_params(), Client),
+    PaymentID1   = await_payment_capture(InvoiceID1, PaymentID1, Client),
+    CBParams     = make_chargeback_params(no_hold),
+    CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
+    CBID         = CB#domain_InvoicePaymentChargeback.id,
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_CF0)))
+    ]            = next_event(InvoiceID, Client),
+    ReopenParams = make_chargeback_reopen_params(),
+    ?invalid_chargeback_status(_) =
+        hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
+    ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
+    ]            = next_event(InvoiceID, Client),
+    ok = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed([])))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
+    ]            = next_event(InvoiceID, Client),
+    AcceptParams = make_chargeback_accept_params(),
+    ok           = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, AcceptParams, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted())))
+    ]            = next_event(InvoiceID, Client).
+
+-spec fail_reopen_after_arbitration_payment_chargeback(config()) -> _ | no_return().
+
+fail_reopen_after_arbitration_payment_chargeback(C) ->
+    Client       = cfg(client, C),
+    PartyClient  = cfg(party_client, C),
+    ShopID       = hg_ct_helper:create_battle_ready_shop(?cat(2), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
+    InvoiceID    = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentID    = process_payment(InvoiceID, make_payment_params(), Client),
+    PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
+    CBParams     = make_chargeback_params(no_hold),
+    CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
+    CBID         = CB#domain_InvoicePaymentChargeback.id,
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_CF0)))
+    ]            = next_event(InvoiceID, Client),
+    ReopenParams = make_chargeback_reopen_params(),
+    ?invalid_chargeback_status(_) =
+        hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
+    ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
+    ]            = next_event(InvoiceID, Client),
+    ok = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed([])))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
+    ]            = next_event(InvoiceID, Client),
+    ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
+    ]            = next_event(InvoiceID, Client),
+    ok = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed([])))
+    ]            = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
+    ]            = next_event(InvoiceID, Client),
+    ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
+    ]            = next_event(InvoiceID, Client),
+    ?chargeback_cannot_reopen_arbitration()
+                 = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client).
 %% CHARGEBACKS WIP
 
 -spec invalid_refund_party_status(config()) -> _ | no_return().
@@ -2502,10 +2735,16 @@ get_cashflow_rounding_fixture(Revision) ->
                         cash_flow = {value, [
                             ?cfpost(
                                 {merchant, settlement},
-                                {provider, settlement},
+                                {system, settlement},
                                 ?share(1, 1, operation_amount)
                             )
-                        ]}
+                        ]},
+                        partial_chargebacks = #domain_PartialChargebackProvisionTerms{
+                            cash_limit = {value, ?cashrng(
+                                {inclusive, ?cash(        10, <<"RUB">>)},
+                                {exclusive, ?cash(1000000000, <<"RUB">>)}
+                            )}
+                        }
                     }
                 }
             }
@@ -3116,6 +3355,9 @@ set_payment_context(Context, Params = #payproc_InvoicePaymentParams{}) ->
 
 make_chargeback_accept_params() ->
     #payproc_InvoicePaymentChargebackAcceptParams{}.
+
+make_chargeback_accept_params(Cash) ->
+    #payproc_InvoicePaymentChargebackAcceptParams{cash = Cash}.
 
 make_chargeback_reopen_params() ->
     #payproc_InvoicePaymentChargebackReopenParams{}.
@@ -3742,7 +3984,13 @@ construct_domain_fixture() ->
                         ?fixed(5000, <<"RUB">>),
                         <<"Chargeback fee">>
                     )
-                ]}
+                ]},
+                partial_chargebacks = #domain_PartialChargebackServiceTerms{
+                    cash_limit = {value, ?cashrng(
+                        {inclusive, ?cash(  1000, <<"RUB">>)},
+                        {exclusive, ?cash(400000, <<"RUB">>)}
+                    )}
+                }
             }
         }
     },
@@ -4102,10 +4350,17 @@ construct_domain_fixture() ->
                         cash_flow = {value, [
                             ?cfpost(
                                 {merchant, settlement},
-                                {provider, settlement},
+                                {system, settlement},
                                 ?share(1, 1, operation_amount)
                             )
-                        ]}
+                        ]},
+                        partial_chargebacks = #domain_PartialChargebackProvisionTerms{
+                            cash_limit = {value, ?cashrng(
+                                {inclusive, ?cash(        10, <<"RUB">>)},
+                                {exclusive, ?cash(1000000000, <<"RUB">>)}
+                            )}
+                        }
+
                     }
                 },
                 recurrent_paytool_terms = #domain_RecurrentPaytoolsProvisionTerms{
@@ -4190,10 +4445,17 @@ construct_domain_fixture() ->
                         cash_flow = {value, [
                             ?cfpost(
                                 {merchant, settlement},
-                                {provider, settlement},
+                                {system, settlement},
                                 ?share(1, 1, operation_amount)
                             )
-                        ]}
+                        ]},
+                        partial_chargebacks = #domain_PartialChargebackProvisionTerms{
+                            cash_limit = {value, ?cashrng(
+                                {inclusive, ?cash(        10, <<"RUB">>)},
+                                {exclusive, ?cash(1000000000, <<"RUB">>)}
+                            )}
+                        }
+
                     }
                 }
             }
@@ -4531,10 +4793,16 @@ payments_w_bank_card_issuer_conditions_fixture(Revision) ->
                         cash_flow = {value, [
                             ?cfpost(
                                 {merchant, settlement},
-                                {provider, settlement},
+                                {system, settlement},
                                 ?share(1, 1, operation_amount)
                             )
-                        ]}
+                        ]},
+                        partial_chargebacks = #domain_PartialChargebackProvisionTerms{
+                            cash_limit = {value, ?cashrng(
+                                {inclusive, ?cash(        10, <<"RUB">>)},
+                                {exclusive, ?cash(1000000000, <<"RUB">>)}
+                            )}
+                        }
                     }
                 }
             }
@@ -4766,10 +5034,16 @@ construct_term_set_for_partial_capture_provider_permit(Revision) ->
                         cash_flow = {value, [
                             ?cfpost(
                                 {merchant, settlement},
-                                {provider, settlement},
+                                {system, settlement},
                                 ?share(1, 1, operation_amount)
                             )
-                        ]}
+                        ]},
+                        partial_chargebacks = #domain_PartialChargebackProvisionTerms{
+                            cash_limit = {value, ?cashrng(
+                                {inclusive, ?cash(        10, <<"RUB">>)},
+                                {exclusive, ?cash(1000000000, <<"RUB">>)}
+                            )}
+                        }
                     },
                     holds = #domain_PaymentHoldsProvisionTerms{
                         lifetime = {decisions, [
