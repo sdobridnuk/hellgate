@@ -953,6 +953,17 @@ assert_capture_cost_currency(?cash(_, PassedSymCode), #domain_InvoicePayment{cos
         passed_currency = PassedSymCode
     }).
 
+validate_processing_deadline(#domain_InvoicePayment{processing_deadline = Deadline}) ->
+    case hg_invoice_utils:check_deadline(Deadline) of
+        ok ->
+            ok;
+        {error, _} ->
+            {failure, payproc_errors:construct('PaymentFailure',
+                {authorization_failed, {processing_deadline_reached, #payprocerr_GeneralFailure{}}}
+            )}
+    end.
+
+
 assert_capture_cart(_Cost, undefined) ->
     ok;
 assert_capture_cart(Cost, Cart) ->
@@ -1572,10 +1583,15 @@ process_session(Action, St) ->
     process_session(Session, Action, St).
 
 process_session(undefined, Action, St0) ->
-    Events = start_session(get_target(St0)),
-    St1 = collapse_changes(Events, St0),
-    Session = get_activity_session(St1),
-    process_session(Session, Action, Events, St1);
+    case validate_processing_deadline(get_payment(St0)) of
+        ok ->
+            Events = start_session(get_target(St0)),
+            St1 = collapse_changes(Events, St0),
+            Session = get_activity_session(St1),
+            process_session(Session, Action, Events, St1);
+        Failure ->
+            {done, {[?payment_status_changed(?failed(Failure))], complex_action_I_dunno}}
+    end;
 process_session(Session, Action, St) ->
     process_session(Session, Action, [], St).
 
@@ -1591,19 +1607,9 @@ process_session(suspended, Session, Action, Events, St) ->
 
 -spec process_active_session(action(), session(), events(), st()) -> machine_result().
 process_active_session(Action, Session, Events, St) ->
-    Payment = get_payment(St),
-    Deadline = get_processing_deadline(Payment),
-    case hg_invoice_utils:check_deadline(Deadline) of
-        ok ->
-            {ok, ProxyResult} = repair_session(St),
-            Result = handle_proxy_result(ProxyResult, Action, Events, Session),
-            finish_session_processing(Result, St);
-        {error, deadline_reached} ->
-            Failure = {failure, payproc_errors:construct('PaymentFailure',
-                {authorization_failed, {processing_deadline_reached, #payprocerr_GeneralFailure{}}}
-            )},
-            process_failure(get_activity(St), Events, Action, Failure, St)
-    end.
+    {ok, ProxyResult} = repair_session(St),
+    Result = handle_proxy_result(ProxyResult, Action, Events, Session),
+    finish_session_processing(Result, St).
 
 repair_session(St = #st{repair_scenario = Scenario}) ->
     case hg_invoice_repair:check_for_action(fail_session, Scenario) of
