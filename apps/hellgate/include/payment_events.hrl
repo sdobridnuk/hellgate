@@ -193,6 +193,38 @@
     }
 ).
 
+-define(chargeback_changed(Cash),
+    {invoice_payment_chargeback_changed,
+        #payproc_InvoicePaymentChargebackChanged{cash = Cash}
+    }
+).
+
+-define(chargeback_changed(Cash, HoldFunds),
+    {invoice_payment_chargeback_changed,
+        #payproc_InvoicePaymentChargebackChanged{
+            cash       = Cash,
+            hold_funds = HoldFunds
+        }
+    }
+).
+
+-define(chargeback_changed(Cash, HoldFunds, Status),
+    {invoice_payment_chargeback_changed,
+        #payproc_InvoicePaymentChargebackChanged{
+            cash          = Cash,
+            hold_funds    = HoldFunds,
+            target_status = Status
+        }
+    }
+).
+
+-define(chargeback_stage_chargeback(),
+    {chargeback,      #domain_InvoicePaymentChargebackStageChargeback{}}).
+-define(chargeback_stage_pre_arbitration(),
+    {pre_arbitration, #domain_InvoicePaymentChargebackStagePreArbitration{}}).
+-define(chargeback_stage_arbitration(),
+    {arbitration,     #domain_InvoicePaymentChargebackStageArbitration{}}).
+
 -define(chargeback_status_pending(),
     {pending,  #domain_InvoicePaymentChargebackPending{}}).
 -define(chargeback_status_accepted(),
@@ -203,15 +235,6 @@
     {cancelled, #domain_InvoicePaymentChargebackCancelled{}}).
 -define(chargeback_status_failed(Failure),
     {failed, #domain_InvoicePaymentChargebackFailed{failure = Failure}}).
-
-% -define(chargeback_status_pending(At),
-%     {pending,  #domain_InvoicePaymentChargebackPending{at = At}}).
-% -define(chargeback_status_accepted(At),
-%     {accepted, #domain_InvoicePaymentChargebackAccepted{at = At}}).
-% -define(chargeback_status_rejected(At),
-%     {rejected, #domain_InvoicePaymentChargebackRejected{at = At}}).
-% -define(chargeback_status_cancelled(At),
-%     {cancelled, #domain_InvoicePaymentChargebackCancelled{at = At}}).
 
 %% Refunds
 

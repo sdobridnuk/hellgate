@@ -805,6 +805,11 @@ handle_payment_result({done, {Changes1, Action}}, PaymentID, PaymentSession, #st
                 changes => wrap_payment_changes(PaymentID, Changes1),
                 state   => St
             };
+        ?charged_back() ->
+            #{
+                changes => wrap_payment_changes(PaymentID, Changes1),
+                state   => St
+            };
         ?failed(_) ->
             #{
                 changes => wrap_payment_changes(PaymentID, Changes1),
