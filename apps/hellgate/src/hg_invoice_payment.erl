@@ -1176,6 +1176,8 @@ accept_chargeback(ID, Params, St0, Opts) ->
               ?chargeback_stage_pre_arbitration() -> ok;
               _ -> _ = rollback_chargeback_cashflow(ChargebackSt, CashFlowPlan, St)
             end,
+            ct:print("WHY"),
+            ct:print("Chargeback\n~p", [Chargeback]),
             Action    = hg_machine_action:instant(),
             HoldFunds = undefined,
             Change    = ?chargeback_changed(Cash, HoldFunds, Status),
@@ -1390,7 +1392,9 @@ collect_chargeback_cashflow(_, _, _, _, _, _) ->
     [].
 
 prepare_chargeback_cashflow(ChargebackSt, CashFlowPlan, St) ->
+    ct:print("PREPARE CB CF\n~p", [CashFlowPlan]),
     PlanID       = construct_chargeback_plan_id(ChargebackSt, St),
+    ct:print("PREPARE CB ID\n~p", [PlanID]),
     % CashFlowPlan = get_chargeback_cashflow_plan(ChargebackSt),
     hg_accounting:plan(PlanID, CashFlowPlan).
 
@@ -1408,14 +1412,15 @@ construct_chargeback_plan_id(ChargebackSt, St) ->
     Chargeback   = get_chargeback(ChargebackSt),
     ChargebackID = get_chargeback_id(Chargeback),
     {Stage, _}   = get_chargeback_stage(Chargeback),
-    Status       = case get_chargeback_target_status(ChargebackSt) of
-        {TargetStatus, _} -> TargetStatus;
-        undefined         -> initial
+    Status       = case {get_chargeback_target_status(ChargebackSt), Stage} of
+        {{TargetStatus, _}, Stage} -> TargetStatus;
+        {undefined, chargeback}    -> initial;
+        {undefined, Stage}         -> pending
     end,
     hg_utils:construct_complex_id([
         get_invoice_id(get_invoice(get_opts(St))),
         get_payment_id(get_payment(St)),
-        {chargeback_session, ChargebackID},
+        {chargeback, ChargebackID},
         genlib:to_binary(Stage),
         genlib:to_binary(Status)
     ]).
@@ -2072,6 +2077,7 @@ update_chargeback_cashflow(ID, Action, St) ->
         _Other        -> get_chargeback_hold_funds(Chargeback)
     end,
     FinalCashFlow      = make_chargeback_cashflow(Chargeback, Payment, Stage, HoldFunds, Revision, St, Opts),
+    ct:print("UPDATE CF FINAL CF\n~p", [FinalCashFlow]),
     case FinalCashFlow of
         [] ->
             CFEvent = ?chargeback_cash_flow_changed([]),
@@ -2289,31 +2295,39 @@ process_result({chargeback_accounter_finalise, ID}, Action, St) ->
     ChargebackSt       = try_get_chargeback_state(ID, St),
     TargetStatus       = get_chargeback_target_status(ChargebackSt),
     ct:print("CB ACCOUNTER FINALISE TARGET STATUS\n~p", [TargetStatus]),
-    CashFlow = get_chargeback_cashflow(ChargebackSt),
-    case CashFlow of
-        [] -> ok;
-        CashFlow -> _ = commit_chargeback_cashflow(ChargebackSt, {1, CashFlow}, St)
-    end,
-    StatusEvent        = [
-        ?chargeback_ev(ID, ?chargeback_status_changed(TargetStatus))
-    ],
-    PaymentStatusEvent = case TargetStatus of
-        ?chargeback_status_accepted() ->
-            ChargebackCash = get_chargeback_cash(get_chargeback(ChargebackSt)),
-                case get_remaining_payment_amount(ChargebackCash, St) of
-                    ?cash(Amount, _) when Amount =:= 0 ->
-                        ct:print("CB ACCOUNTER FINALISE AMOUNT\n~p", [Amount]),
-                        [
-                            ?payment_status_changed(?charged_back())
-                        ];
-                    ?cash(Amount, _) when Amount > 0 ->
-                        ct:print("CB ACCOUNTER FINALISE AMOUNT\n~p", [Amount]),
-                        []
-                end;
-        _NotChargedBack ->
-            []
-    end,
-    {done, {StatusEvent ++ PaymentStatusEvent, Action}};
+    case TargetStatus of
+        ?chargeback_status_pending() ->
+            StatusEvent = [
+                ?chargeback_ev(ID, ?chargeback_status_changed(TargetStatus))
+            ],
+            {done, {StatusEvent, Action}};
+        _NotPending ->
+            CashFlow = get_chargeback_cashflow(ChargebackSt),
+            case CashFlow of
+                [] -> ok;
+                CashFlow -> _ = commit_chargeback_cashflow(ChargebackSt, {1, CashFlow}, St)
+            end,
+            StatusEvent        = [
+                ?chargeback_ev(ID, ?chargeback_status_changed(TargetStatus))
+            ],
+            PaymentStatusEvent = case TargetStatus of
+                ?chargeback_status_accepted() ->
+                    ChargebackCash = get_chargeback_cash(get_chargeback(ChargebackSt)),
+                        case get_remaining_payment_amount(ChargebackCash, St) of
+                            ?cash(Amount, _) when Amount =:= 0 ->
+                                ct:print("CB ACCOUNTER FINALISE AMOUNT\n~p", [Amount]),
+                                [
+                                    ?payment_status_changed(?charged_back())
+                                ];
+                            ?cash(Amount, _) when Amount > 0 ->
+                                ct:print("CB ACCOUNTER FINALISE AMOUNT\n~p", [Amount]),
+                                []
+                        end;
+                _NotChargedBack ->
+                    []
+            end,
+            {done, {StatusEvent ++ PaymentStatusEvent, Action}}
+    end;
 
 process_result({refund_accounter, ID}, Action, St) ->
     RefundSt = try_get_refund_state(ID, St),
@@ -3083,10 +3097,14 @@ save_retry_attempt(Target, #st{retry_attempts = Attempts} = St) ->
 
 merge_chargeback_change(?chargeback_created(Chargeback), _ChargebackSt) ->
     #chargeback_st{chargeback = Chargeback};
-merge_chargeback_change(?chargeback_changed(Cash, HoldFunds, TargetStatus), ChargebackSt) ->
+merge_chargeback_change(?chargeback_changed(Cash, HoldFunds, TargetStatus) = Changes, ChargebackSt) ->
+    ct:print("MERGE CB CHANGE CHANGES\n~p", [Changes]),
     Chargeback0 = get_chargeback(ChargebackSt),
+    ct:print("MERGE CB CHANGE PRE CHANGES\n~p", [Changes]),
     Chargeback1 = set_chargeback_cash(Cash, Chargeback0),
+    ct:print("MERGE CB CHANGE SET PRE HOLD FUNDS\n~p", [Chargeback1]),
     Chargeback2 = set_chargeback_hold_funds(HoldFunds, Chargeback1),
+    ct:print("MERGE CB CHANGE SET HOLD FUNDS\n~p", [Chargeback2]),
     Chargeback3 = case TargetStatus of
         ?chargeback_status_pending() -> set_chargeback_next_stage(Chargeback2);
         _NotPending                  -> Chargeback2
