@@ -379,7 +379,6 @@ validate_customer_shop(#payproc_Customer{shop_id = ShopID}, #domain_Shop{id = Sh
 validate_customer_shop(_, _) ->
     throw_invalid_request(<<"Invalid customer">>).
 
-
 get_active_binding(#payproc_Customer{bindings = Bindings, active_binding_id = BindingID}) ->
     case lists:keysearch(BindingID, #payproc_CustomerBinding.id, Bindings) of
         {value, ActiveBinding} ->
@@ -441,19 +440,19 @@ construct_payment(
     },
     ok = validate_recurrent_intention(RecurrentValidationVarset, MakeRecurrent),
     #domain_InvoicePayment{
-        id               = PaymentID,
-        created_at       = CreatedAt,
-        owner_id         = Party#domain_Party.id,
-        shop_id          = Shop#domain_Shop.id,
-        domain_revision  = Revision,
-        party_revision   = Party#domain_Party.revision,
-        status           = ?pending(),
-        cost             = Cost,
-        payer            = Payer,
-        flow             = Flow,
-        make_recurrent   = MakeRecurrent,
-        context          = Context,
-        external_id      = ExternalID,
+        id                  = PaymentID,
+        created_at          = CreatedAt,
+        owner_id            = Party#domain_Party.id,
+        shop_id             = Shop#domain_Shop.id,
+        domain_revision     = Revision,
+        party_revision      = Party#domain_Party.revision,
+        status              = ?pending(),
+        cost                = Cost,
+        payer               = Payer,
+        flow                = Flow,
+        make_recurrent      = MakeRecurrent,
+        context             = Context,
+        external_id         = ExternalID,
         processing_deadline = Deadline
     }.
 
@@ -955,7 +954,7 @@ validate_processing_deadline(#domain_InvoicePayment{processing_deadline = Deadli
     case hg_invoice_utils:check_deadline(Deadline) of
         ok ->
             ok;
-        {error, _} ->
+        {error, deadline_reached} ->
             {failure, payproc_errors:construct('PaymentFailure',
                 {authorization_failed, {processing_deadline_reached, #payprocerr_GeneralFailure{}}}
             )}
