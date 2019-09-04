@@ -1385,7 +1385,7 @@ collect_chargeback_cashflow(
     MerchantCashflow = reduce_selector(merchant_chargeback_fees     , MerchantCashflowSelector, VS, Revision),
     MerchantCashflow;
 collect_chargeback_cashflow(
-    _ServiceTerms,
+    #domain_PaymentChargebackServiceTerms{fees        = MerchantCashflowSelector},
     #domain_PaymentChargebackProvisionTerms{cash_flow = ProviderCashflowSelector},
     _TargetStatus,
     _Stage,
@@ -1394,8 +1394,9 @@ collect_chargeback_cashflow(
     Revision
 ) ->
     ct:print("COLLECT CF HOLD"),
+    MerchantCashflow = reduce_selector(merchant_chargeback_fees     , MerchantCashflowSelector, VS, Revision),
     ProviderCashflow = reduce_selector(provider_chargeback_cash_flow, ProviderCashflowSelector, VS, Revision),
-    ProviderCashflow;
+    MerchantCashflow ++ ProviderCashflow;
 collect_chargeback_cashflow(
     #domain_PaymentChargebackServiceTerms{fees = MerchantCashflowSelector},
     _ProvisionTerms,
