@@ -1388,7 +1388,7 @@ collect_chargeback_cashflow(
     #domain_PaymentChargebackServiceTerms{fees        = MerchantCashflowSelector},
     #domain_PaymentChargebackProvisionTerms{cash_flow = ProviderCashflowSelector},
     _TargetStatus,
-    _Stage,
+    _Stage = ?chargeback_stage_chargeback(),
     _HoldFunds = true,
     VS,
     Revision
@@ -1397,6 +1397,18 @@ collect_chargeback_cashflow(
     MerchantCashflow = reduce_selector(merchant_chargeback_fees     , MerchantCashflowSelector, VS, Revision),
     ProviderCashflow = reduce_selector(provider_chargeback_cash_flow, ProviderCashflowSelector, VS, Revision),
     MerchantCashflow ++ ProviderCashflow;
+collect_chargeback_cashflow(
+    _MerchantTerms,
+    #domain_PaymentChargebackProvisionTerms{cash_flow = ProviderCashflowSelector},
+    _TargetStatus,
+    _Stage,
+    _HoldFunds = true,
+    VS,
+    Revision
+) ->
+    ct:print("COLLECT CF HOLD AFTER REOPEN"),
+    ProviderCashflow = reduce_selector(provider_chargeback_cash_flow, ProviderCashflowSelector, VS, Revision),
+    ProviderCashflow;
 collect_chargeback_cashflow(
     #domain_PaymentChargebackServiceTerms{fees = MerchantCashflowSelector},
     _ProvisionTerms,
