@@ -36,6 +36,7 @@
 
 -export([payment_start_idempotency/1]).
 -export([payment_success/1]).
+-export([processing_deadline_reached_test/1]).
 -export([payment_success_empty_cvv/1]).
 -export([payment_success_additional_info/1]).
 -export([payment_w_terminal_success/1]).
@@ -195,6 +196,7 @@ groups() ->
 
             payment_start_idempotency,
             payment_success,
+            processing_deadline_reached_test,
             payment_success_empty_cvv,
             payment_success_additional_info,
             payment_w_terminal_success,
@@ -797,6 +799,27 @@ payment_success(C) ->
     ) = hg_client_invoicing:get(InvoiceID, Client),
     ?payment_w_status(PaymentID, ?captured()) = Payment,
     ?payment_w_context(Context) = Payment.
+
+-spec processing_deadline_reached_test(config()) -> test_return().
+
+processing_deadline_reached_test(C) ->
+    Client = cfg(client, C),
+    InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(10), 42000, C),
+    Context = #'Content'{
+        type = <<"application/x-erlang-binary">>,
+        data = erlang:term_to_binary({you, 643, "not", [<<"welcome">>, here]})
+    },
+    PaymentParams0 = set_payment_context(Context, make_payment_params()),
+    Deadline = hg_datetime:format_now(),
+    PaymentParams = PaymentParams0#payproc_InvoicePaymentParams{processing_deadline = Deadline},
+    PaymentID = start_payment(InvoiceID, PaymentParams, Client),
+    PaymentID = await_sessions_restarts(PaymentID, ?processed(), InvoiceID, Client, 0),
+    [?payment_ev(PaymentID, ?payment_status_changed(?failed({failure, Failure})))] = next_event(InvoiceID, Client),
+    ok = payproc_errors:match(
+        'PaymentFailure',
+        Failure,
+        fun({authorization_failed, {processing_deadline_reached, _}}) -> ok end
+    ).
 
 -spec payment_success_empty_cvv(config()) -> test_return().
 
