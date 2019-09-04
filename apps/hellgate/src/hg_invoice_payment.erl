@@ -1587,7 +1587,7 @@ process_session(undefined, Action, St0) ->
             Session = get_activity_session(St1),
             process_session(Session, Action, Events, St1);
         Failure ->
-            {done, {[?payment_status_changed(?failed(Failure))], complex_action_I_dunno}}
+            process_failure(get_activity(St0), [], Action, Failure, St0)
     end;
 process_session(Session, Action, St) ->
     process_session(Session, Action, [], St).
