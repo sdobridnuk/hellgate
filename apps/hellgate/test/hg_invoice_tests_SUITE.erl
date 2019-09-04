@@ -87,6 +87,7 @@
 -export([reopen_reject_payment_chargeback_hold_funds/1]).
 -export([reopen_accept_payment_chargeback_hold_funds/1]).
 -export([fail_reopen_after_arbitration_payment_chargeback/1]).
+-export([cancel_payment_chargeback_after_reopen/1]).
 
 -export([invalid_refund_party_status/1]).
 -export([invalid_refund_shop_status/1]).
@@ -256,7 +257,8 @@ groups() ->
             reopen_accept_payment_chargeback,
             reopen_reject_payment_chargeback_hold_funds,
             reopen_accept_payment_chargeback_hold_funds,
-            fail_reopen_after_arbitration_payment_chargeback
+            fail_reopen_after_arbitration_payment_chargeback,
+            cancel_payment_chargeback_after_reopen
         ]},
 
         {refunds, [], [
@@ -1699,7 +1701,6 @@ terminal_cashflow_overrides_provider(C) ->
         accounts = #{?cur(<<"RUB">>) := #domain_ExternalAccount{outcome = AssistAccountID}}
     } = hg_domain:get(hg_domain:head(), {external_account_set, ?eas(2)}).
 
-%%
 
 %%  CHARGEBACKS WIP
 -spec create_payment_chargeback(config()) -> _ | no_return().
@@ -1837,10 +1838,10 @@ reject_payment_chargeback_hold_funds(C) ->
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(CF1)))
     ]            = next_event(InvoiceID, Client),
-    ?assertNotEqual(CF0, CF1),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
-    ]            = next_event(InvoiceID, Client).
+    ]            = next_event(InvoiceID, Client),
+    ?assertNotEqual(CF0, CF1).
 
 -spec accept_payment_chargeback(config()) -> _ | no_return().
 
@@ -1936,10 +1937,10 @@ accept_partial_payment_chargeback_hold_funds(C) ->
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(CF1)))
     ]            = next_event(InvoiceID, Client),
-    ?assertNotEqual(CF0, CF1),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted())))
-    ]            = next_event(InvoiceID, Client).
+    ]            = next_event(InvoiceID, Client),
+    ?assertNotEqual(CF0, CF1).
 
 -spec reopen_payment_chargeback(config()) -> _ | no_return().
 
@@ -2229,6 +2230,52 @@ fail_reopen_after_arbitration_payment_chargeback(C) ->
     ]            = next_event(InvoiceID, Client),
     ?chargeback_cannot_reopen_arbitration()
                  = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client).
+
+-spec cancel_payment_chargeback_after_reopen(config()) -> _ | no_return().
+
+cancel_payment_chargeback_after_reopen(C) ->
+    Client      = cfg(client, C),
+    PartyClient = cfg(party_client, C),
+    ShopID      = hg_ct_helper:create_battle_ready_shop(?cat(2), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
+    InvoiceID   = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentID   = process_payment(InvoiceID, make_payment_params(), Client),
+    PaymentID   = await_payment_capture(InvoiceID, PaymentID, Client),
+    CBParams    = make_chargeback_params(no_hold),
+    CB          = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
+    CBID        = CB#domain_InvoicePaymentChargeback.id,
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
+    ]           = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(CF0)))
+    ]           = next_event(InvoiceID, Client),
+    ok          = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
+    ]           = next_event(InvoiceID, Client),
+    ReopenParams = make_chargeback_reopen_params(),
+    ok          = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
+    ]           = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+    ]           = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
+    ]           = next_event(InvoiceID, Client),
+    ok          = hg_client_invoicing:cancel_chargeback(InvoiceID, PaymentID, CBID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
+    ]           = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(CF1)))
+    ]           = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
+    ]           = next_event(InvoiceID, Client),
+    ?assertEqual(CF1, hg_cashflow:revert(CF0)).
+
 %% CHARGEBACKS WIP
 
 -spec invalid_refund_party_status(config()) -> _ | no_return().
