@@ -652,14 +652,14 @@ log_misconfigurations(RejectContext) ->
 
 maybe_log_misconfiguration({PRef, {'Misconfiguration', Reason}}) ->
     _ = logger:log(
-        warn,
+        warning,
         "The provider with ref ~p has been misconfigured: ~p",
         [Ref, Reason],
         logger:get_process_metadata()),
     ok;
 maybe_log_misconfiguration({PRef, TRef, {'Misconfiguration', Reason}}) ->
     _ = logger:log(
-        warn,
+        warning,
         "The route with provider ref ~p and terminal ref ~p has been misconfigured: ~p",
         [PRef, TRef, Reason],
         logger:get_process_metadata()),
