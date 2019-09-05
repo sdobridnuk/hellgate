@@ -102,7 +102,9 @@ select_providers(Predestination, PaymentInstitution, VS, Revision, RejectContext
                 {[P | Prvs], Reasons}
              catch
                 ?rejected(Reason) ->
-                    {Prvs, [{ProviderRef, Reason} | Reasons]}
+                    {Prvs, [{ProviderRef, Reason} | Reasons]};
+                error:{misconfiguration, Reason} ->
+                    {Prvs, [{ProviderRef, {'Misconfiguration', Reason}} | Reasons]}
             end
         end,
         {[], []},
@@ -319,7 +321,9 @@ collect_routes_for_provider(Predestination, {ProviderRef, Provider, FailRate}, V
                 {[{ProviderRef, {TerminalRef, Terminal, Priority}, FailRate} | Accepted], Rejected}
             catch
                 ?rejected(Reason) ->
-                    {Accepted, [{ProviderRef, TerminalRef, Reason} | Rejected]}
+                    {Accepted, [{ProviderRef, TerminalRef, Reason} | Rejected]};
+                error:{misconfiguration, Reason} ->
+                    {Prvs, [{ProviderRef, {'Misconfiguration', Reason}} | Reasons]}
             end
         end,
         {[], []},
