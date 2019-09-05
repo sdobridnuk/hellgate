@@ -198,7 +198,7 @@ fatal_risk_score_for_route_found(_C) ->
             {?prv(2), {'PaymentsProvisionTerms', category}},
             {?prv(1), {'PaymentsProvisionTerms', payment_tool}}
         ],
-        rejected_terminals := []
+        rejected_routes := []
     }}}} = Result0,
 
     VS1 = VS0#{
@@ -220,7 +220,7 @@ fatal_risk_score_for_route_found(_C) ->
             {?prv(2), {'PaymentsProvisionTerms', category}},
             {?prv(1), {'PaymentsProvisionTerms', payment_tool}}
         ],
-        rejected_terminals := [{?prv(3), ?trm(10), {'Terminal', risk_coverage}}]}
+        rejected_routes := [{?prv(3), ?trm(10), {'Terminal', risk_coverage}}]}
     }}} = Result1,
     hg_context:cleanup(),
     ok.
@@ -268,7 +268,7 @@ no_route_found_for_payment(_C) ->
             {?prv(2), {'PaymentsProvisionTerms', category}},
             {?prv(1), {'PaymentsProvisionTerms', payment_tool}}
         ],
-        rejected_terminals => []
+        rejected_routes => []
     }}}},
 
     Result0 = hg_routing:choose_route(FailRatedRoutes0, RejectContext1, VS0),
