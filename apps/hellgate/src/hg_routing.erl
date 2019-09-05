@@ -32,10 +32,10 @@
 -type reject_context() :: #{
     varset              := hg_selector:varset(),
     rejected_providers  := list(rejected_provider()),
-    rejected_terminals  := list(rejected_terminal())
+    rejected_routes     := list(rejected_route())
 }.
 -type rejected_provider() :: {provider_ref(), Reason :: term()}.
--type rejected_terminal() :: {terminal_ref(), Reason :: term()}.
+-type rejected_route()    :: {provider_ref(), terminal_ref(), Reason :: term()}.
 
 -type provider()     :: dmsl_domain_thrift:'Provider'().
 -type provider_ref() :: dmsl_domain_thrift:'ProviderRef'().
@@ -114,14 +114,14 @@ select_providers(Predestination, PaymentInstitution, VS, Revision, RejectContext
 
 select_routes(Predestination, FailRatedProviders, VS, Revision, RejectContext) ->
     {Accepted, Rejected} = lists:foldl(
-        fun (Provider, {AcceptedTerminals, RejectedTerminals}) ->
+        fun (Provider, {AcceptedTerminals, RejectedRoutes}) ->
             {Accepts, Rejects} = collect_routes_for_provider(Predestination, Provider, VS, Revision),
-            {Accepts ++ AcceptedTerminals, Rejects ++ RejectedTerminals}
+            {Accepts ++ AcceptedTerminals, Rejects ++ RejectedRoutes}
         end,
         {[], []},
         FailRatedProviders
     ),
-    {Accepted, RejectContext#{rejected_terminals => Rejected}}.
+    {Accepted, RejectContext#{rejected_routes => Rejected}}.
 
 do_choose_route(_FailRatedRoutes, #{risk_score := fatal}, RejectContext) ->
     {error, {no_route_found, {risk_score_is_too_high, RejectContext}}};
