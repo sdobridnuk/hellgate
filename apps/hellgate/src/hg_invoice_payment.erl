@@ -644,26 +644,18 @@ choose_routing_predestination(#domain_InvoicePayment{payer = ?payment_resource_p
 % Other payers has predefined routes
 
 log_misconfigurations(RejectContext) ->
-    RejectedProviders  = maps:get(rejected_providers, RejectContext),
-    RejectedRoutes     = maps:get(rejected_routes, RejectContext),
-    Rejects            = RejectedProviders ++ RejectedRoutes,
+    RejectedProviders = maps:get(rejected_providers, RejectContext),
+    RejectedRoutes    = maps:get(rejected_routes, RejectContext),
+    Rejects           = RejectedProviders ++ RejectedRoutes,
     _ = lists:foreach(fun maybe_log_misconfiguration/1, Rejects),
     ok.
 
 maybe_log_misconfiguration({PRef, {'Misconfiguration', Reason}}) ->
-    _ = logger:log(
-        warning,
-        "The provider with ref ~p has been misconfigured: ~p",
-        [PRef, Reason],
-        logger:get_process_metadata()),
-    ok;
+    Text = "The provider with ref ~p has been misconfigured: ~p",
+    _ = logger:warning(Text, [PRef, Reason]);
 maybe_log_misconfiguration({PRef, TRef, {'Misconfiguration', Reason}}) ->
-    _ = logger:log(
-        warning,
-        "The route with provider ref ~p and terminal ref ~p has been misconfigured: ~p",
-        [PRef, TRef, Reason],
-        logger:get_process_metadata()),
-    ok;
+    Text = "The route with provider ref ~p and terminal ref ~p has been misconfigured: ~p",
+    _ = logger:warning(Text, [PRef, TRef, Reason]);
 maybe_log_misconfiguration(_NotMisconfiguration) ->
     ok.
 
