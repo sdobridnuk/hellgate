@@ -677,7 +677,7 @@ log_reject_context(Level, RejectReason, RejectContext) ->
         logger:get_process_metadata()),
     _ = logger:log(
         Level,
-        "No route found, reason = ~p, rejected terminals: ~p",
+        "No route found, reason = ~p, rejected routes: ~p",
         [RejectReason, maps:get(rejected_routes, RejectContext)],
         logger:get_process_metadata()),
     ok.
