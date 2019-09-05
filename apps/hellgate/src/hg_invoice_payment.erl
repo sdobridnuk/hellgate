@@ -647,14 +647,14 @@ log_misconfigurations(RejectContext) ->
     RejectedProviders  = maps:get(rejected_providers, RejectContext),
     RejectedRoutes     = maps:get(rejected_routes, RejectContext),
     Rejects            = RejectedProviders ++ RejectedRoutes,
-    _ = lists:foreach(fun maybe_log_misconfiguration/1, Misconfigurations),
+    _ = lists:foreach(fun maybe_log_misconfiguration/1, Rejects),
     ok.
 
 maybe_log_misconfiguration({PRef, {'Misconfiguration', Reason}}) ->
     _ = logger:log(
         warning,
         "The provider with ref ~p has been misconfigured: ~p",
-        [Ref, Reason],
+        [PRef, Reason],
         logger:get_process_metadata()),
     ok;
 maybe_log_misconfiguration({PRef, TRef, {'Misconfiguration', Reason}}) ->
