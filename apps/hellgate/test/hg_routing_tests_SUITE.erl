@@ -433,8 +433,6 @@ terminal_priority_for_shop(PartyID, ShopID, _C) ->
     hg_routing:choose_route(FailRatedRoutes1, RejectContext1, VS).
 
 %%% Domain config fixtures
-% uncomputable_provider_fixture(Revision) ->
-%     ok.
 
 routing_with_fail_rate_fixture(Revision) ->
     PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
