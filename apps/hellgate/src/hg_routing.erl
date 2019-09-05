@@ -323,7 +323,7 @@ collect_routes_for_provider(Predestination, {ProviderRef, Provider, FailRate}, V
                 ?rejected(Reason) ->
                     {Accepted, [{ProviderRef, TerminalRef, Reason} | Rejected]};
                 error:{misconfiguration, Reason} ->
-                    {Prvs, [{ProviderRef, {'Misconfiguration', Reason}} | Reasons]}
+                    {Accepted, [{ProviderRef, TerminalRef, {'Misconfiguration', Reason}} | Rejected]}
             end
         end,
         {[], []},
