@@ -696,7 +696,6 @@ construct_domain_fixture() ->
             currencies = {value, ?ordset([
                 ?cur(<<"RUB">>),
                 ?cur(<<"USD">>)
-                % ?cur(<<"EUR">>)
             ])},
             categories = {value, ?ordset([
                 ?cat(2),
@@ -1007,7 +1006,6 @@ construct_domain_fixture() ->
                 payment_terms = #domain_PaymentsProvisionTerms{
                     currencies = {value, ?ordset([
                         ?cur(<<"RUB">>)
-                        % ?cur(<<"EUR">>)
                     ])},
                     categories = {value, ?ordset([
                         ?cat(1)
@@ -1158,7 +1156,6 @@ construct_domain_fixture() ->
                 payment_terms = #domain_PaymentsProvisionTerms{
                     currencies = {value, ?ordset([
                         ?cur(<<"RUB">>)
-                        % ?cur(<<"EUR">>)
                     ])},
                     categories = {value, ?ordset([
                         ?cat(2),
@@ -1213,7 +1210,6 @@ construct_domain_fixture() ->
                 terms = #domain_PaymentsProvisionTerms{
                     currencies = {value, ?ordset([
                         ?cur(<<"RUB">>)
-                        % ?cur(<<"EUR">>)
                     ])},
                     categories = {value, ?ordset([
                         ?cat(2)
