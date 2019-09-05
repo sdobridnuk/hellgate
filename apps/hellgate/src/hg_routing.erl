@@ -63,7 +63,7 @@ gather_providers(Predestination, PaymentInstitution, VS, Revision) ->
     RejectContext = #{
         varset => VS,
         rejected_providers => [],
-        rejected_terminals => []
+        rejected_routes => []
     },
     select_providers(Predestination, PaymentInstitution, VS, Revision, RejectContext).
 
