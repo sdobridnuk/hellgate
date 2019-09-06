@@ -98,9 +98,9 @@ end_per_suite(C) ->
 
 all() ->
     [
-        % {group, invalid_customer_params},
-        {group, basic_customer_methods}
-        % {group, not_permitted_methods}
+        {group, invalid_customer_params},
+        {group, basic_customer_methods},
+        {group, not_permitted_methods}
     ].
 
 -spec groups() -> [{group_name(), list(), [test_case_name()]}].
@@ -115,17 +115,17 @@ groups() ->
             invalid_shop_status
         ]},
         {basic_customer_methods, [sequence], [
-            % create_customer,
-            % delete_customer,
-            % start_binding_w_failure,
-            % start_binding_w_suspend,
-            % start_binding_w_suspend_timeout,
-            % start_binding_w_suspend_failure,
-            start_binding_w_suspend_timeout_default
-            % start_binding,
-            % start_binding_w_tds,
-            % start_two_bindings,
-            % start_two_bindings_w_tds
+            create_customer,
+            delete_customer,
+            start_binding_w_failure,
+            start_binding_w_suspend,
+            start_binding_w_suspend_timeout,
+            start_binding_w_suspend_failure,
+            start_binding_w_suspend_timeout_default,
+            start_binding,
+            start_binding_w_tds,
+            start_two_bindings,
+            start_two_bindings_w_tds
         ]},
         {not_permitted_methods, [sequence], [
             create_customer_not_permitted,
