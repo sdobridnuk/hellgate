@@ -328,7 +328,7 @@ validate_route({error, {no_route_found, {Reason, RejectContext}}}, RecPaymentToo
     end,
     _ = LogFun("No route found, reason = ~p, varset: ~p", maps:get(varset, RejectContext)),
     _ = LogFun("No route found, reason = ~p, rejected providers: ~p", maps:get(rejected_providers, RejectContext)),
-    _ = LogFun("No route found, reason = ~p, rejected terminals: ~p", maps:get(rejected_terminals, RejectContext)),
+    _ = LogFun("No route found, reason = ~p, rejected routes: ~p", maps:get(rejected_routes, RejectContext)),
     error({misconfiguration, {'No route found for a recurrent payment tool', RecPaymentTool}}).
 
 start_session() ->
