@@ -26,6 +26,7 @@
 -export([start_binding_w_suspend/1]).
 -export([start_binding_w_suspend_timeout/1]).
 -export([start_binding_w_suspend_failure/1]).
+-export([start_binding_w_suspend_timeout_default/1]).
 -export([start_binding/1]).
 -export([start_binding_w_tds/1]).
 -export([start_two_bindings/1]).
@@ -97,9 +98,9 @@ end_per_suite(C) ->
 
 all() ->
     [
-        {group, invalid_customer_params},
-        {group, basic_customer_methods},
-        {group, not_permitted_methods}
+        % {group, invalid_customer_params},
+        {group, basic_customer_methods}
+        % {group, not_permitted_methods}
     ].
 
 -spec groups() -> [{group_name(), list(), [test_case_name()]}].
@@ -114,16 +115,17 @@ groups() ->
             invalid_shop_status
         ]},
         {basic_customer_methods, [sequence], [
-            create_customer,
-            delete_customer,
-            start_binding_w_failure,
-            start_binding_w_suspend,
-            start_binding_w_suspend_timeout,
-            start_binding_w_suspend_failure,
-            start_binding,
-            start_binding_w_tds,
-            start_two_bindings,
-            start_two_bindings_w_tds
+            % create_customer,
+            % delete_customer,
+            % start_binding_w_failure,
+            % start_binding_w_suspend,
+            % start_binding_w_suspend_timeout,
+            % start_binding_w_suspend_failure,
+            start_binding_w_suspend_timeout_default
+            % start_binding,
+            % start_binding_w_tds,
+            % start_two_bindings,
+            % start_two_bindings_w_tds
         ]},
         {not_permitted_methods, [sequence], [
             create_customer_not_permitted,
@@ -216,6 +218,7 @@ invalid_shop_status(C) ->
 -spec start_binding_w_suspend(config()) -> test_case_result().
 -spec start_binding_w_suspend_timeout(config()) -> test_case_result().
 -spec start_binding_w_suspend_failure(config()) -> test_case_result().
+-spec start_binding_w_suspend_timeout_default(config()) -> test_case_result().
 -spec start_binding(config()) -> test_case_result().
 -spec start_binding_w_tds(config()) -> test_case_result().
 -spec start_two_bindings(config()) -> test_case_result().
@@ -317,6 +320,31 @@ start_binding_w_suspend_timeout(C) ->
         ?customer_status_changed(?customer_ready())
     ],
     _ = await_for_changes(SuccessChanges, CustomerID, Client).
+
+start_binding_w_suspend_timeout_default(C) ->
+    Client = cfg(client, C),
+    PartyID = cfg(party_id, C),
+    ShopID = cfg(shop_id, C),
+    CustomerParams = hg_ct_helper:make_customer_params(PartyID, ShopID, cfg(test_case_name, C)),
+    Customer = hg_client_customer:create(CustomerParams, Client),
+    #payproc_Customer{id = CustomerID} = Customer,
+    CustomerBindingParams =
+        hg_ct_helper:make_customer_binding_params(hg_dummy_provider:make_payment_tool(no_preauth_suspend_default)),
+    CustomerBinding = hg_client_customer:start_binding(CustomerID, CustomerBindingParams, Client),
+    Customer1 = hg_client_customer:get(CustomerID, Client),
+    #payproc_Customer{id = CustomerID, bindings = Bindings} = Customer1,
+    Bindings = [CustomerBinding],
+    [
+        ?customer_created(_, _, _, _, _, _)
+    ] = next_event(CustomerID, Client),
+    [
+        ?customer_binding_changed(ID, ?customer_binding_started(_, _))
+    ] = next_event(CustomerID, Client),
+    OperationFailure = {operation_timeout, #domain_OperationTimeout{}},
+    DefaultFailure = [
+        ?customer_binding_changed(ID, ?customer_binding_status_changed(?customer_binding_failed(OperationFailure)))
+    ],
+    _ = await_for_changes(DefaultFailure, CustomerID, Client).
 
 start_binding_w_suspend_failure(C) ->
     Client = cfg(client, C),
@@ -590,7 +618,7 @@ construct_proxy(ID, Url, Options) ->
 %%
 
 next_event(CustomerID, Client) ->
-    case hg_client_customer:pull_event(CustomerID, 3*10000, Client) of
+    case hg_client_customer:pull_event(CustomerID, 10000, Client) of
         {ok, ?customer_event(Changes)} ->
             Changes;
         Result ->

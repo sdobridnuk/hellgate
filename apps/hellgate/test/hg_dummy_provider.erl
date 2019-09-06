@@ -184,6 +184,9 @@ generate_token(<<"sleeping">>, #prxprv_RecurrentTokenInfo{payment_tool = Recurre
         no_preauth_timeout_failure ->
             Tag = <<"recurrent-suspend-timeout-failure">>,
             token_suspend(Tag, 1, <<"suspended">>, undefined);
+        no_preauth_suspend_default ->
+            Tag = <<"recurrent-suspend-timeout-default">>,
+            token_suspend(Tag, 1, <<"suspended">>, undefined);
         no_preauth ->
             token_sleep(1, <<"finishing">>)
     end;
@@ -225,6 +228,11 @@ token_suspend(<<"recurrent-suspend-timeout-failure">> = Tag, Timeout, State, Use
     OperationFailure = {operation_failure, {failure, Failure}},
     #prxprv_RecurrentTokenProxyResult{
         intent     = ?suspend(Tag, Timeout, UserInteraction, OperationFailure),
+        next_state = State
+    };
+token_suspend(<<"recurrent-suspend-timeout-default">> = Tag, Timeout, State, UserInteraction) ->
+    #prxprv_RecurrentTokenProxyResult{
+        intent     = ?suspend(Tag, Timeout, UserInteraction, undefined),
         next_state = State
     };
 token_suspend(Tag, Timeout, State, UserInteraction) ->
@@ -531,6 +539,8 @@ get_payment_tool_scenario({'bank_card', #domain_BankCard{token = <<"no_preauth_t
     no_preauth_timeout;
 get_payment_tool_scenario({'bank_card', #domain_BankCard{token = <<"no_preauth_timeout_failure">>}}) ->
     no_preauth_timeout_failure;
+get_payment_tool_scenario({'bank_card', #domain_BankCard{token = <<"no_preauth_suspend_default">>}}) ->
+    no_preauth_suspend_default;
 get_payment_tool_scenario({'bank_card', #domain_BankCard{token = <<"empty_cvv">>}}) ->
     empty_cvv;
 get_payment_tool_scenario({'bank_card', #domain_BankCard{token = <<"preauth_3ds:timeout=", Timeout/binary>>}}) ->
@@ -566,6 +576,8 @@ make_payment_tool(no_preauth_timeout) ->
     make_simple_payment_tool(<<"no_preauth_timeout">>, visa);
 make_payment_tool(no_preauth_timeout_failure) ->
     make_simple_payment_tool(<<"no_preauth_timeout_failure">>, visa);
+make_payment_tool(no_preauth_suspend_default) ->
+    make_simple_payment_tool(<<"no_preauth_suspend_default">>, visa);
 make_payment_tool(empty_cvv) ->
     {
         {bank_card, #domain_BankCard{

@@ -553,6 +553,8 @@ merge_session_change(?session_finished(Result), Session) ->
     Session#{status := finished, result => Result};
 merge_session_change(?session_activated(), Session) ->
     Session#{status := active};
+merge_session_change(?session_suspended(Tag, undefined), Session) ->
+    Session#{status := suspended, tag => Tag};
 merge_session_change(?session_suspended(Tag, TimeoutBehaviour), Session) ->
     Session#{status := suspended, tag => Tag, timeout_behaviour := TimeoutBehaviour};
 merge_session_change(?trx_bound(Trx), Session) ->
