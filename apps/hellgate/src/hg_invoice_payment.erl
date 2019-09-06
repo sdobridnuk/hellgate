@@ -143,18 +143,20 @@
 -type tag()                 :: dmsl_proxy_provider_thrift:'CallbackTag'().
 -type callback()            :: dmsl_proxy_provider_thrift:'Callback'().
 -type callback_response()   :: dmsl_proxy_provider_thrift:'CallbackResponse'().
+-type timeout_behaviour()   :: dmsl_timeout_behaviour_thrift:'TimeoutBehaviour'().
 -type make_recurrent()      :: true | false.
 -type recurrent_token()     :: dmsl_domain_thrift:'Token'().
 -type retry_strategy()      :: hg_retry:strategy().
 
 -type session_status()      :: active | suspended | finished.
 -type session() :: #{
-    target      := target(),
-    status      := session_status(),
-    trx         := trx_info(),
-    tags        := [tag()],
-    result      => session_result(),
-    proxy_state => proxy_state()
+    target            := target(),
+    status            := session_status(),
+    trx               := trx_info(),
+    tags              := [tag()],
+    timeout_behaviour := timeout_behaviour(),
+    result            => session_result(),
+    proxy_state       => proxy_state()
 }.
 
 -type opts() :: #{
@@ -631,6 +633,7 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
             ),
             case hg_routing:choose_route(FailRatedRoutes, RejectContext1, VS) of
                 {ok, _Route} = Result ->
+                    _ = log_misconfigurations(RejectContext1),
                     Result;
                 {error, {no_route_found, {RejectReason, RejectContext}}} = Error ->
                     _ = log_reject_context(RejectReason, RejectContext),
@@ -645,6 +648,22 @@ choose_routing_predestination(#domain_InvoicePayment{payer = ?payment_resource_p
     payment.
 
 % Other payers has predefined routes
+
+log_misconfigurations(RejectContext) ->
+    RejectedProviders = maps:get(rejected_providers, RejectContext),
+    RejectedRoutes    = maps:get(rejected_routes, RejectContext),
+    Rejects           = RejectedProviders ++ RejectedRoutes,
+    _ = lists:foreach(fun maybe_log_misconfiguration/1, Rejects),
+    ok.
+
+maybe_log_misconfiguration({PRef, {'Misconfiguration', Reason}}) ->
+    Text = "The provider with ref ~p has been misconfigured: ~p",
+    _ = logger:warning(Text, [PRef, Reason]);
+maybe_log_misconfiguration({PRef, TRef, {'Misconfiguration', Reason}}) ->
+    Text = "The route with provider ref ~p and terminal ref ~p has been misconfigured: ~p",
+    _ = logger:warning(Text, [PRef, TRef, Reason]);
+maybe_log_misconfiguration(_NotMisconfiguration) ->
+    ok.
 
 log_reject_context(risk_score_is_too_high = RejectReason, RejectContext) ->
     log_reject_context(info, RejectReason, RejectContext);
@@ -664,8 +683,8 @@ log_reject_context(Level, RejectReason, RejectContext) ->
         logger:get_process_metadata()),
     _ = logger:log(
         Level,
-        "No route found, reason = ~p, rejected terminals: ~p",
-        [RejectReason, maps:get(rejected_terminals, RejectContext)],
+        "No route found, reason = ~p, rejected routes: ~p",
+        [RejectReason, maps:get(rejected_routes, RejectContext)],
         logger:get_process_metadata()),
     ok.
 
@@ -1048,16 +1067,16 @@ make_refund(Params, Payment, Revision, St, Opts) ->
     _ = assert_refund_cash(Cash, St),
     Cart = Params#payproc_InvoicePaymentRefundParams.cart,
     _ = assert_refund_cart(Params#payproc_InvoicePaymentRefundParams.cash, Cart, St),
-    ID = construct_refund_id(get_refunds(St)),
     #domain_InvoicePaymentRefund {
-        id              = ID,
+        id              = Params#payproc_InvoicePaymentRefundParams.id,
         created_at      = hg_datetime:format_now(),
         domain_revision = Revision,
         party_revision  = PartyRevision,
         status          = ?refund_pending(),
         reason          = Params#payproc_InvoicePaymentRefundParams.reason,
         cash            = Cash,
-        cart            = Cart
+        cart            = Cart,
+        external_id     = Params#payproc_InvoicePaymentRefundParams.external_id
     }.
 
 make_refund_cashflow(Refund, Payment, Revision, St, Opts) ->
@@ -1073,15 +1092,6 @@ make_refund_cashflow(Refund, Payment, Revision, St, Opts) ->
     Provider = get_route_provider(Route, Revision),
     AccountMap = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS1, Revision),
     construct_final_cashflow(Cashflow, collect_cash_flow_context(Refund), AccountMap).
-
-construct_refund_id(Refunds) ->
-    % we can't be sure that old ids were constructed in strict increasing order, so we need to find max ID
-    MaxID = lists:foldl(fun find_max_refund_id/2, 0, Refunds),
-    genlib:to_binary(MaxID + 1).
-
-find_max_refund_id(#domain_InvoicePaymentRefund{id = ID}, Max) ->
-    IntID = genlib:to_int(ID),
-    erlang:max(IntID, Max).
 
 assert_refund_cash(Cash, St) ->
     PaymentAmount = get_remaining_payment_amount(Cash, St),
@@ -1639,8 +1649,18 @@ finalize_payment(Action, St) ->
 
 -spec process_callback_timeout(action(), session(), events(), st()) -> machine_result().
 process_callback_timeout(Action, Session, Events, St) ->
-    Result = handle_proxy_callback_timeout(Action, Events, Session),
-    finish_session_processing(Result, St).
+    case get_session_timeout_behaviour(Session) of
+        {callback, Payload} ->
+            ProxyContext = construct_proxy_context(St),
+            Route = get_route(St),
+            {ok, CallbackResult} = hg_proxy_provider:handle_payment_callback(Payload, ProxyContext, Route),
+            {_Response, Result} = handle_callback_result(CallbackResult, Action, get_activity_session(St)),
+            finish_session_processing(Result, St);
+        {operation_failure, OperationFailure} ->
+            SessionEvents = [?session_finished(?session_failed(OperationFailure))],
+            Result = {Events ++ wrap_session_events(SessionEvents, Session), Action},
+            finish_session_processing(Result, St)
+    end.
 
 -spec handle_callback(callback(), action(), st()) ->
     {callback_response(), machine_result()}.
@@ -1871,10 +1891,6 @@ handle_proxy_callback_result(
     Events2 = update_proxy_state(ProxyState, Session),
     {wrap_session_events(Events1 ++ Events2, Session), Action0}.
 
-handle_proxy_callback_timeout(Action, Events, Session) ->
-    SessionEvents = [?session_finished(?session_failed(?operation_timeout()))],
-    {Events ++ wrap_session_events(SessionEvents, Session), Action}.
-
 wrap_session_events(SessionEvents, #{target := Target}) ->
     [?session_ev(Target, Ev) || Ev <- SessionEvents].
 
@@ -1911,12 +1927,17 @@ handle_proxy_intent(#prxprv_SleepIntent{timer = Timer, user_interaction = UserIn
     Events = wrap_session_events(try_request_interaction(UserInteraction), Session),
     {Events, Action};
 handle_proxy_intent(
-    #prxprv_SuspendIntent{tag = Tag, timeout = Timer, user_interaction = UserInteraction},
+    #prxprv_SuspendIntent{
+        tag = Tag,
+        timeout = Timer,
+        user_interaction = UserInteraction,
+        timeout_behaviour = TimeoutBehaviour
+    },
     Action0,
     Session
 ) ->
     Action = set_timer(Timer, hg_machine_action:set_tag(Tag, Action0)),
-    Events = [?session_suspended(Tag) | try_request_interaction(UserInteraction)],
+    Events = [?session_suspended(Tag, TimeoutBehaviour) | try_request_interaction(UserInteraction)],
     {wrap_session_events(Events, Session), Action}.
 
 handle_proxy_capture_failure(Action, Failure, Session = #{target := Target}) ->
@@ -2539,10 +2560,12 @@ merge_session_change(?session_finished(Result), Session) ->
     Session#{status := finished, result => Result};
 merge_session_change(?session_activated(), Session) ->
     Session#{status := active};
-merge_session_change(?session_suspended(undefined), Session) ->
-    Session#{status := suspended};
-merge_session_change(?session_suspended(Tag), Session) ->
-    Session#{status := suspended, tags := [Tag | get_session_tags(Session)]};
+
+merge_session_change(?session_suspended(Tag, TimeoutBehaviour), Session) ->
+    Session2 = set_session_tag(Tag, Session),
+    Session3 = set_timeout_behaviour(TimeoutBehaviour, Session2),
+    Session3#{status := suspended};
+
 merge_session_change(?trx_bound(Trx), Session) ->
     Session#{trx := Trx};
 merge_session_change(?proxy_st_changed(ProxyState), Session) ->
@@ -2550,12 +2573,23 @@ merge_session_change(?proxy_st_changed(ProxyState), Session) ->
 merge_session_change(?interaction_requested(_), Session) ->
     Session.
 
+set_timeout_behaviour(undefined, Session) ->
+    Session#{timeout_behaviour => {operation_failure, ?operation_timeout()}};
+set_timeout_behaviour(TimeoutBehaviour, Session) ->
+    Session#{timeout_behaviour => TimeoutBehaviour}.
+
+set_session_tag(undefined, Session) ->
+    Session;
+set_session_tag(Tag, Session) ->
+    Session#{tags := [Tag | get_session_tags(Session)]}.
+
 create_session(Target, Trx) ->
     #{
         target => Target,
         status => active,
         trx    => Trx,
-        tags   => []
+        tags   => [],
+        timeout_behaviour => {operation_failure, ?operation_timeout()}
     }.
 
 get_invoice_state(InvoiceID) ->
@@ -2587,6 +2621,9 @@ get_session_status(#{status := Status}) ->
 
 get_session_trx(#{trx := Trx}) ->
     Trx.
+
+get_session_timeout_behaviour(#{timeout_behaviour := TimeoutBehaviour}) ->
+    TimeoutBehaviour.
 
 get_session_proxy_state(Session) ->
     maps:get(proxy_state, Session, undefined).
@@ -2641,7 +2678,13 @@ collapse_changes(Changes, St) ->
     collapse_changes(Changes, St, #{}).
 
 collapse_changes(Changes, St, Opts) ->
-    lists:foldl(fun (C, St1) -> merge_change(C, St1, Opts) end, St, Changes).
+    lists:foldl(
+        fun (C, St1) ->
+            merge_change(C, St1, Opts)
+        end,
+        St,
+        Changes
+    ).
 
 %%
 
@@ -3028,9 +3071,8 @@ unmarshal(capture, Reason) ->
     ?captured_with_reason(unmarshal(str, Reason));
 
 %% Session change
-
 unmarshal(session_change, [3, [<<"suspended">>, Tag]]) ->
-    ?session_suspended(unmarshal(str, Tag));
+    ?session_suspended(unmarshal(str, Tag), undefined);
 unmarshal(session_change, [3, Change]) ->
     unmarshal(session_change, [2, Change]);
 
@@ -3039,7 +3081,7 @@ unmarshal(session_change, [2, <<"started">>]) ->
 unmarshal(session_change, [2, [<<"finished">>, Result]]) ->
     ?session_finished(unmarshal(session_status, Result));
 unmarshal(session_change, [2, <<"suspended">>]) ->
-    ?session_suspended(undefined);
+    ?session_suspended(undefined, undefined);
 unmarshal(session_change, [2, <<"activated">>]) ->
     ?session_activated();
 unmarshal(session_change, [2, [<<"transaction_bound">>, Trx]]) ->
@@ -3054,7 +3096,7 @@ unmarshal(session_change, [1, ?legacy_session_started()]) ->
 unmarshal(session_change, [1, ?legacy_session_finished(Result)]) ->
     ?session_finished(unmarshal(session_status, Result));
 unmarshal(session_change, [1, ?legacy_session_suspended()]) ->
-    ?session_suspended(undefined);
+    ?session_suspended(undefined, undefined);
 unmarshal(session_change, [1, ?legacy_session_activated()]) ->
     ?session_activated();
 unmarshal(session_change, [1, ?legacy_trx_bound(Trx)]) ->
@@ -3408,27 +3450,3 @@ unmarshal(risk_score, RiskScore) when is_atom(RiskScore) ->
 
 unmarshal(_, Other) ->
     Other.
-
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
-
--spec test() -> _.
-
-create_dummy_refund_with_id(ID) ->
-    #domain_InvoicePaymentRefund{
-        id              = genlib:to_binary(ID),
-        created_at      = hg_datetime:format_now(),
-        domain_revision = 42,
-        party_revision  = 42,
-        status          = ?refund_pending(),
-        reason          = <<"No reason">>,
-        cash            = 1000,
-        cart            = unefined
-    }.
-
--spec construct_refund_id_test() -> _.
-construct_refund_id_test() ->
-    IDs = [X||{_, X} <- lists:sort([ {rand:uniform(), N} || N <- lists:seq(1, 10)])], % 10 IDs shuffled
-    Refunds = lists:map(fun create_dummy_refund_with_id/1, IDs),
-    ?assert(<<"11">> =:= construct_refund_id(Refunds)).
--endif.
