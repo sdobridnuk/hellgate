@@ -1760,14 +1760,12 @@ payment_refund_success(C) ->
     PartyClient = cfg(party_client, C),
     ShopID = hg_ct_helper:create_battle_ready_shop(?cat(2), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
     InvoiceID = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
-    PaymentParams = make_payment_params(),
-    PaymentID = process_payment(InvoiceID, PaymentParams, Client),
+    PaymentID = process_payment(InvoiceID, make_payment_params(), Client),
     RefundParams = make_refund_params(),
     % not finished yet
     ?invalid_payment_status(?processed()) =
         hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
     PaymentID = await_payment_capture(InvoiceID, PaymentID, Client),
-    timer:sleep(2500),
     % not enough funds on the merchant account
     Failure = {failure, payproc_errors:construct('RefundFailure',
         {terms_violated, {insufficient_merchant_funds, #payprocerr_GeneralFailure{}}}
@@ -2225,11 +2223,7 @@ payment_hold_auto_cancellation(C) ->
 payment_hold_capturing(C) ->
     Client = cfg(client, C),
     InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(10), 42000, C),
-    PaymentParams0 = make_payment_params({hold, cancel}),
-    Deadline = woody_deadline:to_binary(woody_deadline:from_timeout(4000)),
-    PaymentParams = PaymentParams0#payproc_InvoicePaymentParams{processing_deadline = Deadline},
-    PaymentID = process_payment(InvoiceID, PaymentParams, Client),
-    timer:sleep(4000),
+    PaymentID = process_payment(InvoiceID, make_payment_params({hold, cancel}), Client),
     ok = hg_client_invoicing:capture_payment(InvoiceID, PaymentID, <<"ok">>, Client),
     PaymentID = await_payment_capture(InvoiceID, PaymentID, <<"ok">>, Client).
 
