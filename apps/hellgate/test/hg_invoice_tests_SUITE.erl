@@ -2808,11 +2808,10 @@ reopen_payment_chargeback_after_failing_to_reopen(C) ->
     AcceptParams = make_chargeback_accept_params(),
     ok           = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, AcceptParams, Client),
     [
-        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted()))),
-        ?payment_ev(PaymentID, ?payment_status_changed(?charged_back()))
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted())))
     ]            = next_event(InvoiceID, Client),
     Settlement6  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(25110, maps:get(min_available_amount, Settlement6)),
+    ?assertEqual(25110, maps:get(min_available_amount, Settlement5)),
     ?assertEqual(25110, maps:get(max_available_amount, Settlement6)).
 
 %% CHARGEBACKS WIP
