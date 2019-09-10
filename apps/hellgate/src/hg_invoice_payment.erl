@@ -1199,8 +1199,14 @@ accept_chargeback(ID, Params, St0, Opts) ->
                  Cash =:= undefined ->
             _      = commit_chargeback_cashflow(ChargebackSt, CashFlowPlan, St),
             Action = hg_machine_action:new(),
+            MaybeChargedBack = case get_remaining_payment_amount(ChargebackCash, St) of
+                ?cash(Amount, _) when Amount =:= 0 ->
+                    [ ?payment_status_changed(?charged_back()) ];
+                ?cash(Amount, _) when Amount > 0 ->
+                  []
+            end,
             Change = ?chargeback_status_changed(Status),
-            Events = [?chargeback_ev(ID, Change), ?payment_status_changed(?charged_back())],
+            Events = [?chargeback_ev(ID, Change)] ++ MaybeChargedBack,
             Result = {Events, Action},
             {ok, Result};
         _ ->
