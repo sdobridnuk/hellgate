@@ -2785,7 +2785,6 @@ reopen_payment_chargeback_after_failing_to_reopen(C) ->
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
     ]            = next_event(InvoiceID, Client),
-    ct:print("UJUJUJUJUJUJU"),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_failed(_))))
     ]            = next_event(InvoiceID, Client),
@@ -2805,7 +2804,16 @@ reopen_payment_chargeback_after_failing_to_reopen(C) ->
     ]            = next_event(InvoiceID, Client),
     Settlement5  = hg_ct_helper:get_account(SettlementID),
     ?assertEqual(25110, maps:get(min_available_amount, Settlement5)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement5)).
+    ?assertEqual(35110, maps:get(max_available_amount, Settlement5)),
+    AcceptParams = make_chargeback_accept_params(),
+    ok           = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, AcceptParams, Client),
+    [
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted()))),
+        ?payment_ev(PaymentID, ?payment_status_changed(?charged_back()))
+    ]            = next_event(InvoiceID, Client),
+    Settlement6  = hg_ct_helper:get_account(SettlementID),
+    ?assertEqual(25110, maps:get(min_available_amount, Settlement6)),
+    ?assertEqual(25110, maps:get(max_available_amount, Settlement6)).
 
 %% CHARGEBACKS WIP
 
