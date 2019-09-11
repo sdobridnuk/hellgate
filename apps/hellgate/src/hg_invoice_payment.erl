@@ -969,7 +969,7 @@ assert_capture_cost_currency(?cash(_, PassedSymCode), #domain_InvoicePayment{cos
         passed_currency = PassedSymCode
     }).
 
-validate_processing_deadline(#domain_InvoicePayment{processing_deadline = Deadline}) ->
+validate_processing_deadline(#domain_InvoicePayment{processing_deadline = Deadline}, _TargetType = processed) ->
     case hg_invoice_utils:check_deadline(Deadline) of
         ok ->
             ok;
@@ -977,7 +977,9 @@ validate_processing_deadline(#domain_InvoicePayment{processing_deadline = Deadli
             {failure, payproc_errors:construct('PaymentFailure',
                 {authorization_failed, {processing_deadline_reached, #payprocerr_GeneralFailure{}}}
             )}
-    end.
+    end;
+validate_processing_deadline(_, _TargetType) ->
+    ok.
 
 
 assert_capture_cart(_Cost, undefined) ->
@@ -1590,7 +1592,7 @@ process_session(Action, St) ->
     process_session(Session, Action, St).
 
 process_session(undefined, Action, St0) ->
-    case validate_processing_deadline(get_payment(St0)) of
+    case validate_processing_deadline(get_payment(St0), get_target_type(get_target(St0))) of
         ok ->
             Events = start_session(get_target(St0)),
             St1 = collapse_changes(Events, St0),
