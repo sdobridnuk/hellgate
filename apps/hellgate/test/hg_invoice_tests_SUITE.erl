@@ -2522,9 +2522,11 @@ adhoc_repair_failed_succeeded(C) ->
     PaymentParams = make_payment_params(PaymentTool, Session),
     PaymentID = start_payment(InvoiceID, PaymentParams, Client),
     [
-        ?payment_ev(PaymentID, ?session_ev(?processed(), ?session_started())),
-        ?payment_ev(PaymentID, ?session_ev(?processed(), ?trx_bound(?trx_info(PaymentID))))
+        ?payment_ev(PaymentID, ?session_ev(?processed(), ?session_started()))
     ] = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?session_ev(?processed(), ?trx_bound(?trx_info(PaymentID))))
+    ]  = next_event(InvoiceID, Client),
     % assume no more events here since machine is FUBAR already
     timeout = next_event(InvoiceID, 2000, Client),
     Changes = [
@@ -2564,7 +2566,9 @@ adhoc_repair_invalid_changes_failed(C) ->
     PaymentParams = make_payment_params(PaymentTool, Session),
     PaymentID = start_payment(InvoiceID, PaymentParams, Client),
     [
-        ?payment_ev(PaymentID, ?session_ev(?processed(), ?session_started())),
+        ?payment_ev(PaymentID, ?session_ev(?processed(), ?session_started()))
+    ] = next_event(InvoiceID, Client),
+    [
         ?payment_ev(PaymentID, ?session_ev(?processed(), ?trx_bound(?trx_info(PaymentID))))
     ] = next_event(InvoiceID, Client),
     timeout = next_event(InvoiceID, 1000, Client),
@@ -2739,7 +2743,9 @@ repair_fail_session_succeeded(C) ->
     PaymentParams = make_payment_params(PaymentTool, Session),
     PaymentID = start_payment(InvoiceID, PaymentParams, Client),
     [
-        ?payment_ev(PaymentID, ?session_ev(?processed(), ?session_started())),
+        ?payment_ev(PaymentID, ?session_ev(?processed(), ?session_started()))
+    ] = next_event(InvoiceID, Client),
+    [
         ?payment_ev(PaymentID, ?session_ev(?processed(), ?trx_bound(?trx_info(PaymentID))))
     ] = next_event(InvoiceID, Client),
 
@@ -2788,7 +2794,9 @@ repair_complex_succeeded_second(C) ->
     PaymentParams = make_payment_params(PaymentTool, Session),
     PaymentID = start_payment(InvoiceID, PaymentParams, Client),
     [
-        ?payment_ev(PaymentID, ?session_ev(?processed(), ?session_started())),
+        ?payment_ev(PaymentID, ?session_ev(?processed(), ?session_started()))
+    ] = next_event(InvoiceID, Client),
+    [
         ?payment_ev(PaymentID, ?session_ev(?processed(), ?trx_bound(?trx_info(PaymentID))))
     ] = next_event(InvoiceID, Client),
 
