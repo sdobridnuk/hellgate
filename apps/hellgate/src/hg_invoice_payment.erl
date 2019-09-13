@@ -1596,7 +1596,7 @@ process_session(undefined, Action, St0) ->
         ok ->
             Events = start_session(get_target(St0)),
             St1 = collapse_changes(Events, St0),
-            Result = {start_session(get_target(St0)), hg_machine_action:instant()},
+            Result = {start_session(get_target(St0)), hg_machine_action:set_timeout(0, Action)},
             finish_session_processing(Result, St1);
         Failure ->
             process_failure(get_activity(St0), [], Action, Failure, St0)

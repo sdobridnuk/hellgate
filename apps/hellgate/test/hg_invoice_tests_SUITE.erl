@@ -3146,12 +3146,14 @@ await_payment_session_started(InvoiceID, PaymentID, Client, Target) ->
     PaymentID.
 
 await_payment_process_interaction(InvoiceID, PaymentID, Client) ->
-    Events = next_event(InvoiceID, Client),
-    Event1 = next_event(InvoiceID, Client),
+    Events0 = next_event(InvoiceID, Client),
     [
-        ?payment_ev(PaymentID, ?session_ev(?processed(), ?session_started())),
+        ?payment_ev(PaymentID, ?session_ev(?processed(), ?session_started()))
+    ] = Events0,
+    Events1 = next_event(InvoiceID, Client),
+    [
         ?payment_ev(PaymentID, ?session_ev(?processed(), ?interaction_requested(UserInteraction)))
-    ] = Events ++ Event1,
+    ] = Events1,
     UserInteraction.
 
 await_payment_process_finish(InvoiceID, PaymentID, Client) ->
