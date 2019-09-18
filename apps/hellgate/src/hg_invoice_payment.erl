@@ -84,10 +84,10 @@
                   | adjustment_activity()
                   | idle.
 
--type payment_activity()      :: {payment, payment_step()}.
--type refund_activity()       :: {refund_new | refund_session | refund_accounter, refund_id()}.
--type adjustment_activity()   :: {adjustment_new | adjustment_pending, adjustment_id()}.
--type chargeback_activity()   :: {chargeback_new | chargeback_accounter, chargeback_id()}.
+-type payment_activity()    :: {payment, payment_step()}.
+-type refund_activity()     :: {refund_new | refund_session | refund_accounter, refund_id()}.
+-type adjustment_activity() :: {adjustment_new | adjustment_pending, adjustment_id()}.
+-type chargeback_activity() :: {chargeback_new | chargeback_accounter | chargeback_accounter_finalise, chargeback_id()}.
 
 -type payment_step() :: new
                       | risk_scoring
@@ -156,9 +156,7 @@
 -type chargeback_params()        :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackParams'().
 -type chargeback_accept_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackAcceptParams'().
 -type chargeback_reopen_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackReopenParams'().
--type chargeback_target_status() :: dmsl_domain_thrift:'InvoicePaymentChargebackPending'()
-                                  | dmsl_domain_thrift:'InvoicePaymentChargebackAccepted'()
-                                  | dmsl_domain_thrift:'InvoicePaymentChargebackRejected'().
+-type chargeback_target_status() :: dmsl_domain_thrift:'InvoicePaymentChargebackStatus'().
 
 -type refund()                   :: dmsl_domain_thrift:'InvoicePaymentRefund'().
 -type refund_id()                :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
@@ -1133,7 +1131,7 @@ cancel_chargeback(ID, St0, Opts) ->
             Result = {Events, Action},
             {ok, Result};
         _NotChargeback ->
-            case ChargebackHoldFunds of
+            _ = case ChargebackHoldFunds of
                 true  -> _ = rollback_chargeback_cashflow(ChargebackSt, CashFlowPlan, St);
                 false -> ok
             end,
@@ -1158,7 +1156,7 @@ reject_chargeback(ID, St0, Opts) ->
     Status          = ?chargeback_status_rejected(),
     case Chargeback of
         #domain_InvoicePaymentChargeback{hold_funds = false} ->
-            case ChargebackStage of
+            _ = case ChargebackStage of
               ?chargeback_stage_arbitration()     -> ok;
               ?chargeback_stage_pre_arbitration() -> ok;
               _ -> _ = commit_chargeback_cashflow(ChargebackSt, CashFlowPlan, St)
@@ -1209,7 +1207,7 @@ accept_chargeback(ID, Params, St0, Opts) ->
             Result = {Events, Action},
             {ok, Result};
         _ ->
-            case ChargebackStage of
+            _ = case ChargebackStage of
               ?chargeback_stage_arbitration()     -> ok;
               ?chargeback_stage_pre_arbitration() -> ok;
               _ -> _ = rollback_chargeback_cashflow(ChargebackSt, CashFlowPlan, St)
@@ -1262,17 +1260,17 @@ make_chargeback(Params, HoldFunds, Payment, Revision, St, Opts) ->
 
 make_chargeback_cashflow(Chargeback, Payment, TargetStatus, Stage, HoldFunds, Revision, St, Opts) ->
     ct:print("STAGE\n~p", [Stage]),
-    Route                 = get_route(St),
-    Shop                  = get_shop(Opts),
-    MerchantTerms         = get_merchant_chargeback_terms(get_merchant_payments_terms(Opts, Revision)),
-    VS0                   = collect_validation_varset(St, Opts),
-    VS1                   = validate_chargeback(MerchantTerms, Chargeback, Payment, VS0, Revision),
-    ProviderPaymentsTerms = get_provider_payments_terms(Route, Revision),
-    ProviderTerms         = get_provider_chargeback_terms(ProviderPaymentsTerms, Chargeback, Payment, VS1, Revision),
-    Cashflow              = collect_chargeback_cashflow(MerchantTerms, ProviderTerms, TargetStatus, Stage, HoldFunds, VS1, Revision),
-    PaymentInstitution    = get_payment_institution(Opts, Revision),
-    Provider              = get_route_provider(Route, Revision),
-    AccountMap            = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS1, Revision),
+    Route          = get_route(St),
+    Shop           = get_shop(Opts),
+    MerchantTerms  = get_merchant_chargeback_terms(get_merchant_payments_terms(Opts, Revision)),
+    VS0            = collect_validation_varset(St, Opts),
+    VS1            = validate_chargeback(MerchantTerms, Chargeback, Payment, VS0, Revision),
+    PaymentsTerms  = get_provider_payments_terms(Route, Revision),
+    ProviderTerms  = get_provider_chargeback_terms(PaymentsTerms, Chargeback, Payment, VS1, Revision),
+    Cashflow       = collect_chargeback_cashflow(MerchantTerms, ProviderTerms, TargetStatus, Stage, HoldFunds, VS1, Revision),
+    PayInstitution = get_payment_institution(Opts, Revision),
+    Provider       = get_route_provider(Route, Revision),
+    AccountMap     = collect_account_map(Payment, Shop, PayInstitution, Provider, VS1, Revision),
     construct_final_cashflow(Cashflow, collect_cash_flow_context(Chargeback), AccountMap).
 
 get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{chargebacks = Terms}) when Terms /= undefined ->
@@ -1391,22 +1389,21 @@ assert_chargeback_cash(Cash, St) ->
 get_chargeback_cash(#domain_InvoicePaymentChargeback{cash = Cash}) ->
     Cash.
 
-% get_chargeback_created_at(#domain_InvoicePaymentChargeback{created_at = CreatedAt}) ->
-%     CreatedAt.
-
 % TODO: CHARGEBACKS WIP
 % UGLY AS FUCK
 collect_chargeback_cashflow(
     #domain_PaymentChargebackServiceTerms{fees = MerchantCashflowSelector},
     _ProvisionTerms,
-    _TargetStatus = ?chargeback_status_cancelled(),
+    TargetStatus,
     Stage,
-    _HoldFunds,
+    HoldFunds,
     VS,
     Revision
-) when Stage =/= ?chargeback_stage_chargeback() ->
-    ct:print("COLLECT CF TO REVERT"),
-    MerchantCashflow = reduce_selector(merchant_chargeback_fees     , MerchantCashflowSelector, VS, Revision),
+) when Stage        =/= ?chargeback_stage_chargeback(),
+       TargetStatus =:= ?chargeback_status_cancelled() orelse
+       Stage        =:= ?chargeback_stage_chargeback(),
+       HoldFunds    =:= false ->
+    MerchantCashflow = reduce_selector(merchant_chargeback_fees, MerchantCashflowSelector, VS, Revision),
     MerchantCashflow;
 collect_chargeback_cashflow(
     #domain_PaymentChargebackServiceTerms{fees        = MerchantCashflowSelector},
@@ -1417,7 +1414,6 @@ collect_chargeback_cashflow(
     VS,
     Revision
 ) ->
-    ct:print("COLLECT CF HOLD"),
     MerchantCashflow = reduce_selector(merchant_chargeback_fees     , MerchantCashflowSelector, VS, Revision),
     ProviderCashflow = reduce_selector(provider_chargeback_cash_flow, ProviderCashflowSelector, VS, Revision),
     MerchantCashflow ++ ProviderCashflow;
@@ -1430,23 +1426,9 @@ collect_chargeback_cashflow(
     VS,
     Revision
 ) ->
-    ct:print("COLLECT CF HOLD AFTER REOPEN"),
     ProviderCashflow = reduce_selector(provider_chargeback_cash_flow, ProviderCashflowSelector, VS, Revision),
     ProviderCashflow;
-collect_chargeback_cashflow(
-    #domain_PaymentChargebackServiceTerms{fees = MerchantCashflowSelector},
-    _ProvisionTerms,
-    _TargetStatus,
-    _Stage = ?chargeback_stage_chargeback(),
-    _HoldFunds = false,
-    VS,
-    Revision
-) ->
-    ct:print("COLLECT CF NO HOLD"),
-    MerchantCashflow = reduce_selector(merchant_chargeback_fees, MerchantCashflowSelector, VS, Revision),
-    MerchantCashflow;
 collect_chargeback_cashflow(_, _, _, _, _, _, _) ->
-    ct:print("COLLECT CF OTHER"),
     [].
 
 prepare_chargeback_cashflow(ChargebackSt, CashFlowPlan, St) ->
@@ -1653,7 +1635,13 @@ get_provider_chargeback_terms(
         ?cash(Amount, _) when Amount > 0 ->
             get_provider_partial_chargeback_terms(Terms, Chargeback, Payment, VS, Revision)
     end;
-get_provider_chargeback_terms(#domain_PaymentsProvisionTerms{chargebacks = undefined}, _Chargeback, Payment, _VS, _Revision) ->
+get_provider_chargeback_terms(
+    #domain_PaymentsProvisionTerms{chargebacks = undefined},
+    _Chargeback,
+    Payment,
+    _VS,
+    _Revision
+) ->
     error({misconfiguration, {'No chargeback terms for a payment', Payment}}).
 
 get_provider_partial_chargeback_terms(
@@ -2081,20 +2069,20 @@ process_cash_flow_building(Route, VS, Payment, PaymentInstitution, Revision, Opt
 % FIXME: requires rework
 -spec create_chargeback_cashflow(chargeback_id(), action(), st()) -> machine_result().
 create_chargeback_cashflow(ChargebackID, _Action, St) ->
-    ChargebackSt       = try_get_chargeback_state(ChargebackID, St),
-    Chargeback         = get_chargeback(ChargebackID, St),
-    TargetStatus       = get_chargeback_target_status(ChargebackSt),
-    Stage              = get_chargeback_stage(Chargeback),
-    HoldFunds          = get_chargeback_hold_funds(Chargeback),
-    Revision           = get_chargeback_revision(ChargebackSt),
-    Opts               = get_opts(St),
-    Payment            = get_payment(St),
-    FinalCashFlow      = make_chargeback_cashflow(Chargeback, Payment, TargetStatus, Stage, HoldFunds, Revision, St, Opts),
-    CashFlowPlan       = {1, FinalCashFlow},
-    _AffectedAccounts   = prepare_chargeback_cashflow(ChargebackSt, CashFlowPlan, St),
-    CFEvent = ?chargeback_cash_flow_created(FinalCashFlow),
-    CBEvent = ?chargeback_ev(ChargebackID, CFEvent),
-    Action0 = hg_machine_action:new(),
+    ChargebackSt  = try_get_chargeback_state(ChargebackID, St),
+    Chargeback    = get_chargeback(ChargebackID, St),
+    TargetStatus  = get_chargeback_target_status(ChargebackSt),
+    Stage         = get_chargeback_stage(Chargeback),
+    HoldFunds     = get_chargeback_hold_funds(Chargeback),
+    Revision      = get_chargeback_revision(ChargebackSt),
+    Opts          = get_opts(St),
+    Payment       = get_payment(St),
+    FinalCashFlow = make_chargeback_cashflow(Chargeback, Payment, TargetStatus, Stage, HoldFunds, Revision, St, Opts),
+    CashFlowPlan  = {1, FinalCashFlow},
+    _             = prepare_chargeback_cashflow(ChargebackSt, CashFlowPlan, St),
+    CFEvent       = ?chargeback_cash_flow_created(FinalCashFlow),
+    CBEvent       = ?chargeback_ev(ChargebackID, CFEvent),
+    Action0       = hg_machine_action:new(),
     {done, {[CBEvent], Action0}}.
 
 -spec update_chargeback_cashflow(chargeback_id(), action(), st()) -> machine_result().
@@ -2107,8 +2095,8 @@ update_chargeback_cashflow(ID, _Action, St) ->
     Payment       = get_payment(St),
     Opts          = get_opts(St),
     HoldFunds     = case TargetStatus of
-        {accepted, _} -> true;
-        {rejected, _} -> false;
+        ?chargeback_status_accepted() -> true;
+        ?chargeback_status_rejected() -> false;
         _Other        -> get_chargeback_hold_funds(Chargeback)
     end,
     FinalCashFlow = make_chargeback_cashflow(Chargeback, Payment, TargetStatus, Stage, HoldFunds, Revision, St, Opts),
@@ -2326,8 +2314,8 @@ process_result({payment, finalizing_accounter}, Action, St) ->
 
 process_result({chargeback_accounter_finalise, ID}, Action, St) ->
     ct:print("CB ACCOUNTER FINALISE"),
-    ChargebackSt       = try_get_chargeback_state(ID, St),
-    TargetStatus       = get_chargeback_target_status(ChargebackSt),
+    ChargebackSt = try_get_chargeback_state(ID, St),
+    TargetStatus = get_chargeback_target_status(ChargebackSt),
     ct:print("CB ACCOUNTER FINALISE TARGET STATUS\n~p", [TargetStatus]),
     case TargetStatus of
         ?chargeback_status_pending() ->
@@ -2337,7 +2325,7 @@ process_result({chargeback_accounter_finalise, ID}, Action, St) ->
             {done, {StatusEvent, Action}};
         _NotPending ->
             CashFlow = get_chargeback_cashflow(ChargebackSt),
-            case CashFlow of
+            _ = case CashFlow of
                 [] -> ok;
                 CashFlow -> _ = commit_chargeback_cashflow(ChargebackSt, {1, CashFlow}, St)
             end,
@@ -3003,9 +2991,7 @@ merge_change(Change = ?chargeback_ev(ID, Event), St, Opts) ->
         ?chargeback_status_changed(Status) ->
             ct:print("STATUS CHANGED\n~p", [Status]),
             _ = validate_transition([idle, {chargeback_accounter_finalise, ID}], Change, St, Opts),
-            St#st{activity = idle};
-        _ ->
-            St
+            St#st{activity = idle}
     end,
     ChargebackSt = merge_chargeback_change(Event, try_get_chargeback_state(ID, St1)),
     set_chargeback_state(ID, ChargebackSt, St1);
