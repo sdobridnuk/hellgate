@@ -1738,7 +1738,7 @@ create_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID0, ?chargeback_cash_flow_created(_)))
     ]            = next_event(InvoiceID, Client),
     Settlement2  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement2)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement2)),
     RefundParams = make_refund_params(),
     ?chargeback_pending() =
         hg_client_invoicing:refund_payment(InvoiceID, PaymentID, RefundParams, Client),
@@ -1766,27 +1766,14 @@ create_payment_chargeback_hold_funds(C) ->
     CBParams     = make_chargeback_params(hold_funds),
     CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     CBID         = CB#domain_InvoicePaymentChargeback.id,
-    % [
-    %     ?payment_ev(PaymentID, ?chargeback_ev(CBID0, ?chargeback_created(CB0)))
-    % ]            = next_event(InvoiceID, Client),
-    % [
-    %     ?payment_ev(PaymentID, ?chargeback_ev(CBID0, ?chargeback_status_changed(?chargeback_status_failed(_))))
-    % ]            = next_event(InvoiceID, Client),
-    % InvoiceID1   = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
-    % PaymentID1   = process_payment(InvoiceID1, make_payment_params(), Client),
-    % PaymentID1   = await_payment_capture(InvoiceID1, PaymentID1, Client),
-    % Settlement2  = hg_ct_helper:get_account(SettlementID),
-    % ?assertEqual(80220, maps:get(min_available_amount, Settlement2)),
-    % CB1          = #domain_InvoicePaymentChargeback{id = CBID1} =
-    %     hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     [
-        ?payment_ev(PaymentID, ?chargeback_ev(CBID0, ?chargeback_created(CB0)))
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
     ]            = next_event(InvoiceID, Client),
     [
-        ?payment_ev(PaymentID, ?chargeback_ev(CBID0, ?chargeback_cash_flow_created(_)))
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_)))
     ]            = next_event(InvoiceID, Client),
     Settlement3  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(40110 - 42000, maps:get(min_available_amount, Settlement3)).
+    ?assertEqual(40110 - 5000 - 42000, maps:get(min_available_amount, Settlement3)).
 
 -spec cancel_payment_chargeback(config()) -> _ | no_return().
 
@@ -1815,7 +1802,7 @@ cancel_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_)))
     ]            = next_event(InvoiceID, Client),
     Settlement2  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement2)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement2)),
     ok           = hg_client_invoicing:cancel_chargeback(InvoiceID, PaymentID, CBID, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
@@ -1844,11 +1831,6 @@ cancel_payment_chargeback_hold_funds(C) ->
     PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
     Settlement1  = hg_ct_helper:get_account(SettlementID),
     ?assertEqual(40110, maps:get(min_available_amount, Settlement1)),
-    % InvoiceID1   = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
-    % PaymentID1   = process_payment(InvoiceID1, make_payment_params(), Client),
-    % PaymentID1   = await_payment_capture(InvoiceID1, PaymentID1, Client),
-    % Settlement2  = hg_ct_helper:get_account(SettlementID),
-    % ?assertEqual(80220, maps:get(min_available_amount, Settlement2)),
     CBParams     = make_chargeback_params(hold_funds),
     CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     CBID         = CB#domain_InvoicePaymentChargeback.id,
@@ -1895,15 +1877,15 @@ reject_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_)))
     ]            = next_event(InvoiceID, Client),
     Settlement2  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement2)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement2)),
     ?assertEqual(40110, maps:get(max_available_amount, Settlement2)),
     ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ]            = next_event(InvoiceID, Client),
     Settlement3  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement3)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement3)).
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement3)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement3)).
 
 -spec reject_payment_chargeback_hold_funds(config()) -> _ | no_return().
 
@@ -1922,11 +1904,6 @@ reject_payment_chargeback_hold_funds(C) ->
     PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
     Settlement1  = hg_ct_helper:get_account(SettlementID),
     ?assertEqual(40110, maps:get(min_available_amount, Settlement1)),
-    % InvoiceID1   = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
-    % PaymentID1   = process_payment(InvoiceID1, make_payment_params(), Client),
-    % PaymentID1   = await_payment_capture(InvoiceID1, PaymentID1, Client),
-    % Settlement2  = hg_ct_helper:get_account(SettlementID),
-    % ?assertEqual(80220, maps:get(min_available_amount, Settlement2)),
     CBParams     = make_chargeback_params(hold_funds),
     CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     CBID         = CB#domain_InvoicePaymentChargeback.id,
@@ -1950,8 +1927,8 @@ reject_payment_chargeback_hold_funds(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ]            = next_event(InvoiceID, Client),
     Settlement4  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement4)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement4)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement4)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement4)),
     ?assertNotEqual(CF0, CF1).
 
 -spec accept_payment_chargeback(config()) -> _ | no_return().
@@ -1971,11 +1948,6 @@ accept_payment_chargeback(C) ->
     PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
     Settlement1  = hg_ct_helper:get_account(SettlementID),
     ?assertEqual(40110, maps:get(min_available_amount, Settlement1)),
-    % InvoiceID1   = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
-    % PaymentID1   = process_payment(InvoiceID1, make_payment_params(), Client),
-    % PaymentID1   = await_payment_capture(InvoiceID1, PaymentID1, Client),
-    % Settlement2  = hg_ct_helper:get_account(SettlementID),
-    % ?assertEqual(80220, maps:get(min_available_amount, Settlement2)),
     CBParams     = make_chargeback_params(no_hold),
     CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     CBID         = CB#domain_InvoicePaymentChargeback.id,
@@ -2024,11 +1996,6 @@ accept_payment_chargeback_hold_funds(C) ->
     PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
     Settlement1  = hg_ct_helper:get_account(SettlementID),
     ?assertEqual(40110, maps:get(min_available_amount, Settlement1)),
-    % InvoiceID1   = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
-    % PaymentID1   = process_payment(InvoiceID1, make_payment_params(), Client),
-    % PaymentID1   = await_payment_capture(InvoiceID1, PaymentID1, Client),
-    % Settlement2  = hg_ct_helper:get_account(SettlementID),
-    % ?assertEqual(80220, maps:get(min_available_amount, Settlement2)),
     CBParams     = make_chargeback_params(hold_funds),
     CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     CBID         = CB#domain_InvoicePaymentChargeback.id,
@@ -2068,11 +2035,6 @@ accept_partial_payment_chargeback_hold_funds(C) ->
     PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
     Settlement1  = hg_ct_helper:get_account(SettlementID),
     ?assertEqual(40110, maps:get(min_available_amount, Settlement1)),
-    % InvoiceID1   = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
-    % PaymentID1   = process_payment(InvoiceID1, make_payment_params(), Client),
-    % PaymentID1   = await_payment_capture(InvoiceID1, PaymentID1, Client),
-    % Settlement2  = hg_ct_helper:get_account(SettlementID),
-    % ?assertEqual(80220, maps:get(min_available_amount, Settlement2)),
     CBParams     = make_chargeback_params(hold_funds),
     CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     CBID         = CB#domain_InvoicePaymentChargeback.id,
@@ -2128,7 +2090,7 @@ reopen_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_CF0)))
     ]            = next_event(InvoiceID, Client),
     Settlement2  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement2)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement2)),
     ReopenParams = make_chargeback_reopen_params(),
     ?invalid_chargeback_status(_) =
         hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
@@ -2137,8 +2099,8 @@ reopen_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ]            = next_event(InvoiceID, Client),
     Settlement3  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement3)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement3)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement3)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement3)),
     ok = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
@@ -2150,8 +2112,8 @@ reopen_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
     ]            = next_event(InvoiceID, Client),
     Settlement4  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement4)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement4)).
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement4)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement4)).
 
 -spec reopen_partial_payment_chargeback(config()) -> _ | no_return().
 
@@ -2180,7 +2142,7 @@ reopen_partial_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_CF0)))
     ]            = next_event(InvoiceID, Client),
     Settlement2  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement2)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement2)),
     ReopenParams = make_chargeback_reopen_params(20000, <<"RUB">>),
     ?invalid_chargeback_status(_) =
         hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
@@ -2189,8 +2151,8 @@ reopen_partial_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ]            = next_event(InvoiceID, Client),
     Settlement3  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement3)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement3)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement3)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement3)),
     ok = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
@@ -2202,8 +2164,8 @@ reopen_partial_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
     ]            = next_event(InvoiceID, Client),
     Settlement4  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement4)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement4)).
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement4)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement4)).
 
 -spec reopen_partial_payment_chargeback_hold_funds(config()) -> _ | no_return().
 
@@ -2292,7 +2254,7 @@ reopen_reject_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_)))
     ]            = next_event(InvoiceID, Client),
     Settlement2  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement2)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement2)),
     ?assertEqual(40110, maps:get(max_available_amount, Settlement2)),
     ReopenParams = make_chargeback_reopen_params(),
     ?invalid_chargeback_status(_) =
@@ -2302,8 +2264,8 @@ reopen_reject_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ]            = next_event(InvoiceID, Client),
     Settlement3  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement3)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement3)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement3)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement3)),
     ok = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
@@ -2315,15 +2277,15 @@ reopen_reject_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
     ]            = next_event(InvoiceID, Client),
     Settlement4  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement4)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement4)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement4)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement4)),
     ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ]            = next_event(InvoiceID, Client),
     Settlement5  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement5)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement5)).
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement5)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement5)).
 
 -spec reopen_accept_payment_chargeback(config()) -> _ | no_return().
 
@@ -2415,11 +2377,6 @@ reopen_reject_payment_chargeback_hold_funds(C) ->
     PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
     Settlement1  = hg_ct_helper:get_account(SettlementID),
     ?assertEqual(40110, maps:get(min_available_amount, Settlement1)),
-    % InvoiceID1   = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
-    % PaymentID1   = process_payment(InvoiceID1, make_payment_params(), Client),
-    % PaymentID1   = await_payment_capture(InvoiceID1, PaymentID1, Client),
-    % Settlement2  = hg_ct_helper:get_account(SettlementID),
-    % ?assertEqual(80220, maps:get(min_available_amount, Settlement2)),
     CBParams     = make_chargeback_params(hold_funds),
     CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     CBID         = CB#domain_InvoicePaymentChargeback.id,
@@ -2459,7 +2416,7 @@ reopen_reject_payment_chargeback_hold_funds(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
     ]            = next_event(InvoiceID, Client),
     Settlement5  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement5)),
+    ?assertEqual(40110 - 5000 - 42000, maps:get(min_available_amount, Settlement5)),
     ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement5)),
     ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
     [
@@ -2531,7 +2488,7 @@ reopen_accept_payment_chargeback_hold_funds(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
     ]            = next_event(InvoiceID, Client),
     Settlement5  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement5)),
+    ?assertEqual(40110 - 5000 - 42000, maps:get(min_available_amount, Settlement5)),
     ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement5)),
     AcceptParams = make_chargeback_accept_params(),
     ok           = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, AcceptParams, Client),
@@ -2570,7 +2527,7 @@ fail_reopen_after_arbitration_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_)))
     ]            = next_event(InvoiceID, Client),
     Settlement2  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement2)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement2)),
     ?assertEqual(40110, maps:get(max_available_amount, Settlement2)),
     ReopenParams = make_chargeback_reopen_params(),
     ?invalid_chargeback_status(_) =
@@ -2580,8 +2537,8 @@ fail_reopen_after_arbitration_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ]            = next_event(InvoiceID, Client),
     Settlement3  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement3)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement3)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement3)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement3)),
     ok = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
@@ -2593,15 +2550,15 @@ fail_reopen_after_arbitration_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
     ]            = next_event(InvoiceID, Client),
     Settlement4  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement4)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement4)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement4)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement4)),
     ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ]            = next_event(InvoiceID, Client),
     Settlement5  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement5)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement5)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement5)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement5)),
     ok = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
@@ -2613,15 +2570,15 @@ fail_reopen_after_arbitration_payment_chargeback(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
     ]            = next_event(InvoiceID, Client),
     Settlement6  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement6)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement6)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement6)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement6)),
     ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ]            = next_event(InvoiceID, Client),
     Settlement7  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement7)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement7)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement7)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement7)),
     ?chargeback_cannot_reopen_arbitration()
                  = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client).
 
@@ -2652,15 +2609,15 @@ cancel_payment_chargeback_after_reopen(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(CF0)))
     ]            = next_event(InvoiceID, Client),
     Settlement2  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement2)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement2)),
     ?assertEqual(40110, maps:get(max_available_amount, Settlement2)),
     ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ]            = next_event(InvoiceID, Client),
     Settlement3  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement3)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement3)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement3)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement3)),
     ReopenParams = make_chargeback_reopen_params(),
     ok           = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
     [
@@ -2673,8 +2630,8 @@ cancel_payment_chargeback_after_reopen(C) ->
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
     ]            = next_event(InvoiceID, Client),
     Settlement4  = hg_ct_helper:get_account(SettlementID),
-    ?assertEqual(35110, maps:get(min_available_amount, Settlement4)),
-    ?assertEqual(35110, maps:get(max_available_amount, Settlement4)),
+    ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement4)),
+    ?assertEqual(40110 - 5000, maps:get(max_available_amount, Settlement4)),
     ok           = hg_client_invoicing:cancel_chargeback(InvoiceID, PaymentID, CBID, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
@@ -4032,10 +3989,10 @@ make_chargeback_accept_params(Cash) ->
 
 make_chargeback_reopen_params() ->
     #payproc_InvoicePaymentChargebackReopenParams{}.
-make_chargeback_reopen_params(hold_funds) ->
-    #payproc_InvoicePaymentChargebackReopenParams{
-        hold_funds  = true
-    }.
+% make_chargeback_reopen_params(hold_funds) ->
+%     #payproc_InvoicePaymentChargebackReopenParams{
+%         hold_funds  = true
+%     }.
 make_chargeback_reopen_params(Amount, Currency) ->
     #payproc_InvoicePaymentChargebackReopenParams{
         cash = make_cash(Amount, Currency)
