@@ -218,6 +218,17 @@
     }
 ).
 
+-define(chargeback_changed(Cash, HoldFunds, Status, Stage),
+    {invoice_payment_chargeback_changed,
+        #payproc_InvoicePaymentChargebackChanged{
+            cash          = Cash,
+            hold_funds    = HoldFunds,
+            target_status = Status,
+            stage         = Stage
+        }
+    }
+).
+
 -define(chargeback_stage_chargeback(),
     {chargeback,      #domain_InvoicePaymentChargebackStageChargeback{}}).
 -define(chargeback_stage_pre_arbitration(),
@@ -233,8 +244,6 @@
     {rejected, #domain_InvoicePaymentChargebackRejected{}}).
 -define(chargeback_status_cancelled(),
     {cancelled, #domain_InvoicePaymentChargebackCancelled{}}).
--define(chargeback_status_failed(Failure),
-    {failed, #domain_InvoicePaymentChargebackFailed{failure = Failure}}).
 
 %% Refunds
 
