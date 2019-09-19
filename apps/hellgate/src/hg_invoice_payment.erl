@@ -2930,7 +2930,7 @@ merge_change(Change = ?chargeback_ev(ID, Event), St, Opts) ->
         ?chargeback_cash_flow_changed(_) ->
             _ = validate_transition({chargeback_accounter, ID}, Change, St, Opts),
             St#st{activity = {chargeback_accounter_finalise, ID}};
-        ?chargeback_status_changed(Status) ->
+        ?chargeback_status_changed(_) ->
             _ = validate_transition([idle, {chargeback_accounter_finalise, ID}], Change, St, Opts),
             St#st{activity = idle}
     end,
@@ -3040,13 +3040,13 @@ save_retry_attempt(Target, #st{retry_attempts = Attempts} = St) ->
 
 merge_chargeback_change(?chargeback_created(Chargeback), _ChargebackSt) ->
     #chargeback_st{chargeback = Chargeback};
-merge_chargeback_change(?chargeback_changed(Cash, HoldFunds, TargetStatus, Stage) = Changes, ChargebackSt) ->
+merge_chargeback_change(?chargeback_changed(Cash, HoldFunds, TargetStatus, Stage), ChargebackSt) ->
     Chargeback0 = get_chargeback(ChargebackSt),
     Chargeback1 = set_chargeback_cash(Cash, Chargeback0),
     Chargeback2 = set_chargeback_hold_funds(HoldFunds, Chargeback1),
     Chargeback3 = set_chargeback_stage(Stage, Chargeback2),
     ChargebackSt#chargeback_st{chargeback = Chargeback3, target_status = TargetStatus};
-merge_chargeback_change(?chargeback_status_changed(Status) = Changes, ChargebackSt) ->
+merge_chargeback_change(?chargeback_status_changed(Status), ChargebackSt) ->
     ChargebackSt0 = set_chargeback(set_chargeback_status(Status, get_chargeback(ChargebackSt)), ChargebackSt),
     ChargebackSt0#chargeback_st{target_status = undefined};
 merge_chargeback_change(?chargeback_cash_flow_created(CashFlow), ChargebackSt) ->
