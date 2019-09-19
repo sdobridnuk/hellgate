@@ -993,7 +993,6 @@ collapse_history(History) ->
     ).
 
 collapse_changes(Changes, St0, Opts) ->
-    % ct:print("COLLAPSE CHANGES\n~p", [Changes]),
     lists:foldl(fun (C, St) -> merge_change(C, St, Opts) end, St0, Changes).
 
 merge_change(?invoice_created(Invoice), St, _Opts) ->

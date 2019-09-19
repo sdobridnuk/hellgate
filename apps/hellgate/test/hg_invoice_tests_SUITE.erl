@@ -1756,13 +1756,13 @@ create_payment_chargeback(C) ->
     PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
     Settlement1  = hg_ct_helper:get_account(SettlementID),
     ?assertEqual(40110, maps:get(min_available_amount, Settlement1)),
-    CB0          = #domain_InvoicePaymentChargeback{id = CBID0} =
+    CB          = #domain_InvoicePaymentChargeback{id = CBID} =
         hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     [
-        ?payment_ev(PaymentID, ?chargeback_ev(CBID0, ?chargeback_created(CB0)))
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
     ]            = next_event(InvoiceID, Client),
     [
-        ?payment_ev(PaymentID, ?chargeback_ev(CBID0, ?chargeback_cash_flow_created(_)))
+        ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_cash_flow_created(_)))
     ]            = next_event(InvoiceID, Client),
     Settlement2  = hg_ct_helper:get_account(SettlementID),
     ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement2)),
@@ -3859,7 +3859,6 @@ next_event(InvoiceID, Client) ->
 next_event(InvoiceID, Timeout, Client) ->
     case hg_client_invoicing:pull_event(InvoiceID, Timeout, Client) of
         {ok, ?invoice_ev(Changes)} ->
-            % ct:print("CHANGES\n~p", [Changes]),
             R = case filter_changes(Changes) of
                 L when length(L) > 0 ->
                     L;
