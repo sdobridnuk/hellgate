@@ -427,6 +427,8 @@ end_per_suite(C) ->
     {exception, #payproc_InsufficientAccountBalance{}}).
 -define(invoice_payment_amount_exceeded(Maximum),
     {exception, #payproc_InvoicePaymentAmountExceeded{maximum = Maximum}}).
+-define(inconsistent_chargeback_currency(Currency),
+    {exception, #payproc_InconsistentChargebackCurrency{currency = Currency}}).
 -define(inconsistent_refund_currency(Currency),
     {exception, #payproc_InconsistentRefundCurrency{currency = Currency}}).
 -define(inconsistent_capture_currency(Currency),
@@ -1922,6 +1924,9 @@ accept_payment_chargeback(C) ->
     ExceedParams = make_chargeback_accept_params(?cash(200000, <<"RUB">>)),
     ?invoice_payment_amount_exceeded(_)
                  = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, ExceedParams, Client),
+    Inconsistent = make_chargeback_accept_params(?cash(2000, <<"USD">>)),
+    ?inconsistent_chargeback_currency(_)
+                 = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, Inconsistent, Client),
     AcceptParams = make_chargeback_accept_params(),
     ok           = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, AcceptParams, Client),
     [
