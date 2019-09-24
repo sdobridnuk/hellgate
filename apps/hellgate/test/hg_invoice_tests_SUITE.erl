@@ -1753,6 +1753,9 @@ cancel_payment_chargeback(C) ->
     PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
     Settlement1  = hg_ct_helper:get_account(SettlementID),
     ?assertEqual(40110, maps:get(min_available_amount, Settlement1)),
+    Inconsistent = make_chargeback_params(1000, <<"USD">>),
+    ?inconsistent_chargeback_currency(_)
+                 = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, Inconsistent, Client),
     CBParams     = make_chargeback_params(no_hold),
     CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     CBID         = CB#domain_InvoicePaymentChargeback.id,
@@ -1921,10 +1924,10 @@ accept_payment_chargeback(C) ->
     Settlement3  = hg_ct_helper:get_account(SettlementID),
     ?assertEqual(40110 - 5000, maps:get(min_available_amount, Settlement3)),
     ?assertEqual(40110, maps:get(max_available_amount, Settlement3)),
-    ExceedParams = make_chargeback_accept_params(?cash(200000, <<"RUB">>)),
+    ExceedParams = make_chargeback_accept_params(200000, <<"RUB">>),
     ?invoice_payment_amount_exceeded(_)
                  = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, ExceedParams, Client),
-    Inconsistent = make_chargeback_accept_params(?cash(2000, <<"USD">>)),
+    Inconsistent = make_chargeback_accept_params(2000, <<"USD">>),
     ?inconsistent_chargeback_currency(_)
                  = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, Inconsistent, Client),
     AcceptParams = make_chargeback_accept_params(),
@@ -2011,7 +2014,7 @@ accept_partial_payment_chargeback_hold_funds(C) ->
     Settlement3  = hg_ct_helper:get_account(SettlementID),
     ?assertEqual(40110 - 5000 - 42000, maps:get(min_available_amount, Settlement3)),
     ?assertEqual(40110, maps:get(max_available_amount, Settlement3)),
-    AcceptParams = make_chargeback_accept_params(?cash(20000, <<"RUB">>)),
+    AcceptParams = make_chargeback_accept_params(20000, <<"RUB">>),
     ok           = hg_client_invoicing:accept_chargeback(InvoiceID, PaymentID, CBID, AcceptParams, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_changed(_)))
@@ -2060,6 +2063,9 @@ reopen_reject_payment_chargeback(C) ->
     ?invalid_chargeback_status(_) =
         hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, ReopenParams, Client),
     ok           = hg_client_invoicing:reject_chargeback(InvoiceID, PaymentID, CBID, Client),
+    Inconsistent = make_chargeback_reopen_params(2000, <<"USD">>),
+    ?inconsistent_chargeback_currency(_)
+                 = hg_client_invoicing:reopen_chargeback(InvoiceID, PaymentID, CBID, Inconsistent, Client),
     [
         ?payment_ev(PaymentID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ]            = next_event(InvoiceID, Client),
@@ -2104,11 +2110,6 @@ reopen_accept_payment_chargeback(C) ->
     PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
     Settlement1  = hg_ct_helper:get_account(SettlementID),
     ?assertEqual(40110, maps:get(min_available_amount, Settlement1)),
-    % InvoiceID1   = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
-    % PaymentID1   = process_payment(InvoiceID1, make_payment_params(), Client),
-    % PaymentID1   = await_payment_capture(InvoiceID1, PaymentID1, Client),
-    % Settlement2  = hg_ct_helper:get_account(SettlementID),
-    % ?assertEqual(80220, maps:get(min_available_amount, Settlement2)),
     CBParams     = make_chargeback_params(no_hold),
     CB           = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     CBID         = CB#domain_InvoicePaymentChargeback.id,
@@ -4117,17 +4118,21 @@ set_payment_context(Context, Params = #payproc_InvoicePaymentParams{}) ->
 make_chargeback_accept_params() ->
     #payproc_InvoicePaymentChargebackAcceptParams{}.
 
-make_chargeback_accept_params(Cash) ->
-    #payproc_InvoicePaymentChargebackAcceptParams{cash = Cash}.
+make_chargeback_accept_params(Amount, Currency) ->
+    #payproc_InvoicePaymentChargebackAcceptParams{
+        cash = make_cash(Amount, Currency)
+   }.
 
 make_chargeback_reopen_params() ->
     #payproc_InvoicePaymentChargebackReopenParams{}.
-% make_chargeback_reopen_params(hold_funds) ->
-%     #payproc_InvoicePaymentChargebackReopenParams{
-%         hold_funds  = true
-%     }.
 make_chargeback_reopen_params(Amount, Currency) ->
     #payproc_InvoicePaymentChargebackReopenParams{
+        cash = make_cash(Amount, Currency)
+    }.
+
+make_chargeback_params(Amount, Currency) ->
+    #payproc_InvoicePaymentChargebackParams{
+        reason_code = <<"CB.C0DE">>,
         cash = make_cash(Amount, Currency)
     }.
 
