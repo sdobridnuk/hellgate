@@ -51,6 +51,8 @@
 -type action()                   :: hg_machine_action:t().
 -type machine_result()           :: hg_invoice_payment:machine_result().
 
+-type setter()                   :: fun((any(), chargeback_state()) -> chargeback_state()).
+
 -spec get(chargeback_state()) ->
     chargeback().
 get(#chargeback_st{chargeback = Chargeback}) ->
@@ -209,19 +211,28 @@ do_reopen(ID, PaymentState, ReopenParams) ->
 do_merge_change(?chargeback_created(Chargeback), ChargebackState) ->
     set(Chargeback, ChargebackState);
 do_merge_change(?chargeback_changed(Cash, HoldFunds, TargetStatus, Stage), ChargebackState) ->
-    ChargebackState0 = set_cash(Cash, ChargebackState),
-    ChargebackState1 = set_hold_funds(HoldFunds, ChargebackState0),
-    ChargebackState2 = set_target_status(TargetStatus, ChargebackState1),
-    ChargebackState3 = set_stage(Stage, ChargebackState2),
-    ChargebackState3;
+    Changes = [
+        {fun set_cash/2         , Cash},
+        {fun set_hold_funds/2   , HoldFunds},
+        {fun set_target_status/2, TargetStatus},
+        {fun set_stage/2        , Stage}
+    ],
+    merge_state_changes(Changes, ChargebackState);
 do_merge_change(?chargeback_status_changed(Status), ChargebackState) ->
-    ChargebackState0 = set_status(Status, ChargebackState),
-    ChargebackState1 = set_target_status(undefined, ChargebackState0),
-    ChargebackState1;
+    Changes = [
+        {fun set_status/2       , Status},
+        {fun set_target_status/2, undefined}
+    ],
+    merge_state_changes(Changes, ChargebackState);
 do_merge_change(?chargeback_cash_flow_created(CashFlow), ChargebackState) ->
     set_cash_flow(CashFlow, ChargebackState);
 do_merge_change(?chargeback_cash_flow_changed(CashFlow), ChargebackState) ->
     set_cash_flow(CashFlow, ChargebackState).
+
+-spec merge_state_changes([{setter(), any()}], chargeback_state()) ->
+    chargeback_state().
+merge_state_changes(Changes, ChargebackState) ->
+    lists:foldl(fun({Fun, Arg}, Acc) -> Fun(Arg, Acc) end, ChargebackState, Changes).
 
 -spec do_create_cash_flow(chargeback_id(), payment_state()) ->
     machine_result() | no_return().
@@ -758,7 +769,6 @@ get_next_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_charge
     ?chargeback_stage_pre_arbitration();
 get_next_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_pre_arbitration()}) ->
     ?chargeback_stage_arbitration().
-
 
 %% Setters
 
