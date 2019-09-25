@@ -870,12 +870,6 @@ collect_cash_flow_context(
         operation_amount => Cost
     };
 collect_cash_flow_context(
-    #domain_InvoicePaymentChargeback{cash = Cash}
-) ->
-    #{
-        operation_amount => Cash
-    };
-collect_cash_flow_context(
     #domain_InvoicePaymentRefund{cash = Cash}
 ) ->
     #{
@@ -1238,7 +1232,7 @@ get_remaining_payment_amount(Cash, St) ->
     hg_cash:sub(InterimPaymentAmount, Cash).
 
 -spec get_remaining_payment_balance(st()) ->
-    integer().
+    cash().
 
 get_remaining_payment_balance(St) ->
     PaymentAmount = get_payment_cost(get_payment(St)),
