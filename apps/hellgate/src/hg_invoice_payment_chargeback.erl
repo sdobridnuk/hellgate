@@ -37,7 +37,7 @@
 -type chargeback_status()        :: dmsl_domain_thrift:'InvoicePaymentChargebackStatus'().
 -type chargeback_stage()         :: dmsl_domain_thrift:'InvoicePaymentChargebackStage'().
 
--type chargeback_target_status() :: dmsl_domain_thrift:'InvoicePaymentChargebackStatus'().
+-type chargeback_target_status() :: dmsl_domain_thrift:'InvoicePaymentChargebackStatus'() | undefined.
 
 -type chargeback_params()        :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackParams'().
 -type accept_params()            :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackAcceptParams'().
@@ -631,9 +631,9 @@ maybe_set_charged_back_status(_NotAccepted, _Cash, _PaymentState) ->
 collect_validation_varset(Party, Shop, Payment, ChargebackState) ->
     #domain_Party{id = PartyID} = Party,
     #domain_Shop{
-        id = ShopID,
+        id       = ShopID,
         category = Category,
-        account = #domain_ShopAccount{currency = Currency}
+        account  = #domain_ShopAccount{currency = Currency}
     } = Shop,
     #{
         party_id     => PartyID,
@@ -686,8 +686,6 @@ assert_payment_status(Status, #domain_InvoicePayment{status = {Status, _}}) ->
 assert_payment_status(_, #domain_InvoicePayment{status = Status}) ->
     throw(#payproc_InvalidPaymentStatus{status = Status}).
 
-assert_cash(undefined, _PaymentState) ->
-    ok;
 assert_cash(Cash, PaymentState) ->
     PaymentAmount = get_remaining_payment_amount(Cash, PaymentState),
     assert_remaining_payment_amount(PaymentAmount, PaymentState).
@@ -716,7 +714,7 @@ assert_contract_active(#domain_Contract{status = Status}) ->
 
 %% Getters
 
--spec get_id(chargeback_state()) ->
+-spec get_id(chargeback_state() | chargeback()) ->
     chargeback_id().
 get_id(#chargeback_st{chargeback = Chargeback}) ->
     get_id(Chargeback);
@@ -728,40 +726,40 @@ get_id(#domain_InvoicePaymentChargeback{id = ID}) ->
 get_target_status(#chargeback_st{target_status = TargetStatus}) ->
     TargetStatus.
 
--spec get_cash(chargeback_state()) ->
+-spec get_cash_flow_plan(chargeback_state()) ->
+    hg_accounting:batch().
+get_cash_flow_plan(#chargeback_st{cash_flow = CashFlow}) ->
+    {1, CashFlow}.
+
+-spec get_cash(chargeback_state() | chargeback()) ->
     cash().
 get_cash(#chargeback_st{chargeback = Chargeback}) ->
     get_cash(Chargeback);
 get_cash(#domain_InvoicePaymentChargeback{cash = Cash}) ->
     Cash.
 
--spec get_cash_flow_plan(chargeback_state()) ->
-    hg_accounting:batch().
-get_cash_flow_plan(#chargeback_st{cash_flow = CashFlow}) ->
-    {1, CashFlow}.
-
--spec get_revision(chargeback_state()) ->
+-spec get_revision(chargeback_state() | chargeback()) ->
     hg_domain:revision().
 get_revision(#chargeback_st{chargeback = Chargeback}) ->
     get_revision(Chargeback);
 get_revision(#domain_InvoicePaymentChargeback{domain_revision = Revision}) ->
     Revision.
 
--spec get_hold_funds(chargeback_state()) ->
+-spec get_hold_funds(chargeback_state() | chargeback()) ->
     boolean().
 get_hold_funds(#chargeback_st{chargeback = Chargeback}) ->
     get_hold_funds(Chargeback);
 get_hold_funds(#domain_InvoicePaymentChargeback{hold_funds = HoldFunds}) ->
     HoldFunds.
 
--spec get_stage(chargeback_state()) ->
+-spec get_stage(chargeback_state() | chargeback()) ->
     chargeback_stage().
 get_stage(#chargeback_st{chargeback = Chargeback}) ->
     get_stage(Chargeback);
 get_stage(#domain_InvoicePaymentChargeback{stage = Stage}) ->
     Stage.
 
--spec get_next_stage(chargeback_state()) ->
+-spec get_next_stage(chargeback_state() | chargeback()) ->
     ?chargeback_stage_pre_arbitration() | ?chargeback_stage_arbitration().
 get_next_stage(#chargeback_st{chargeback = Chargeback}) ->
     get_next_stage(Chargeback);
