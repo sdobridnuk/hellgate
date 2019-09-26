@@ -43,7 +43,8 @@
 -type operation_time_limit()    :: fd_proto_fault_detector_thrift:'Milliseconds'().
 -type pre_aggregation_size()    :: fd_proto_fault_detector_thrift:'Seconds'() | undefined.
 
--type fd_service_type()         :: adapter_availability.
+-type fd_service_type()         :: adapter_availability
+                                 | provider_conversion.
 
 %% API
 
@@ -249,16 +250,16 @@ do_call('RegisterOperation', Args, Opts, Deadline) ->
             {error, Reason}
     end.
 
-do_build_service_id(adapter_availability, ID) ->
+do_build_service_id(ServiceType, ID) ->
     hg_utils:construct_complex_id([
         <<"hellgate_service">>,
-        <<"adapter_availability">>,
+        genlib:to_binary(ServiceType),
         ID
     ]).
 
-do_build_operation_id(adapter_availability) ->
+do_build_operation_id(ServiceType) ->
     hg_utils:construct_complex_id([
         <<"hellgate_operation">>,
-        <<"adapter_availability">>,
+        genlib:to_binary(ServiceType),
         hg_utils:unique_id()
     ]).
