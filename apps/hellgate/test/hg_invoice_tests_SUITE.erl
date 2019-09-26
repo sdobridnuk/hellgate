@@ -1734,8 +1734,8 @@ terminal_cashflow_overrides_provider(C) ->
         accounts = #{?cur(<<"RUB">>) := #domain_ExternalAccount{outcome = AssistAccountID}}
     } = hg_domain:get(hg_domain:head(), {external_account_set, ?eas(2)}).
 
+%%  CHARGEBACKS
 
-%%  CHARGEBACKS WIP
 -spec cancel_payment_chargeback(config()) -> _ | no_return().
 
 cancel_payment_chargeback(C) ->
@@ -2714,7 +2714,7 @@ cancel_payment_chargeback_after_reopen(C) ->
     ?assertEqual(40110, maps:get(max_available_amount, Settlement5)),
     ?assertEqual(CF1, hg_cashflow:revert(CF0)).
 
-%% CHARGEBACKS WIP
+%% CHARGEBACKS
 
 -spec invalid_refund_party_status(config()) -> _ | no_return().
 
@@ -3899,13 +3899,12 @@ next_event(InvoiceID, Client) ->
 next_event(InvoiceID, Timeout, Client) ->
     case hg_client_invoicing:pull_event(InvoiceID, Timeout, Client) of
         {ok, ?invoice_ev(Changes)} ->
-            R = case filter_changes(Changes) of
+            case filter_changes(Changes) of
                 L when length(L) > 0 ->
                     L;
                 [] ->
                     next_event(InvoiceID, Timeout, Client)
-                end,
-            R;
+                end;
         Result ->
             Result
     end.
