@@ -162,7 +162,7 @@ score_providers_with_fault_detector(Providers) ->
     % placeholder
     FailRateServiceIDs = [build_fd_failrate_service_id(PR) || {PR, _P} <- Providers],
     FailRateStats      = hg_fault_detector_client:get_statistics(FailRateServiceIDs),
-    FailRatedProviders = [{PR, P, get_provider_status(PR, P, FDStats)} || {PR, P} <- Providers],
+    FailRatedProviders = [{PR, P, get_provider_status(PR, P, FailRateStats)} || {PR, P} <- Providers],
     FailRatedProviders.
 
 %% TODO: maybe use custom cutoffs per provider
