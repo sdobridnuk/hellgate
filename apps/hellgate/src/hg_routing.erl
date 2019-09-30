@@ -156,8 +156,12 @@ export_route({ProviderRef, {TerminalRef, _Terminal, _Priority}}) ->
 
 score_providers_with_fault_detector([]) -> [];
 score_providers_with_fault_detector(Providers) ->
-    ServiceIDs         = [build_fd_service_id(PR) || {PR, _P} <- Providers],
-    FDStats            = hg_fault_detector_client:get_statistics(ServiceIDs),
+    % placeholder
+    ConversionServiceIDs = [build_fd_conversion_service_id(PR) || {PR, _P} <- Providers],
+    _ConversionStats     = hg_fault_detector_client:get_statistics(ConversionServiceIDs),
+    % placeholder
+    FailRateServiceIDs = [build_fd_failrate_service_id(PR) || {PR, _P} <- Providers],
+    FailRateStats      = hg_fault_detector_client:get_statistics(FailRateServiceIDs),
     FailRatedProviders = [{PR, P, get_provider_status(PR, P, FDStats)} || {PR, P} <- Providers],
     FailRatedProviders.
 
@@ -268,9 +272,13 @@ score_risk_coverage(Terminal, VS) ->
     RiskCoverage = Terminal#domain_Terminal.risk_coverage,
     math:exp(-hg_inspector:compare_risk_score(RiskCoverage, RiskScore)).
 
-build_fd_service_id(#domain_ProviderRef{id = ID}) ->
+build_fd_failrate_service_id(#domain_ProviderRef{id = ID}) ->
     BinaryID = erlang:integer_to_binary(ID),
     hg_fault_detector_client:build_service_id(adapter_availability, BinaryID).
+
+build_fd_conversion_service_id(#domain_ProviderRef{id = ID}) ->
+    BinaryID = erlang:integer_to_binary(ID),
+    hg_fault_detector_client:build_service_id(provider_conversion, BinaryID).
 
 -spec get_payments_terms(route(), hg_domain:revision()) -> terms().
 
