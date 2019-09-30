@@ -109,11 +109,22 @@ build_service_id(ServiceType, ID) ->
 %%------------------------------------------------------------------------------
 %% @doc
 %% `build_operation_id_id/3` is a helper function for building operation IDs
+%% The final part of the id is generated randomly.
 %% @end
 %%------------------------------------------------------------------------------
 -spec build_operation_id(fd_service_type()) -> binary().
 build_operation_id(ServiceType) ->
     do_build_operation_id(ServiceType).
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% `build_operation_id_id/4` is a deterministic version of `build_operation_id/3`, with the `ID` argument being the final part
+%% of the operation id, instead of it being randomly generated.
+%% @end
+%%------------------------------------------------------------------------------
+-spec build_operation_id(fd_service_type(), binary()) -> binary().
+build_operation_id(ServiceType, ID) ->
+    do_build_operation_id(ServiceType, ID).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -251,15 +262,13 @@ do_call('RegisterOperation', Args, Opts, Deadline) ->
     end.
 
 do_build_service_id(ServiceType, ID) ->
-    hg_utils:construct_complex_id([
-        <<"hellgate_service">>,
-        genlib:to_binary(ServiceType),
-        ID
-    ]).
+    Prefix = <<"hellgate_service">>,
+    BinServiceType = genlib:to_binary(ServiceType),
+    hg_utils:construct_complex_id([Prefix, BinServiceType, ID]).
 
 do_build_operation_id(ServiceType) ->
-    hg_utils:construct_complex_id([
-        <<"hellgate_operation">>,
-        genlib:to_binary(ServiceType),
-        hg_utils:unique_id()
-    ]).
+    do_build_operation_id(ServiceType, hg_utils:unique_id()).
+do_build_operation_id(ServiceType, ID) ->
+    Prefix = <<"hellgate_operation">>,
+    BinServiceType = genlib:to_binary(ServiceType),
+    hg_utils:construct_complex_id([Prefix, BinServiceType, ID]).
