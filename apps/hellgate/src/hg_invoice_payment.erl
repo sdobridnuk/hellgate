@@ -1512,7 +1512,9 @@ process_routing(Action, St) ->
     Events0 = [?risk_score_changed(RiskScore)],
     VS1 = VS0#{risk_score => RiskScore},
     case choose_route(PaymentInstitution, VS1, Revision, St) of
-        {ok, Route} ->
+        {ok, {ProviderRef, _TerminalRef} = Route} ->
+            % TODO: Initiate fault detector conversion service here?
+            _ = provider_conversion_service(start, ProviderRef, Payment),
             process_cash_flow_building(Route, VS1, Payment, PaymentInstitution, Revision, Opts, Events0, Action);
         {error, {no_route_found, {Reason, _Details}}} ->
             Failure = {failure, payproc_errors:construct('PaymentFailure',
@@ -1520,6 +1522,35 @@ process_routing(Action, St) ->
             )},
             process_failure(get_activity(St), Events0, Action, Failure, St)
     end.
+
+provider_conversion_service(start, #domain_ProviderRef{id = ProviderID}, Payment) ->
+    ServiceType   = provider_conversion,
+    BinaryID      = erlang:integer_to_binary(ProviderID),
+    PaymentID     = get_payment_id(Payment),
+    % TODO: config should not be hardcoded perhaps
+    ServiceConfig = hg_fault_detector_client:build_config(6000000, 1200000),
+    %
+    ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
+    OperationID   = hg_fault_detector_client:build_operation_id(ServiceType, PaymentID),
+    case hg_fault_detector_client:register_operation(start, ServiceID, OperationID, ServiceConfig) of
+        {error, not_found} ->
+            _ = hg_fault_detector_client:init_service(ServiceID, ServiceConfig),
+            _ = hg_fault_detector_client:register_operation(start, ServiceID, OperationID, ServiceConfig);
+        Result ->
+            Result
+    end;
+provider_conversion_service(Status, #domain_ProviderRef{id = ProviderID}, Payment)
+    when Status =:= error;
+         Status =:= finish->
+    ServiceType   = provider_conversion,
+    BinaryID      = erlang:integer_to_binary(ProviderID),
+    PaymentID     = get_payment_id(Payment),
+    % TODO: config should not be hardcoded perhaps
+    ServiceConfig = hg_fault_detector_client:build_config(6000000, 1200000),
+    %
+    ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
+    OperationID   = hg_fault_detector_client:build_operation_id(ServiceType, PaymentID),
+    _             = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig).
 
 process_cash_flow_building(Route, VS, Payment, PaymentInstitution, Revision, Opts, Events0, Action) ->
     MerchantTerms = get_merchant_payments_terms(Opts, Revision),
@@ -1720,8 +1751,16 @@ process_result({payment, finalizing_accounter}, Action, St) ->
     Target = get_target(St),
     _AffectedAccounts = case Target of
         ?captured() ->
+            Payment     = get_payment(St),
+            Route       = get_route(St),
+            ProviderRef = get_route_provider_ref(Route),
+            _           = provider_conversion_service(finish, ProviderRef, Payment),
             commit_payment_cashflow(St);
         ?cancelled() ->
+            Payment     = get_payment(St),
+            Route       = get_route(St),
+            ProviderRef = get_route_provider_ref(Route),
+            _           = provider_conversion_service(error, ProviderRef, Payment),
             rollback_payment_cashflow(St)
     end,
     NewAction = get_action(Target, Action, St),
@@ -1762,6 +1801,10 @@ process_failure({payment, Step}, Events, Action, Failure, St, _RefundSt) when
             {SessionEvents, SessionAction} = retry_session(Action, Target, Timeout),
             {next, {Events ++ SessionEvents, SessionAction}};
         fatal ->
+            Payment     = get_payment(St),
+            Route       = get_route(St),
+            ProviderRef = get_route_provider_ref(Route),
+            _           = provider_conversion_service(error, ProviderRef, Payment),
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
 process_failure({refund_new, ID}, Events, Action, Failure, St, RefundSt) ->
