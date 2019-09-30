@@ -43,7 +43,7 @@
 -type terminal_ref() :: dmsl_domain_thrift:'TerminalRef'().
 
 -type provider_status()     :: {provider_condition(), fail_rate()}.
--type provider_condition()  :: alive | dead.
+-type provider_condition()  :: 1 | 0.
 -type fail_rate()           :: float().
 
 -type fail_rated_provider() :: {provider_ref(), provider(), provider_status()}.
@@ -139,6 +139,10 @@ choose_scored_route(ScoredRoutes, _RejectContext) ->
     {ok, export_route(Route)}.
 
 score_routes(Routes, VS) ->
+    % placeholder
+    ConversionServiceIDs = [build_fd_conversion_service_id(ProviderRef) || {PR, _T, _PStatus} <- Routes],
+    _ConversionStats     = hg_fault_detector_client:get_statistics(ConversionServiceIDs),
+    % placeholder
     [{score_route(R, VS), {Provider, Terminal}} || {Provider, Terminal, _ProviderStatus} = R <- Routes].
 
 balance_routes(FailRatedRoutes) ->
@@ -156,21 +160,17 @@ export_route({ProviderRef, {TerminalRef, _Terminal, _Priority}}) ->
 
 score_providers_with_fault_detector([]) -> [];
 score_providers_with_fault_detector(Providers) ->
-    % placeholder
-    ConversionServiceIDs = [build_fd_conversion_service_id(PR) || {PR, _P} <- Providers],
-    _ConversionStats     = hg_fault_detector_client:get_statistics(ConversionServiceIDs),
-    % placeholder
     FailRateServiceIDs = [build_fd_failrate_service_id(PR) || {PR, _P} <- Providers],
     FailRateStats      = hg_fault_detector_client:get_statistics(FailRateServiceIDs),
     FailRatedProviders = [{PR, P, get_provider_status(PR, P, FailRateStats)} || {PR, P} <- Providers],
     FailRatedProviders.
 
 %% TODO: maybe use custom cutoffs per provider
-get_provider_status(ProviderRef, _Provider, FDStats) ->
-    ProviderID       = build_fd_service_id(ProviderRef),
+get_provider_status(ProviderRef, _Provider, FailRateStats) ->
+    ProviderID       = build_fd_failrate_service_id(ProviderRef),
     FDConfig         = genlib_app:env(hellgate, fault_detector, #{}),
     CriticalFailRate = genlib_map:get(critical_fail_rate, FDConfig, 0.7),
-    case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FDStats) of
+    case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FailRateStats) of
         {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}}
             when FailRate >= CriticalFailRate ->
             {0, FailRate};
@@ -179,6 +179,15 @@ get_provider_status(ProviderRef, _Provider, FDStats) ->
         false ->
             {1, 0.0}
     end.
+
+% get_provider_conversion(ProviderRef, ConversionStats) ->
+%     ProviderID = build_fd_conversion_service_id(ProviderRef),
+%     case lists:keysearch(ProviderID, #fault_detector_ServiceStatistics.service_id, FailRateStats) of
+%         {value, #fault_detector_ServiceStatistics{failure_rate = FailedConversions}} ->
+%             1.0 - FailedConversions;
+%         false ->
+%             1.0
+%     end.
 
 score_route({_Provider, {_TerminalRef, Terminal, Priority}, ProviderStatus}, VS) ->
     RiskCoverage = score_risk_coverage(Terminal, VS),
