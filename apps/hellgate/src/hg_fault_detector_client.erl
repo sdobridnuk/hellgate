@@ -104,7 +104,7 @@ build_config(SlidingWindow, OpTimeLimit, PreAggrSize) ->
 -spec build_service_id(fd_service_type(), binary()) ->
     binary().
 build_service_id(ServiceType, ID) ->
-    do_build_service_id(ServiceType, ID).
+    do_build_id(service, ServiceType, ID).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -114,7 +114,7 @@ build_service_id(ServiceType, ID) ->
 %%------------------------------------------------------------------------------
 -spec build_operation_id(fd_service_type()) -> binary().
 build_operation_id(ServiceType) ->
-    do_build_operation_id(ServiceType).
+    build_operation_id(ServiceType, hg_utils:unique_id()).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -124,7 +124,7 @@ build_operation_id(ServiceType) ->
 %%------------------------------------------------------------------------------
 -spec build_operation_id(fd_service_type(), binary()) -> binary().
 build_operation_id(ServiceType, ID) ->
-    do_build_operation_id(ServiceType, ID).
+    do_build_id(operation, ServiceType, ID).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -261,14 +261,10 @@ do_call('RegisterOperation', Args, Opts, Deadline) ->
             {error, Reason}
     end.
 
-do_build_service_id(ServiceType, ID) ->
-    Prefix = <<"hellgate_service">>,
-    BinServiceType = genlib:to_binary(ServiceType),
-    hg_utils:construct_complex_id([Prefix, BinServiceType, ID]).
-
-do_build_operation_id(ServiceType) ->
-    do_build_operation_id(ServiceType, hg_utils:unique_id()).
-do_build_operation_id(ServiceType, ID) ->
-    Prefix = <<"hellgate_operation">>,
+do_build_id(IDType, ServiceType, ID) ->
+    Prefix = case IDType of
+        service   -> <<"hellgate_service">>;
+        operation -> <<"hellgate_operation">>
+    end,
     BinServiceType = genlib:to_binary(ServiceType),
     hg_utils:construct_complex_id([Prefix, BinServiceType, ID]).
