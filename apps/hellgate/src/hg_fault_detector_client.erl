@@ -25,6 +25,7 @@
 
 -export([build_service_id/2]).
 -export([build_operation_id/1]).
+-export([build_operation_id/2]).
 
 -export([init_service/1]).
 -export([init_service/2]).
@@ -118,7 +119,8 @@ build_operation_id(ServiceType) ->
 
 %%------------------------------------------------------------------------------
 %% @doc
-%% `build_operation_id_id/4` is a deterministic version of `build_operation_id/3`, with the `ID` argument being the final part
+%% `build_operation_id_id/4` is a deterministic version of
+%% `build_operation_id/3`, with the `ID` argument being the final part
 %% of the operation id, instead of it being randomly generated.
 %% @end
 %%------------------------------------------------------------------------------

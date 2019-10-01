@@ -157,12 +157,11 @@ export_route({ProviderRef, {TerminalRef, _Terminal, _Priority}}) ->
 
 score_providers_with_fault_detector([]) -> [];
 score_providers_with_fault_detector(Providers) ->
-    FailRateServiceIDs   = [build_fd_failrate_service_id(PR) || {PR, _P} <- Providers],
-    FailRateStats        = hg_fault_detector_client:get_statistics(FailRateServiceIDs),
-    ConversionServiceIDs = [build_fd_conversion_service_id(PR) || {PR, _P} <- Providers],
-    ConversionStats      = hg_fault_detector_client:get_statistics(ConversionServiceIDs),
-    FailRatedProviders   = [{PR, P, get_provider_status(PR, P, FailRateStats, ConversionStats)} || {PR, P} <- Providers],
-    FailRatedProviders.
+    FailRateIDs     = [build_fd_failrate_service_id(PR) || {PR, _P} <- Providers],
+    FailRateStats   = hg_fault_detector_client:get_statistics(FailRateIDs),
+    ConversionIDs   = [build_fd_conversion_service_id(PR) || {PR, _P} <- Providers],
+    ConversionStats = hg_fault_detector_client:get_statistics(ConversionIDs),
+    [{PR, P, get_provider_status(PR, P, FailRateStats, ConversionStats)} || {PR, P} <- Providers].
 
 %% TODO: maybe use custom cutoffs per provider
 get_provider_status(ProviderRef, _Provider, FailRateStats, ConversionStats) ->
