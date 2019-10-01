@@ -1523,7 +1523,7 @@ process_routing(Action, St) ->
             process_failure(get_activity(St), Events0, Action, Failure, St)
     end.
 
-provider_conversion_service(start, #domain_ProviderRef{id = ProviderID}, Payment) ->
+provider_conversion_service(Status, #domain_ProviderRef{id = ProviderID}, Payment) ->
     ServiceType   = provider_conversion,
     BinaryID      = erlang:integer_to_binary(ProviderID),
     PaymentID     = get_payment_id(Payment),
@@ -1532,25 +1532,19 @@ provider_conversion_service(start, #domain_ProviderRef{id = ProviderID}, Payment
     %
     ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
     OperationID   = hg_fault_detector_client:build_operation_id(ServiceType, PaymentID),
+    case Status of
+        start  -> _ = maybe_init_and_start_service(ServiceID, OperationID, ServiceConfig);
+        Status -> _ = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig)
+    end.
+
+maybe_init_and_start_service(ServiceType, OperationID, ServiceConfig) ->
     case hg_fault_detector_client:register_operation(start, ServiceID, OperationID, ServiceConfig) of
         {error, not_found} ->
             _ = hg_fault_detector_client:init_service(ServiceID, ServiceConfig),
             _ = hg_fault_detector_client:register_operation(start, ServiceID, OperationID, ServiceConfig);
         Result ->
             Result
-    end;
-provider_conversion_service(Status, #domain_ProviderRef{id = ProviderID}, Payment)
-    when Status =:= error;
-         Status =:= finish->
-    ServiceType   = provider_conversion,
-    BinaryID      = erlang:integer_to_binary(ProviderID),
-    PaymentID     = get_payment_id(Payment),
-    % TODO: config should not be hardcoded perhaps
-    ServiceConfig = hg_fault_detector_client:build_config(6000000, 1200000),
-    %
-    ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
-    OperationID   = hg_fault_detector_client:build_operation_id(ServiceType, PaymentID),
-    _             = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig).
+    end.
 
 process_cash_flow_building(Route, VS, Payment, PaymentInstitution, Revision, Opts, Events0, Action) ->
     MerchantTerms = get_merchant_payments_terms(Opts, Revision),
