@@ -140,10 +140,6 @@ choose_scored_route(ScoredRoutes, _RejectContext) ->
     {ok, export_route(Route)}.
 
 score_routes(Routes, VS) ->
-    % placeholder
-    % ConversionServiceIDs = [build_fd_conversion_service_id(ProviderRef) || {PR, _T, _PStatus} <- Routes],
-    % _ConversionStats     = hg_fault_detector_client:get_statistics(ConversionServiceIDs),
-    % placeholder
     [{score_route(R, VS), {Provider, Terminal}} || {Provider, Terminal, _ProviderStatus} = R <- Routes].
 
 balance_routes(FailRatedRoutes) ->
