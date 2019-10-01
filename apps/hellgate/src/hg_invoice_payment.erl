@@ -1537,7 +1537,7 @@ provider_conversion_service(Status, #domain_ProviderRef{id = ProviderID}, Paymen
         Status -> _ = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig)
     end.
 
-maybe_init_and_start_service(ServiceType, OperationID, ServiceConfig) ->
+maybe_init_and_start_service(ServiceID, OperationID, ServiceConfig) ->
     case hg_fault_detector_client:register_operation(start, ServiceID, OperationID, ServiceConfig) of
         {error, not_found} ->
             _ = hg_fault_detector_client:init_service(ServiceID, ServiceConfig),
