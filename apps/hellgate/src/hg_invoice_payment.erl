@@ -1512,7 +1512,8 @@ process_routing(Action, St) ->
     Events0 = [?risk_score_changed(RiskScore)],
     VS1 = VS0#{risk_score => RiskScore},
     case choose_route(PaymentInstitution, VS1, Revision, St) of
-        {ok, {ProviderRef, _TerminalRef} = Route} ->
+        {ok, Route} ->
+            ProviderRef = get_route_provider_ref(Route),
             _ = provider_conversion_service(start, ProviderRef, Payment),
             process_cash_flow_building(Route, VS1, Payment, PaymentInstitution, Revision, Opts, Events0, Action);
         {error, {no_route_found, {Reason, _Details}}} ->
