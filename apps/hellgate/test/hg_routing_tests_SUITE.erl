@@ -157,9 +157,9 @@ gathers_fail_rated_providers(_C) ->
 
     {Providers0, _RejectContext0} = hg_routing:gather_providers(payment, PaymentInstitution, VS, Revision),
     [
-        {?prv(202), _, {1, 0.0}},
-        {?prv(201), _, {1, 0.1}},
-        {?prv(200), _, {0, 0.9}}
+        {?prv(202), _, {1, 0.0, 1.0}},
+        {?prv(201), _, {1, 0.1, 1.0}},
+        {?prv(200), _, {0, 0.9, 1.0}}
     ] = hg_routing:gather_provider_fail_rates(Providers0),
 
     hg_context:cleanup(),
@@ -317,9 +317,9 @@ prefer_alive(_C) ->
 
     {ProviderRefs, ProviderData} = lists:unzip(Providers),
 
-    FailRatedProviders0 = lists:zip3(ProviderRefs, ProviderData, [{1, 0.0}, {0, 1.0}, {0, 1.0}]),
-    FailRatedProviders1 = lists:zip3(ProviderRefs, ProviderData, [{0, 1.0}, {1, 0.0}, {0, 1.0}]),
-    FailRatedProviders2 = lists:zip3(ProviderRefs, ProviderData, [{0, 1.0}, {0, 1.0}, {1, 0.0}]),
+    FailRatedProviders0 = lists:zip3(ProviderRefs, ProviderData, [{1, 0.0, 1.0}, {0, 1.0, 1.0}, {0, 1.0, 1.0}]),
+    FailRatedProviders1 = lists:zip3(ProviderRefs, ProviderData, [{0, 1.0, 1.0}, {1, 0.0, 1.0}, {0, 1.0, 1.0}]),
+    FailRatedProviders2 = lists:zip3(ProviderRefs, ProviderData, [{0, 1.0, 1.0}, {0, 1.0, 1.0}, {1, 0.0, 1.0}]),
 
     {FailRatedRoutes0, RC0} = hg_routing:gather_routes(payment, FailRatedProviders0, RejectContext, VS, Revision),
     {FailRatedRoutes1, RC1} = hg_routing:gather_routes(payment, FailRatedProviders1, RejectContext, VS, Revision),
@@ -354,7 +354,7 @@ prefer_better_risk_score(_C) ->
 
     {ProviderRefs, ProviderData} = lists:unzip(Providers),
 
-    FailRatedProviders = lists:zip3(ProviderRefs, ProviderData, [{1, 0.6}, {1, 0.6}, {0, 0.8}]),
+    FailRatedProviders = lists:zip3(ProviderRefs, ProviderData, [{1, 0.6, 1.0}, {1, 0.6, 1.0}, {0, 0.8, 1.0}]),
 
     {FailRatedRoutes, RC} = hg_routing:gather_routes(payment, FailRatedProviders, RejectContext, VS, Revision),
 
@@ -383,7 +383,7 @@ prefer_lower_fail_rate(_C) ->
 
     {ProviderRefs, ProviderData} = lists:unzip(Providers),
 
-    FailRatedProviders5 = lists:zip3(ProviderRefs, ProviderData, [{0, 0.8}, {1, 0.6}, {1, 0.5}]),
+    FailRatedProviders5 = lists:zip3(ProviderRefs, ProviderData, [{0, 0.8, 1.0}, {1, 0.6, 1.0}, {1, 0.5, 1.0}]),
 
     {FailRatedRoutes5, RC5} = hg_routing:gather_routes(payment, FailRatedProviders5, RejectContext, VS, Revision),
 
