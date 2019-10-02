@@ -21,6 +21,7 @@
 -export([prefer_alive/1]).
 -export([prefer_better_risk_score/1]).
 -export([prefer_lower_fail_rate/1]).
+-export([prefer_higher_conversion/1]).
 -export([handle_uncomputale_provider_terms/1]).
 
 -export([terminal_priority_for_shop/1]).
@@ -390,6 +391,35 @@ prefer_lower_fail_rate(_C) ->
     Result5 = hg_routing:choose_route(FailRatedRoutes5, RC5, VS),
 
     {ok, #domain_PaymentRoute{provider = ?prv(200)}} = Result5,
+
+    ok.
+
+-spec prefer_higher_conversion(config()) -> test_return().
+prefer_higher_conversion(_C) ->
+    VS = #{
+        category        => ?cat(1),
+        currency        => ?cur(<<"RUB">>),
+        cost            => ?cash(1000, <<"RUB">>),
+        payment_tool    => {payment_terminal, #domain_PaymentTerminal{terminal_type = euroset}},
+        party_id        => <<"12345">>,
+        risk_score      => low,
+        flow            => instant
+    },
+
+    Revision = hg_domain:head(),
+    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
+
+    {Providers, RejectContext} = hg_routing:gather_providers(payment, PaymentInstitution, VS, Revision),
+
+    {ProviderRefs, ProviderData} = lists:unzip(Providers),
+
+    FailRatedProviders5 = lists:zip3(ProviderRefs, ProviderData, [{0, 0.8, 1.0}, {1, 0.5, 0.9}, {1, 0.5, 1.0}]),
+
+    {FailRatedRoutes5, RC5} = hg_routing:gather_routes(payment, FailRatedProviders5, RejectContext, VS, Revision),
+
+    Result5 = hg_routing:choose_route(FailRatedRoutes5, RC5, VS),
+
+    {ok, #domain_PaymentRoute{provider = ?prv(202)}} = Result5,
 
     ok.
 
