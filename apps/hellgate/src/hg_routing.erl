@@ -157,26 +157,25 @@ export_route({ProviderRef, {TerminalRef, _Terminal, _Priority}}) ->
 
 score_providers_with_fault_detector([]) -> [];
 score_providers_with_fault_detector(Providers) ->
-    FailRateIDs     = [build_fd_failrate_service_id(PR) || {PR, _P} <- Providers],
-    FailRateStats   = hg_fault_detector_client:get_statistics(FailRateIDs),
-    ConversionIDs   = [build_fd_conversion_service_id(PR) || {PR, _P} <- Providers],
-    ConversionStats = hg_fault_detector_client:get_statistics(ConversionIDs),
-    [{PR, P, get_provider_status(PR, P, FailRateStats, ConversionStats)} || {PR, P} <- Providers].
+    FailRateIDs   = [build_fd_failrate_service_id(PR) || {PR, _P} <- Providers],
+    ConversionIDs = [build_fd_conversion_service_id(PR) || {PR, _P} <- Providers],
+    FDStats       = hg_fault_detector_client:get_statistics(FailRateIDs ++ ConversionIDs),
+    [{PR, P, get_provider_status(PR, P, FDStats)} || {PR, P} <- Providers].
 
 %% TODO: maybe use custom cutoffs per provider
-get_provider_status(ProviderRef, _Provider, FailRateStats, ConversionStats) ->
-    EnvFDConfig         = genlib_app:env(hellgate, fault_detector, #{}),
-    CriticalFailRate    = genlib_map:get(critical_fail_rate, EnvFDConfig, 0.7),
-    FailRateServiceID   = build_fd_failrate_service_id(ProviderRef),
-    ConversionServiceID = build_fd_conversion_service_id(ProviderRef),
-    Conversion =
-        case lists:keysearch(ConversionServiceID, #fault_detector_ServiceStatistics.service_id, ConversionStats) of
+get_provider_status(ProviderRef, _Provider, FDStats) ->
+    EnvFDConfig      = genlib_app:env(hellgate, fault_detector, #{}),
+    CriticalFailRate = genlib_map:get(critical_fail_rate, EnvFDConfig, 0.7),
+    FailRateID       = build_fd_failrate_service_id(ProviderRef),
+    ConversionID     = build_fd_conversion_service_id(ProviderRef),
+    Conversion       =
+        case lists:keysearch(ConversionID, #fault_detector_ServiceStatistics.service_id, FDStats) of
             {value, #fault_detector_ServiceStatistics{failure_rate = FailedConversions}} ->
                 1.0 - FailedConversions;
             false ->
                 1.0
         end,
-    case lists:keysearch(FailRateServiceID, #fault_detector_ServiceStatistics.service_id, FailRateStats) of
+    case lists:keysearch(FailRateID, #fault_detector_ServiceStatistics.service_id, FDStats) of
         {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}}
             when FailRate >= CriticalFailRate ->
             {0, FailRate, Conversion};
