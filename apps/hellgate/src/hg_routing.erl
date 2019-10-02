@@ -165,8 +165,8 @@ score_providers_with_fault_detector(Providers) ->
 
 %% TODO: maybe use custom cutoffs per provider
 get_provider_status(ProviderRef, _Provider, FailRateStats, ConversionStats) ->
-    FailRateConfig      = genlib_app:env(hellgate, fault_detector, #{}),
-    CriticalFailRate    = genlib_map:get(critical_fail_rate, FailRateConfig, 0.7),
+    EnvFDConfig         = genlib_app:env(hellgate, fault_detector, #{}),
+    CriticalFailRate    = genlib_map:get(critical_fail_rate, EnvFDConfig, 0.7),
     FailRateServiceID   = build_fd_failrate_service_id(ProviderRef),
     ConversionServiceID = build_fd_conversion_service_id(ProviderRef),
     Conversion =
