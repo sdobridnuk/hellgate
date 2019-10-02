@@ -1513,8 +1513,6 @@ process_routing(Action, St) ->
     VS1 = VS0#{risk_score => RiskScore},
     case choose_route(PaymentInstitution, VS1, Revision, St) of
         {ok, Route} ->
-            ProviderRef = get_route_provider_ref(Route),
-            _ = provider_conversion_service(start, ProviderRef, Payment),
             process_cash_flow_building(Route, VS1, Payment, PaymentInstitution, Revision, Opts, Events0, Action);
         {error, {no_route_found, {Reason, _Details}}} ->
             Failure = {failure, payproc_errors:construct('PaymentFailure',
@@ -1523,21 +1521,27 @@ process_routing(Action, St) ->
             process_failure(get_activity(St), Events0, Action, Failure, St)
     end.
 
-provider_conversion_service(Status, #domain_ProviderRef{id = ProviderID}, Payment) ->
+% TODO: maybe use custom settings per provider
+provider_conversion_service(Status, St) ->
+    Payment       = get_payment(St),
+    Route         = get_route(St),
+    ProviderRef   = get_route_provider_ref(Route),
+    ProviderID    = ProviderRef#domain_ProviderRef.id,
     ServiceType   = provider_conversion,
     BinaryID      = erlang:integer_to_binary(ProviderID),
     PaymentID     = get_payment_id(Payment),
-    % TODO: config should not be hardcoded perhaps
-    ServiceConfig = hg_fault_detector_client:build_config(6000000, 1200000),
-    %
+    EnvFDConfig   = genlib_app:env(hellgate, fault_detector, #{}),
+    SlidingWindow = genlib_map:get(conversion_sliding_window,       EnvFDConfig, 6000000),
+    OpTimeLimit   = genlib_map:get(conversion_operation_time_limit, EnvFDConfig, 1200000),
+    ServiceConfig = hg_fault_detector_client:build_config(SlidingWindow, OpTimeLimit),
     ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
     OperationID   = hg_fault_detector_client:build_operation_id(ServiceType, PaymentID),
     case Status of
-        start  -> _ = maybe_init_and_start_service(ServiceID, OperationID, ServiceConfig);
+        start  -> _ = maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig);
         Status -> _ = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig)
     end.
 
-maybe_init_and_start_service(ServiceID, OperationID, ServiceConfig) ->
+maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig) ->
     case hg_fault_detector_client:register_operation(start, ServiceID, OperationID, ServiceConfig) of
         {error, not_found} ->
             _ = hg_fault_detector_client:init_service(ServiceID, ServiceConfig),
@@ -1745,16 +1749,8 @@ process_result({payment, finalizing_accounter}, Action, St) ->
     Target = get_target(St),
     _AffectedAccounts = case Target of
         ?captured() ->
-            Payment     = get_payment(St),
-            Route       = get_route(St),
-            ProviderRef = get_route_provider_ref(Route),
-            _           = provider_conversion_service(finish, ProviderRef, Payment),
             commit_payment_cashflow(St);
         ?cancelled() ->
-            Payment     = get_payment(St),
-            Route       = get_route(St),
-            ProviderRef = get_route_provider_ref(Route),
-            _           = provider_conversion_service(error, ProviderRef, Payment),
             rollback_payment_cashflow(St)
     end,
     NewAction = get_action(Target, Action, St),
@@ -1795,10 +1791,6 @@ process_failure({payment, Step}, Events, Action, Failure, St, _RefundSt) when
             {SessionEvents, SessionAction} = retry_session(Action, Target, Timeout),
             {next, {Events ++ SessionEvents, SessionAction}};
         fatal ->
-            Payment     = get_payment(St),
-            Route       = get_route(St),
-            ProviderRef = get_route_provider_ref(Route),
-            _           = provider_conversion_service(error, ProviderRef, Payment),
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
 process_failure({refund_new, ID}, Events, Action, Failure, St, RefundSt) ->
@@ -2320,12 +2312,14 @@ merge_change(Change = ?risk_score_changed(RiskScore), #st{} = St, Opts) ->
         risk_score = RiskScore,
         activity   = {payment, routing}
     };
-merge_change(Change = ?route_changed(Route), #st{} = St, Opts) ->
-    _ = validate_transition({payment, routing}, Change, St, Opts),
-    St#st{
+merge_change(Change = ?route_changed(Route), #st{} = St0, Opts) ->
+    _ = validate_transition({payment, routing}, Change, St0, Opts),
+    St1 = St0#st{
         route      = Route,
         activity   = {payment, cash_flow_building}
-    };
+    },
+    _ = provider_conversion_service(start, St1),
+    St1;
 merge_change(Change = ?cash_flow_changed(Cashflow), #st{activity = Activity} = St, Opts) ->
     _ = validate_transition([{payment, S} || S <- [cash_flow_building, flow_waiting]], Change, St, Opts),
     case Activity of
@@ -2348,18 +2342,22 @@ merge_change(Change = ?payment_status_changed({failed, _} = Status), #st{payment
         routing,
         processing_session
     ]], Change, St, Opts),
+    _ = provider_conversion_service(error, St),
     St#st{
         payment    = Payment#domain_InvoicePayment{status = Status},
         activity   = idle
     };
 merge_change(Change = ?payment_status_changed({cancelled, _} = Status), #st{payment = Payment} = St, Opts) ->
     _ = validate_transition({payment, finalizing_accounter}, Change, St, Opts),
+    % TODO: is cancel actually a finish? Could it perhaps be an error in some circumstances?
+    _ = provider_conversion_service(finish, St),
     St#st{
         payment    = Payment#domain_InvoicePayment{status = Status},
         activity   = idle
     };
 merge_change(Change = ?payment_status_changed({captured, Captured} = Status), #st{payment = Payment} = St, Opts) ->
     _ = validate_transition({payment, finalizing_accounter}, Change, St, Opts),
+    _ = provider_conversion_service(finish, St),
     St#st{
         payment    = Payment#domain_InvoicePayment{
             status = Status,
