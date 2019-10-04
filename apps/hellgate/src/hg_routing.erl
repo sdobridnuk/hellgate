@@ -34,21 +34,21 @@
     rejected_providers  := list(rejected_provider()),
     rejected_routes     := list(rejected_route())
 }.
--type rejected_provider() :: {provider_ref(), Reason :: term()}.
--type rejected_route()    :: {provider_ref(), terminal_ref(), Reason :: term()}.
+-type rejected_provider()      :: {provider_ref(), Reason :: term()}.
+-type rejected_route()         :: {provider_ref(), terminal_ref(), Reason :: term()}.
 
--type provider()     :: dmsl_domain_thrift:'Provider'().
--type provider_ref() :: dmsl_domain_thrift:'ProviderRef'().
--type terminal()     :: dmsl_domain_thrift:'Terminal'().
--type terminal_ref() :: dmsl_domain_thrift:'TerminalRef'().
+-type provider()               :: dmsl_domain_thrift:'Provider'().
+-type provider_ref()           :: dmsl_domain_thrift:'ProviderRef'().
+-type terminal()               :: dmsl_domain_thrift:'Terminal'().
+-type terminal_ref()           :: dmsl_domain_thrift:'TerminalRef'().
 
--type provider_status()     :: {provider_condition(), fail_rate(), conversion()}.
--type provider_condition()  :: 1 | 0.
--type fail_rate()           :: float().
--type conversion()          :: float().
+-type provider_status()        :: {provider_condition(), availability_fail_rate(), conversion_fail_rate()}.
+-type provider_condition()     :: alive | dead.
+-type availability_fail_rate() :: float().
+-type conversion_fail_rate()   :: float().
 
--type fail_rated_provider() :: {provider_ref(), provider(), provider_status()}.
--type fail_rated_route()    :: {provider_ref(), {terminal_ref(), terminal()}, provider_status()}.
+-type fail_rated_provider()    :: {provider_ref(), provider(), provider_status()}.
+-type fail_rated_route()       :: {provider_ref(), {terminal_ref(), terminal()}, provider_status()}.
 
 -export_type([route_predestination/0]).
 
@@ -157,40 +157,44 @@ export_route({ProviderRef, {TerminalRef, _Terminal, _Priority}}) ->
 
 score_providers_with_fault_detector([]) -> [];
 score_providers_with_fault_detector(Providers) ->
-    FailRateIDs   = [build_fd_failrate_service_id(PR) || {PR, _P} <- Providers],
-    ConversionIDs = [build_fd_conversion_service_id(PR) || {PR, _P} <- Providers],
-    FDStats       = hg_fault_detector_client:get_statistics(FailRateIDs ++ ConversionIDs),
+    AvailabilityIDs = [build_fd_availability_service_id(PR) || {PR, _P} <- Providers],
+    ConversionIDs   = [build_fd_conversion_service_id(PR) || {PR, _P} <- Providers],
+    FDStats         = hg_fault_detector_client:get_statistics(AvailabilityIDs ++ ConversionIDs),
     [{PR, P, get_provider_status(PR, P, FDStats)} || {PR, P} <- Providers].
 
 %% TODO: maybe use custom cutoffs per provider
 get_provider_status(ProviderRef, _Provider, FDStats) ->
-    EnvFDConfig      = genlib_app:env(hellgate, fault_detector, #{}),
-    CriticalFailRate = genlib_map:get(critical_fail_rate, EnvFDConfig, 0.7),
-    FailRateID       = build_fd_failrate_service_id(ProviderRef),
-    ConversionID     = build_fd_conversion_service_id(ProviderRef),
-    Conversion       =
-        case lists:keysearch(ConversionID, #fault_detector_ServiceStatistics.service_id, FDStats) of
-            {value, #fault_detector_ServiceStatistics{failure_rate = FailedConversions}} ->
-                1.0 - FailedConversions;
+    EnvFDConfig           = genlib_app:env(hellgate, fault_detector, #{}),
+    CriticalFailRate      = genlib_map:get(critical_fail_rate, EnvFDConfig, 0.7),
+    AvailabilityServiceID = build_fd_availability_service_id(ProviderRef),
+    ConversionServiceID   = build_fd_conversion_service_id(ProviderRef),
+    ConversionFailRate    =
+        case lists:keysearch(ConversionServiceID, #fault_detector_ServiceStatistics.service_id, FDStats) of
+            {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
+                FailRate;
             false ->
                 1.0
         end,
-    case lists:keysearch(FailRateID, #fault_detector_ServiceStatistics.service_id, FDStats) of
-        {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}}
-            when FailRate >= CriticalFailRate ->
-            {0, FailRate, Conversion};
-        {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
-            {1, FailRate, Conversion};
+    case lists:keysearch(AvailabilityServiceID, #fault_detector_ServiceStatistics.service_id, FDStats) of
+        {value, #fault_detector_ServiceStatistics{failure_rate = AvailabilityFailRate}}
+            when AvailabilityFailRate >= CriticalFailRate ->
+            {dead, AvailabilityFailRate, ConversionFailRate};
+        {value, #fault_detector_ServiceStatistics{failure_rate = AvailabilityFailRate}} ->
+            {alive, AvailabilityFailRate, ConversionFailRate};
         false ->
-            {1, 0.0, Conversion}
+            {alive, 0.0, ConversionFailRate}
     end.
 
 score_route({_Provider, {_TerminalRef, Terminal, Priority}, ProviderStatus}, VS) ->
+    {ProviderCondition, AvailabilityFailRate, ConversionFailRate} = ProviderStatus,
     RiskCoverage = score_risk_coverage(Terminal, VS),
-    {ProviderCondition, FailRate, Conversion} = ProviderStatus,
-    SuccessRate = 1.0 - FailRate,
+    Availability = 1.0 - AvailabilityFailRate,
+    Conversion   = 1.0 - ConversionFailRate,
     {PriorityRate, RandomCondition} = Priority,
-    {ProviderCondition, PriorityRate, RandomCondition, RiskCoverage, Conversion, SuccessRate}.
+    case ProviderCondition of
+        alive -> {1, PriorityRate, RandomCondition, RiskCoverage, Conversion, Availability};
+        dead  -> {0, PriorityRate, RandomCondition, RiskCoverage, Conversion, Availability}
+    end.
 
 balance_route_groups(RouteGroups) ->
     maps:fold(
@@ -277,7 +281,7 @@ score_risk_coverage(Terminal, VS) ->
     RiskCoverage = Terminal#domain_Terminal.risk_coverage,
     math:exp(-hg_inspector:compare_risk_score(RiskCoverage, RiskScore)).
 
-build_fd_failrate_service_id(#domain_ProviderRef{id = ID}) ->
+build_fd_availability_service_id(#domain_ProviderRef{id = ID}) ->
     BinaryID = erlang:integer_to_binary(ID),
     hg_fault_detector_client:build_service_id(adapter_availability, BinaryID).
 
