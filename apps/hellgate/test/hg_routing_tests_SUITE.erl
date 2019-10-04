@@ -393,9 +393,9 @@ prefer_lower_fail_rate(_C) ->
 
     {FailRatedRoutes, RC5} = hg_routing:gather_routes(payment, FailRatedProviders, RejectContext, VS, Revision),
 
-    Result5 = hg_routing:choose_route(FailRatedRoutes5, RC5, VS),
+    Result = hg_routing:choose_route(FailRatedRoutes, RC5, VS),
 
-    {ok, #domain_PaymentRoute{provider = ?prv(200)}} = Result5,
+    {ok, #domain_PaymentRoute{provider = ?prv(200)}} = Result,
 
     ok.
 
@@ -423,9 +423,9 @@ prefer_higher_conversion(_C) ->
 
     {FailRatedRoutes, RC5} = hg_routing:gather_routes(payment, FailRatedProviders, RejectContext, VS, Revision),
 
-    Result5 = hg_routing:choose_route(FailRatedRoutes5, RC5, VS),
+    Result = hg_routing:choose_route(FailRatedRoutes, RC5, VS),
 
-    {ok, #domain_PaymentRoute{provider = ?prv(202)}} = Result5,
+    {ok, #domain_PaymentRoute{provider = ?prv(202)}} = Result,
 
     ok.
 
