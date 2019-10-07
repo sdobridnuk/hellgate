@@ -19,6 +19,7 @@
 -export([no_route_found_for_payment/1]).
 -export([fatal_risk_score_for_route_found/1]).
 -export([prefer_alive/1]).
+-export([prefer_normal_conversion/1]).
 -export([prefer_better_risk_score/1]).
 -export([prefer_lower_fail_rate/1]).
 -export([prefer_higher_conversion/1]).
@@ -58,6 +59,7 @@ groups() -> [
     {routing_with_fail_rate, [parallel], [
         gathers_fail_rated_providers,
         prefer_alive,
+        prefer_normal_conversion,
         prefer_better_risk_score,
         prefer_lower_fail_rate
     ]},
@@ -158,9 +160,9 @@ gathers_fail_rated_providers(_C) ->
 
     {Providers0, _RejectContext0} = hg_routing:gather_providers(payment, PaymentInstitution, VS, Revision),
     [
-        {?prv(202), _, {alive, 0.0, 1.0}},
-        {?prv(201), _, {alive, 0.1, 1.0}},
-        {?prv(200), _, {dead,  0.9, 1.0}}
+        {?prv(202), _, {{alive, 0.0}, {normal, 0.0}}},
+        {?prv(201), _, {{alive, 0.1}, {normal, 0.1}}},
+        {?prv(200), _, {{dead,  0.9}, {lacking, 0.9}}}
     ] = hg_routing:gather_provider_fail_rates(Providers0),
 
     hg_context:cleanup(),
@@ -318,11 +320,59 @@ prefer_alive(_C) ->
 
     {ProviderRefs, ProviderData} = lists:unzip(Providers),
 
-    ProviderStatuses0   = [{alive, 0.0, 1.0}, {dead, 1.0, 1.0},  {dead, 1.0, 1.0}],
+    Alive   = {alive,   0.0},
+    Dead    = {dead,    1.0},
+    Normal  = {normal,  0.0},
+
+    ProviderStatuses0   = [{Alive, Normal}, {Dead,  Normal}, {Dead, Normal}],
+    ProviderStatuses1   = [{Dead,  Normal}, {Alive, Normal}, {Dead, Normal}],
+    ProviderStatuses2   = [{Dead,  Normal}, {Dead, Normal},  {Alive, Normal}],
     FailRatedProviders0 = lists:zip3(ProviderRefs, ProviderData, ProviderStatuses0),
-    ProviderStatuses1   = [{dead, 1.0, 1.0},  {alive, 0.0, 1.0}, {dead, 1.0, 1.0}],
     FailRatedProviders1 = lists:zip3(ProviderRefs, ProviderData, ProviderStatuses1),
-    ProviderStatuses2   = [{dead, 1.0, 1.0},  {dead, 1.0, 1.0},  {alive, 0.0, 1.0}],
+    FailRatedProviders2 = lists:zip3(ProviderRefs, ProviderData, ProviderStatuses2),
+
+    {FailRatedRoutes0, RC0} = hg_routing:gather_routes(payment, FailRatedProviders0, RejectContext, VS, Revision),
+    {FailRatedRoutes1, RC1} = hg_routing:gather_routes(payment, FailRatedProviders1, RejectContext, VS, Revision),
+    {FailRatedRoutes2, RC2} = hg_routing:gather_routes(payment, FailRatedProviders2, RejectContext, VS, Revision),
+
+    Result0 = hg_routing:choose_route(FailRatedRoutes0, RC0, VS),
+    Result1 = hg_routing:choose_route(FailRatedRoutes1, RC1, VS),
+    Result2 = hg_routing:choose_route(FailRatedRoutes2, RC2, VS),
+
+    {ok, #domain_PaymentRoute{provider = ?prv(202)}} = Result0,
+    {ok, #domain_PaymentRoute{provider = ?prv(201)}} = Result1,
+    {ok, #domain_PaymentRoute{provider = ?prv(200)}} = Result2,
+
+    ok.
+
+-spec prefer_normal_conversion(config()) -> test_return().
+prefer_normal_conversion(_C) ->
+    VS = #{
+        category        => ?cat(1),
+        currency        => ?cur(<<"RUB">>),
+        cost            => ?cash(1000, <<"RUB">>),
+        payment_tool    => {payment_terminal, #domain_PaymentTerminal{terminal_type = euroset}},
+        party_id        => <<"12345">>,
+        risk_score      => low,
+        flow            => instant
+    },
+
+    Revision = hg_domain:head(),
+    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
+
+    {Providers, RejectContext} = hg_routing:gather_providers(payment, PaymentInstitution, VS, Revision),
+
+    {ProviderRefs, ProviderData} = lists:unzip(Providers),
+
+    Alive   = {alive,   0.0},
+    Normal  = {normal,  0.0},
+    Lacking = {lacking, 1.0},
+
+    ProviderStatuses0   = [{Alive, Normal},  {Alive, Lacking}, {Alive, Lacking}],
+    ProviderStatuses1   = [{Alive, Lacking}, {Alive, Normal},  {Alive, Lacking}],
+    ProviderStatuses2   = [{Alive, Lacking}, {Alive, Lacking}, {Alive, Normal}],
+    FailRatedProviders0 = lists:zip3(ProviderRefs, ProviderData, ProviderStatuses0),
+    FailRatedProviders1 = lists:zip3(ProviderRefs, ProviderData, ProviderStatuses1),
     FailRatedProviders2 = lists:zip3(ProviderRefs, ProviderData, ProviderStatuses2),
 
     {FailRatedRoutes0, RC0} = hg_routing:gather_routes(payment, FailRatedProviders0, RejectContext, VS, Revision),
@@ -358,7 +408,7 @@ prefer_better_risk_score(_C) ->
 
     {ProviderRefs, ProviderData} = lists:unzip(Providers),
 
-    ProviderStatuses   = [{alive, 0.6, 1.0}, {alive, 0.6, 1.0}, {dead, 0.8, 1.0}],
+    ProviderStatuses   = [{{alive, 0.6}, {normal, 0.0}}, {{alive, 0.6}, {normal, 0.0}}, {{dead, 0.8}, {normal, 0.0}}],
     FailRatedProviders = lists:zip3(ProviderRefs, ProviderData, ProviderStatuses),
 
     {FailRatedRoutes, RC} = hg_routing:gather_routes(payment, FailRatedProviders, RejectContext, VS, Revision),
@@ -388,12 +438,12 @@ prefer_lower_fail_rate(_C) ->
 
     {ProviderRefs, ProviderData} = lists:unzip(Providers),
 
-    ProviderStatuses   = [{dead, 0.8, 1.0}, {alive, 0.6, 1.0}, {alive, 0.5, 1.0}],
+    ProviderStatuses   = [{{dead, 0.8}, {lacking, 1.0}}, {{alive, 0.6}, {normal, 0.5}}, {{alive, 0.5}, {normal, 0.5}}],
     FailRatedProviders = lists:zip3(ProviderRefs, ProviderData, ProviderStatuses),
 
-    {FailRatedRoutes, RC5} = hg_routing:gather_routes(payment, FailRatedProviders, RejectContext, VS, Revision),
+    {FailRatedRoutes, RC} = hg_routing:gather_routes(payment, FailRatedProviders, RejectContext, VS, Revision),
 
-    Result = hg_routing:choose_route(FailRatedRoutes, RC5, VS),
+    Result = hg_routing:choose_route(FailRatedRoutes, RC, VS),
 
     {ok, #domain_PaymentRoute{provider = ?prv(200)}} = Result,
 
@@ -418,12 +468,12 @@ prefer_higher_conversion(_C) ->
 
     {ProviderRefs, ProviderData} = lists:unzip(Providers),
 
-    ProviderStatuses   = [{dead, 0.8, 1.0}, {alive, 0.6, 1.0}, {alive, 0.5, 1.0}],
+    ProviderStatuses   = [{{dead, 0.8}, {lacking, 1.0}}, {{alive, 0.5}, {normal, 0.5}}, {{alive, 0.5}, {normal, 0.3}}],
     FailRatedProviders = lists:zip3(ProviderRefs, ProviderData, ProviderStatuses),
 
-    {FailRatedRoutes, RC5} = hg_routing:gather_routes(payment, FailRatedProviders, RejectContext, VS, Revision),
+    {FailRatedRoutes, RC} = hg_routing:gather_routes(payment, FailRatedProviders, RejectContext, VS, Revision),
 
-    Result = hg_routing:choose_route(FailRatedRoutes, RC5, VS),
+    Result = hg_routing:choose_route(FailRatedRoutes, RC, VS),
 
     {ok, #domain_PaymentRoute{provider = ?prv(202)}} = Result,
 
