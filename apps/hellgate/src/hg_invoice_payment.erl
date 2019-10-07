@@ -2390,7 +2390,6 @@ merge_change(Change = ?payment_status_changed({failed, _} = Status), #st{payment
     };
 merge_change(Change = ?payment_status_changed({cancelled, _} = Status), #st{payment = Payment} = St, Opts) ->
     _ = validate_transition({payment, finalizing_accounter}, Change, St, Opts),
-    % TODO: is cancel actually a finish? Could it perhaps be an error in some circumstances?
     St#st{
         payment    = Payment#domain_InvoicePayment{status = Status},
         activity   = idle
