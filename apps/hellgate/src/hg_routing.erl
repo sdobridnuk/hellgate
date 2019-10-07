@@ -42,9 +42,14 @@
 -type terminal()               :: dmsl_domain_thrift:'Terminal'().
 -type terminal_ref()           :: dmsl_domain_thrift:'TerminalRef'().
 
--type provider_status()        :: {provider_condition(), availability_fail_rate(), conversion_fail_rate()}.
--type provider_condition()     :: alive | dead.
+-type provider_status()        :: {availability_status(), conversion_status()}.
+
+-type availability_status()    :: {availability_condition(), availability_fail_rate()}.
+-type availability_condition() :: alive | dead.
 -type availability_fail_rate() :: float().
+
+-type conversion_status()      :: {conversion_condition(), conversion_fail_rate()}.
+-type conversion_condition()   :: normal | lacking.
 -type conversion_fail_rate()   :: float().
 
 -type fail_rated_provider()    :: {provider_ref(), provider(), provider_status()}.
@@ -164,37 +169,59 @@ score_providers_with_fault_detector(Providers) ->
 
 %% TODO: maybe use custom cutoffs per provider
 get_provider_status(ProviderRef, _Provider, FDStats) ->
-    EnvFDConfig           = genlib_app:env(hellgate, fault_detector, #{}),
-    CriticalFailRate      = genlib_map:get(critical_fail_rate, EnvFDConfig, 0.7),
     AvailabilityServiceID = build_fd_availability_service_id(ProviderRef),
     ConversionServiceID   = build_fd_conversion_service_id(ProviderRef),
-    ConversionFailRate    =
-        case lists:keysearch(ConversionServiceID, #fault_detector_ServiceStatistics.service_id, FDStats) of
-            {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
-                FailRate;
-            false ->
-                1.0
-        end,
-    case lists:keysearch(AvailabilityServiceID, #fault_detector_ServiceStatistics.service_id, FDStats) of
-        {value, #fault_detector_ServiceStatistics{failure_rate = AvailabilityFailRate}}
-            when AvailabilityFailRate >= CriticalFailRate ->
-            {dead, AvailabilityFailRate, ConversionFailRate};
-        {value, #fault_detector_ServiceStatistics{failure_rate = AvailabilityFailRate}} ->
-            {alive, AvailabilityFailRate, ConversionFailRate};
+    AvailabilityStatus    = get_provider_availability_status(AvailabilityServiceID, FDStats),
+    ConversionStatus      = get_provider_conversion_status(ConversionServiceID, FDStats),
+    {AvailabilityStatus, ConversionStatus}.
+
+get_provider_availability_status(ID, Stats) ->
+    AvailabilityConfig = genlib_app:env(hellgate, fault_detector_availability, #{}),
+    CriticalFailRate   = genlib_map:get(critical_fail_rate, AvailabilityConfig, 0.7),
+    case lists:keysearch(ID, #fault_detector_ServiceStatistics.service_id, Stats) of
+        {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}}
+            when FailRate >= CriticalFailRate ->
+            {dead,  FailRate};
+        {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
+            {alive, FailRate};
         false ->
-            {alive, 0.0, ConversionFailRate}
+            {alive, 0.0}
+    end.
+
+get_provider_conversion_status(ID, Stats) ->
+    ConversionConfig = genlib_app:env(hellgate, fault_detector_conversion, #{}),
+    CriticalFailRate = genlib_map:get(critical_fail_rate, ConversionConfig, 0.7),
+    case lists:keysearch(ID, #fault_detector_ServiceStatistics.service_id, Stats) of
+        {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}}
+            when FailRate >= CriticalFailRate ->
+            {lacking, FailRate};
+        {value, #fault_detector_ServiceStatistics{failure_rate = FailRate}} ->
+            {normal, FailRate};
+        false ->
+            {normal, 0.0}
     end.
 
 score_route({_Provider, {_TerminalRef, Terminal, Priority}, ProviderStatus}, VS) ->
-    {ProviderCondition, AvailabilityFailRate, ConversionFailRate} = ProviderStatus,
-    RiskCoverage = score_risk_coverage(Terminal, VS),
-    Availability = 1.0 - AvailabilityFailRate,
-    Conversion   = 1.0 - ConversionFailRate,
-    {PriorityRate, RandomCondition} = Priority,
-    case ProviderCondition of
-        alive -> {1, PriorityRate, RandomCondition, RiskCoverage, Conversion, Availability};
-        dead  -> {0, PriorityRate, RandomCondition, RiskCoverage, Conversion, Availability}
-    end.
+    RiskCoverage                              = score_risk_coverage(Terminal, VS),
+    {AvailabilityStatus,    ConversionStatus} = ProviderStatus,
+    {AvailabilityCondition, Availability}     = get_availability_score(AvailabilityStatus),
+    {ConversionCondition,   Conversion}       = get_conversion_score(ConversionStatus),
+    {PriorityRate, RandomCondition}           = Priority,
+    {
+        AvailabilityCondition,
+        ConversionCondition,
+        PriorityRate,
+        RandomCondition,
+        RiskCoverage,
+        Conversion,
+        Availability
+    }.
+
+get_availability_score({alive, FailRate}) -> {1, 1.0 - FailRate};
+get_availability_score({dead,  FailRate}) -> {0, 1.0 - FailRate}.
+
+get_conversion_score({normal,  FailRate}) -> {1, 1.0 - FailRate};
+get_conversion_score({lacking, FailRate}) -> {0, 1.0 - FailRate}.
 
 balance_route_groups(RouteGroups) ->
     maps:fold(
@@ -222,7 +249,7 @@ get_weight_from_route({_Provider, {_TerminalRef, _Terminal, Priority}, _Provider
 set_weight_to_route(Value, Route) ->
     set_random_condition(Value, Route).
 
-group_routes_by_priority(Route = {_, _, {ProviderCondition, _, _}}, SortedRoutes) ->
+group_routes_by_priority(Route = {_, _, {{ProviderCondition, _}, _}}, SortedRoutes) ->
     Priority = get_priority_from_route(Route),
     Key = {ProviderCondition, Priority},
     case maps:get(Key, SortedRoutes, undefined) of
