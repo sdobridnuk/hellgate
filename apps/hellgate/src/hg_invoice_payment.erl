@@ -126,7 +126,8 @@
     adjustments    = []  :: [adjustment()],
     recurrent_token      :: undefined | recurrent_token(),
     opts                 :: undefined | opts(),
-    repair_scenario      :: undefined | hg_invoice_repair:scenario()
+    repair_scenario      :: undefined | hg_invoice_repair:scenario(),
+    capture_params       :: undefined | capture_params()
 }).
 
 -record(refund_st, {
@@ -153,10 +154,6 @@
 
 -type chargeback()               :: dmsl_domain_thrift:'InvoicePaymentChargeback'().
 -type chargeback_id()            :: dmsl_domain_thrift:'InvoicePaymentChargebackID'().
-% -type chargeback_params()        :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackParams'().
-% -type chargeback_accept_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackAcceptParams'().
-% -type chargeback_reopen_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackReopenParams'().
-% -type chargeback_target_status() :: dmsl_domain_thrift:'InvoicePaymentChargebackStatus'().
 
 -type refund()                   :: dmsl_domain_thrift:'InvoicePaymentRefund'().
 -type refund_id()                :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
@@ -183,6 +180,45 @@
 -type retry_strategy()           :: hg_retry:strategy().
 
 -type session_status()           :: active | suspended | finished.
+
+-type st() :: #st{}.
+
+-export_type([st/0]).
+-export_type([activity/0]).
+-export_type([machine_result/0]).
+
+-type cash()                :: dmsl_domain_thrift:'Cash'().
+-type cart()                :: dmsl_domain_thrift:'InvoiceCart'().
+-type party()               :: dmsl_domain_thrift:'Party'().
+-type payer()               :: dmsl_domain_thrift:'Payer'().
+-type invoice()             :: dmsl_domain_thrift:'Invoice'().
+-type invoice_id()          :: dmsl_domain_thrift:'InvoiceID'().
+-type payment()             :: dmsl_domain_thrift:'InvoicePayment'().
+-type payment_id()          :: dmsl_domain_thrift:'InvoicePaymentID'().
+-type refund()              :: dmsl_domain_thrift:'InvoicePaymentRefund'().
+-type refund_id()           :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
+-type refund_params()       :: dmsl_payment_processing_thrift:'InvoicePaymentRefundParams'().
+-type adjustment()          :: dmsl_domain_thrift:'InvoicePaymentAdjustment'().
+-type adjustment_id()       :: dmsl_domain_thrift:'InvoicePaymentAdjustmentID'().
+-type adjustment_params()   :: dmsl_payment_processing_thrift:'InvoicePaymentAdjustmentParams'().
+-type target()              :: dmsl_domain_thrift:'TargetInvoicePaymentStatus'().
+-type target_type()         :: 'processed' | 'captured' | 'cancelled' | 'refunded'.
+-type risk_score()          :: dmsl_domain_thrift:'RiskScore'().
+-type route()               :: dmsl_domain_thrift:'PaymentRoute'().
+-type cash_flow()           :: dmsl_domain_thrift:'FinalCashFlow'().
+-type trx_info()            :: dmsl_domain_thrift:'TransactionInfo'().
+-type session_result()      :: dmsl_payment_processing_thrift:'SessionResult'().
+-type proxy_state()         :: dmsl_proxy_provider_thrift:'ProxyState'().
+-type tag()                 :: dmsl_proxy_provider_thrift:'CallbackTag'().
+-type callback()            :: dmsl_proxy_provider_thrift:'Callback'().
+-type callback_response()   :: dmsl_proxy_provider_thrift:'CallbackResponse'().
+-type timeout_behaviour()   :: dmsl_timeout_behaviour_thrift:'TimeoutBehaviour'().
+-type make_recurrent()      :: true | false.
+-type recurrent_token()     :: dmsl_domain_thrift:'Token'().
+-type retry_strategy()      :: hg_retry:strategy().
+-type capture_params()      :: dmsl_payment_processing_thrift:'InvoicePaymentCaptureParams'().
+
+-type session_status()      :: active | suspended | finished.
 
 -type session() :: #{
     target            := target(),
@@ -965,24 +1001,36 @@ reduce_selector(Name, Selector, VS, Revision) ->
 start_session(Target) ->
     [?session_ev(Target, ?session_started())].
 
+start_capture(Reason, Cost, Cart) ->
+    [?payment_capture_started(Reason, Cost, Cart)]
+    ++ start_session(?captured(Reason, Cost, Cart)).
+
+start_partial_capture(Reason, Cost, Cart, Cashflow) ->
+    [
+        ?payment_capture_started(Reason, Cost, Cart),
+        ?cash_flow_changed(Cashflow)
+    ].
+
 -spec capture(st(), binary(), cash() | undefined, cart() | undefined, opts()) -> {ok, result()}.
 
 capture(St, Reason, Cost, Cart, Opts) ->
     Payment = get_payment(St),
     _ = assert_capture_cost_currency(Cost, Payment),
     _ = assert_capture_cart(Cost, Cart),
+    _ = assert_activity({payment, flow_waiting}, St),
+    _ = assert_payment_flow(hold, Payment),
     case check_equal_capture_cost_amount(Cost, Payment) of
         true ->
             total_capture(St, Reason, Cart);
         false ->
-            _ = assert_activity({payment, flow_waiting}, St),
-            _ = assert_payment_flow(hold, Payment),
             partial_capture(St, Reason, Cost, Cart, Opts)
     end.
 
 total_capture(St, Reason, Cart) ->
-    Cost = get_payment_cost(get_payment(St)),
-    do_payment(St, ?captured(Reason, Cost, Cart)).
+    Payment = get_payment(St),
+    Cost = get_payment_cost(Payment),
+    Changes = start_capture(Reason, Cost, Cart),
+    {ok, {Changes, hg_machine_action:instant()}}.
 
 partial_capture(St, Reason, Cost, Cart, Opts) ->
     Payment             = get_payment(St),
@@ -1007,29 +1055,14 @@ partial_capture(St, Reason, Cost, Cart, Opts) ->
         VS,
         Revision
     ),
-    Invoice             = get_invoice(Opts),
-    _AffectedAccounts   = hg_accounting:plan(
-        construct_payment_plan_id(Invoice, Payment2),
-        [
-            {2, hg_cashflow:revert(get_cashflow(St))},
-            {3, FinalCashflow}
-        ]
-    ),
-    Changes =
-        [?cash_flow_changed(FinalCashflow)] ++
-        start_session(?captured(Reason, Cost, Cart)),
+    Changes = start_partial_capture(Reason, Cost, Cart, FinalCashflow),
     {ok, {Changes, hg_machine_action:instant()}}.
 
 -spec cancel(st(), binary()) -> {ok, result()}.
 
-cancel(St, Reason) ->
-    do_payment(St, ?cancelled_with_reason(Reason)).
-
-do_payment(St, Target) ->
-    Payment = get_payment(St),
-    _ = assert_activity({payment, flow_waiting}, St),
-    _ = assert_payment_flow(hold, Payment),
-    {ok, {start_session(Target), hg_machine_action:instant()}}.
+cancel(_St, Reason) ->
+    Changes = start_session(?cancelled_with_reason(Reason)),
+    {ok, {Changes, hg_machine_action:instant()}}.
 
 assert_capture_cost_currency(undefined, _) ->
     ok;
@@ -1564,6 +1597,8 @@ process_timeout({chargeback_accounter, ID}, Action, St) ->
     hg_invoice_payment_chargeback:update_cash_flow(ID, Action, St);
 process_timeout({chargeback_accounter_finalise, _ID}, Action, St) ->
     process_result(Action, St);
+process_timeout({payment, updating_accounter}, Action, St) ->
+    process_accounter_update(Action, St);
 process_timeout({refund_new, ID}, Action, St) ->
     process_refund_cashflow(ID, Action, St);
 process_timeout({refund_session, _ID}, Action, St) ->
@@ -1692,6 +1727,27 @@ process_adjustment_cashflow(ID, _Action, St) ->
     _AffectedAccounts = prepare_adjustment_cashflow(Adjustment, St, Opts),
     Events = [?adjustment_ev(ID, ?adjustment_status_changed(?adjustment_processed()))],
     {done, {Events, hg_machine_action:new()}}.
+
+process_accounter_update(Action, St = #st{partial_cash_flow = FinalCashflow, capture_params = CaptureParams}) ->
+    Opts = get_opts(St),
+    #payproc_InvoicePaymentCaptureParams{
+        reason = Reason,
+        cash = Cost,
+        cart = Cart
+    } = CaptureParams,
+    Invoice  = get_invoice(Opts),
+    Payment  = get_payment(St),
+    Payment2 = Payment#domain_InvoicePayment{cost = Cost},
+    _AffectedAccounts = hg_accounting:plan(
+        construct_payment_plan_id(Invoice, Payment2),
+        [
+            {2, hg_cashflow:revert(get_cashflow(St))},
+            {3, FinalCashflow}
+        ]
+    ),
+    Events = start_session(?captured(Reason, Cost, Cart)),
+    {next, {Events, hg_machine_action:set_timeout(0, Action)}}.
+
 %%
 
 -spec process_session(action(), st()) -> machine_result().
@@ -1754,7 +1810,12 @@ finalize_payment(Action, St) ->
                     )
             end
     end,
-    StartEvents = start_session(Target),
+    StartEvents = case Target of
+        ?captured(Reason, Cost) ->
+            start_capture(Reason, Cost, undefined);
+        _ ->
+            start_session(Target)
+    end,
     {done, {StartEvents, hg_machine_action:set_timeout(0, Action)}}.
 
 -spec process_callback_timeout(action(), session(), events(), st()) -> machine_result().
@@ -2406,21 +2467,30 @@ merge_change(Change = ?route_changed(Route), #st{} = St, Opts) ->
         activity   = {payment, cash_flow_building}
     };
 merge_change(Change = ?cash_flow_changed(Cashflow), #st{activity = Activity} = St, Opts) ->
-    _ = validate_transition([{payment, S} || S <- [cash_flow_building, flow_waiting]], Change, St, Opts),
+    _ = validate_transition([{payment, S} || S <- [cash_flow_building, processing_capture]], Change, St, Opts),
     case Activity of
         {payment, cash_flow_building} ->
             St#st{
                 cash_flow  = Cashflow,
                 activity   = {payment, processing_session}
             };
-        _ ->
+        {payment, processing_capture} ->
             St#st{
-                partial_cash_flow = Cashflow
-            }
+                partial_cash_flow = Cashflow,
+                activity   = {payment, updating_accounter}
+            };
+        _ ->
+            St
     end;
 merge_change(Change = ?rec_token_acquired(Token), #st{} = St, Opts) ->
     _ = validate_transition([{payment, processing_session}, {payment, finalizing_session}], Change, St, Opts),
     St#st{recurrent_token = Token};
+merge_change(Change = ?payment_capture_started(Params), #st{} = St, Opts) ->
+    _ = validate_transition([{payment, S} || S <- [flow_waiting]], Change, St, Opts),
+    St#st{
+        capture_params = Params,
+        activity = {payment, processing_capture}
+    };
 merge_change(Change = ?payment_status_changed({failed, _} = Status), #st{payment = Payment} = St, Opts) ->
     _ = validate_transition([{payment, S} || S <- [
         risk_scoring,
@@ -2543,6 +2613,8 @@ merge_change(
     _ = validate_transition([{payment, S} || S <- [
         processing_session,
         flow_waiting,
+        processing_capture,
+        updating_accounter,
         finalizing_session
     ]], Change, St, Opts),
     % FIXME why the hell dedicated handling
@@ -2552,7 +2624,12 @@ merge_change(
         {payment, processing_session} ->
             %% session retrying
             St2#st{activity = {payment, processing_session}};
-        {payment, flow_waiting} ->
+        {payment, PaymentActivity} when
+            PaymentActivity =:= flow_waiting orelse
+            PaymentActivity =:= processing_capture orelse
+            PaymentActivity =:= updating_accounter
+        ->
+            %% session flow
             St2#st{activity = {payment, finalizing_session}};
         {payment, finalizing_session} ->
             %% session retrying
