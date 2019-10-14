@@ -402,7 +402,6 @@ prefer_higher_availability(_C) ->
 
     ProviderStatuses = [{{alive, 0.6}, {normal, 0.5}}, {{alive, 0.5}, {normal, 0.5}}, {{dead, 0.8}, {lacking, 1.0}}],
     FailRatedRoutes  = lists:zip3(ProviderRefs, TerminalData, ProviderStatuses),
-    ct:print("FailRatedRoutes\n~p", [FailRatedRoutes]),
 
     Result = hg_routing:choose_route(FailRatedRoutes, RC, VS),
 

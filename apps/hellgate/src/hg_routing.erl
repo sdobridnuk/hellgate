@@ -153,7 +153,6 @@ export_route({ProviderRef, {TerminalRef, _Terminal, _Priority}}) ->
 score_routes_with_fault_detector([]) -> [];
 score_routes_with_fault_detector(Routes) ->
     IDs     = build_ids(Routes),
-    ct:print("FD IDs\n~p", [IDs]),
     FDStats = hg_fault_detector_client:get_statistics(IDs),
     [{PR, T, get_provider_status(PR, FDStats)} || {PR, T} <- Routes].
 
@@ -199,13 +198,13 @@ get_provider_conversion_status(FDID, Stats) ->
             {normal, 0.0}
     end.
 
-score_route({Provider, {_TerminalRef, Terminal, Priority}, ProviderStatus}, VS) ->
+score_route({_Provider, {_TerminalRef, Terminal, Priority}, ProviderStatus}, VS) ->
     RiskCoverage                              = score_risk_coverage(Terminal, VS),
     {AvailabilityStatus,    ConversionStatus} = ProviderStatus,
     {AvailabilityCondition, Availability}     = get_availability_score(AvailabilityStatus),
     {ConversionCondition,   Conversion}       = get_conversion_score(ConversionStatus),
     {PriorityRate, RandomCondition}           = Priority,
-    Result = {
+    {
         AvailabilityCondition,
         ConversionCondition,
         PriorityRate,
@@ -213,9 +212,7 @@ score_route({Provider, {_TerminalRef, Terminal, Priority}, ProviderStatus}, VS) 
         RiskCoverage,
         Conversion,
         Availability
-    },
-    ct:print("Provider\n~p\nVector\n~p\n", [Provider, Result]),
-    Result.
+    }
 
 get_availability_score({alive, FailRate}) -> {1, 1.0 - FailRate};
 get_availability_score({dead,  FailRate}) -> {0, 1.0 - FailRate}.
