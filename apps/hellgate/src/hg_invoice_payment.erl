@@ -619,25 +619,18 @@ choose_route(PaymentInstitution, VS, Revision, St) ->
         {ok, _Route} = Result ->
             Result;
         undefined ->
-            Payment         = get_payment(St),
-            Predestination  = choose_routing_predestination(Payment),
-            {Providers, RejectContext0} = hg_routing:gather_providers(
+            Payment        = get_payment(St),
+            Predestination = choose_routing_predestination(Payment),
+            {Routes, RejectContext} = hg_routing:gather_routes(
                 Predestination,
                 PaymentInstitution,
                 VS,
                 Revision
             ),
-            FailRatedProviders = hg_routing:gather_provider_fail_rates(Providers),
-            {FailRatedRoutes, RejectContext1} = hg_routing:gather_routes(
-                 Predestination,
-                 FailRatedProviders,
-                 RejectContext0,
-                 VS,
-                 Revision
-            ),
-            case hg_routing:choose_route(FailRatedRoutes, RejectContext1, VS) of
+            FailRatedRoutes = hg_routing:gather_fail_rates(Routes),
+            case hg_routing:choose_route(FailRatedRoutes, RejectContext, VS) of
                 {ok, _Route} = Result ->
-                    _ = log_misconfigurations(RejectContext1),
+                    _ = log_misconfigurations(RejectContext),
                     Result;
                 {error, {no_route_found, {RejectReason, RejectContext}}} = Error ->
                     _ = log_reject_context(RejectReason, RejectContext),
