@@ -178,47 +178,9 @@
 -type make_recurrent()           :: true | false.
 -type recurrent_token()          :: dmsl_domain_thrift:'Token'().
 -type retry_strategy()           :: hg_retry:strategy().
-
--type session_status()           :: active | suspended | finished.
-
--type st() :: #st{}.
-
--export_type([st/0]).
--export_type([activity/0]).
--export_type([machine_result/0]).
-
--type cash()                :: dmsl_domain_thrift:'Cash'().
--type cart()                :: dmsl_domain_thrift:'InvoiceCart'().
--type party()               :: dmsl_domain_thrift:'Party'().
--type payer()               :: dmsl_domain_thrift:'Payer'().
--type invoice()             :: dmsl_domain_thrift:'Invoice'().
--type invoice_id()          :: dmsl_domain_thrift:'InvoiceID'().
--type payment()             :: dmsl_domain_thrift:'InvoicePayment'().
--type payment_id()          :: dmsl_domain_thrift:'InvoicePaymentID'().
--type refund()              :: dmsl_domain_thrift:'InvoicePaymentRefund'().
--type refund_id()           :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
--type refund_params()       :: dmsl_payment_processing_thrift:'InvoicePaymentRefundParams'().
--type adjustment()          :: dmsl_domain_thrift:'InvoicePaymentAdjustment'().
--type adjustment_id()       :: dmsl_domain_thrift:'InvoicePaymentAdjustmentID'().
--type adjustment_params()   :: dmsl_payment_processing_thrift:'InvoicePaymentAdjustmentParams'().
--type target()              :: dmsl_domain_thrift:'TargetInvoicePaymentStatus'().
--type target_type()         :: 'processed' | 'captured' | 'cancelled' | 'refunded'.
--type risk_score()          :: dmsl_domain_thrift:'RiskScore'().
--type route()               :: dmsl_domain_thrift:'PaymentRoute'().
--type cash_flow()           :: dmsl_domain_thrift:'FinalCashFlow'().
--type trx_info()            :: dmsl_domain_thrift:'TransactionInfo'().
--type session_result()      :: dmsl_payment_processing_thrift:'SessionResult'().
--type proxy_state()         :: dmsl_proxy_provider_thrift:'ProxyState'().
--type tag()                 :: dmsl_proxy_provider_thrift:'CallbackTag'().
--type callback()            :: dmsl_proxy_provider_thrift:'Callback'().
--type callback_response()   :: dmsl_proxy_provider_thrift:'CallbackResponse'().
--type timeout_behaviour()   :: dmsl_timeout_behaviour_thrift:'TimeoutBehaviour'().
--type make_recurrent()      :: true | false.
--type recurrent_token()     :: dmsl_domain_thrift:'Token'().
--type retry_strategy()      :: hg_retry:strategy().
 -type capture_params()      :: dmsl_payment_processing_thrift:'InvoicePaymentCaptureParams'().
 
--type session_status()      :: active | suspended | finished.
+-type session_status()           :: active | suspended | finished.
 
 -type session() :: #{
     target            := target(),
