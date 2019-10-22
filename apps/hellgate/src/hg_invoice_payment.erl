@@ -106,6 +106,8 @@
                              | cash_flow_building
                              | processing_session
                              | processing_accounter
+                             | processing_capture
+                             | updating_accounter
                              | flow_waiting
                              | finalizing_session
                              | finalizing_accounter.
