@@ -153,10 +153,6 @@
 
 -type chargeback()               :: dmsl_domain_thrift:'InvoicePaymentChargeback'().
 -type chargeback_id()            :: dmsl_domain_thrift:'InvoicePaymentChargebackID'().
-% -type chargeback_params()        :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackParams'().
-% -type chargeback_accept_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackAcceptParams'().
-% -type chargeback_reopen_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackReopenParams'().
-% -type chargeback_target_status() :: dmsl_domain_thrift:'InvoicePaymentChargebackStatus'().
 
 -type refund()                   :: dmsl_domain_thrift:'InvoicePaymentRefund'().
 -type refund_id()                :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
@@ -2468,15 +2464,21 @@ merge_change(Change = ?chargeback_ev(ID, Event), St, Opts) ->
         ?chargeback_created(_) ->
             _ = validate_transition(idle, Change, St, Opts),
             St#st{activity = {chargeback_new, ID}};
-        ?chargeback_cash_flow_created(_) ->
-            _ = validate_transition({chargeback_new, ID}, Change, St, Opts),
-            St#st{activity = idle};
+        ?chargeback_stage_changed(_) ->
+            _ = validate_transition(idle, Change, St, Opts),
+            St;
         ?chargeback_changed(_, _, _) ->
             _ = validate_transition(idle, Change, St, Opts),
             St#st{activity = {chargeback_accounter, ID}};
         ?chargeback_cash_flow_changed(_) ->
-            _ = validate_transition({chargeback_accounter, ID}, Change, St, Opts),
-            St#st{activity = {chargeback_accounter_finalise, ID}};
+            case St of
+                #st{activity = {chargeback_new, ID}} ->
+                    _ = validate_transition({chargeback_new, ID}, Change, St, Opts),
+                    St#st{activity = idle};
+                #st{activity = {chargeback_accounter, ID}} ->
+                    _ = validate_transition({chargeback_accounter, ID}, Change, St, Opts),
+                    St#st{activity = {chargeback_accounter_finalise, ID}}
+            end;
         ?chargeback_status_changed(_) ->
             _ = validate_transition([idle, {chargeback_accounter_finalise, ID}], Change, St, Opts),
             St#st{activity = idle}

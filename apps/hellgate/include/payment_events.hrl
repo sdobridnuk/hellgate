@@ -181,6 +181,12 @@
     }
 ).
 
+-define(chargeback_stage_changed(Stage),
+    {invoice_payment_chargeback_stage_changed,
+        #payproc_InvoicePaymentChargebackStageChanged{stage = Stage}
+    }
+).
+
 -define(chargeback_cash_flow_created(CashFlow),
     {invoice_payment_chargeback_cash_flow_created,
         #payproc_InvoicePaymentChargebackCashFlowCreated{cash_flow = CashFlow}
@@ -238,8 +244,8 @@
 
 -define(chargeback_status_pending(),
     {pending,  #domain_InvoicePaymentChargebackPending{}}).
--define(chargeback_status_accepted(),
-    {accepted, #domain_InvoicePaymentChargebackAccepted{}}).
+-define(chargeback_status_accepted(Cash),
+    {accepted, #domain_InvoicePaymentChargebackAccepted{cash = Cash}}).
 -define(chargeback_status_rejected(),
     {rejected, #domain_InvoicePaymentChargebackRejected{}}).
 -define(chargeback_status_cancelled(),
