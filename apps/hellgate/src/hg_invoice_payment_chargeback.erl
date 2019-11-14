@@ -211,12 +211,26 @@ do_reopen(ID, PaymentState, ReopenParams) ->
     chargeback_state().
 do_merge_change(?chargeback_created(Chargeback), ChargebackState) ->
     set(Chargeback, ChargebackState);
-do_merge_change(?chargeback_changed(Cash, HoldFunds, TargetStatus), ChargebackState) ->
-    Changes = [
-        {fun set_cash/2         , Cash},
-        {fun set_hold_funds/2   , HoldFunds},
-        {fun set_target_status/2, TargetStatus}
-    ],
+do_merge_change(?chargeback_changed(HoldFunds, TargetStatus), ChargebackState) ->
+    Changes = case TargetStatus of
+        ?chargeback_status_accepted(Cash) ->
+            [
+                {fun set_cash/2         , Cash},
+                {fun set_hold_funds/2   , HoldFunds},
+                {fun set_target_status/2, TargetStatus}
+            ];
+        ?chargeback_status_pending(Cash) ->
+            [
+                {fun set_cash/2         , Cash},
+                {fun set_hold_funds/2   , HoldFunds},
+                {fun set_target_status/2, TargetStatus}
+            ];
+        _ ->
+            [
+                {fun set_hold_funds/2   , HoldFunds},
+                {fun set_target_status/2, TargetStatus}
+            ]
+    end,
     merge_state_changes(Changes, ChargebackState);
 do_merge_change(?chargeback_stage_changed(Stage), ChargebackState) ->
     Changes = [
@@ -285,7 +299,7 @@ do_finalise(ID, Action, PaymentState) ->
     TargetStatus    = get_target_status(ChargebackState),
     CashFlowPlan    = get_cash_flow_plan(ChargebackState),
     case {TargetStatus, CashFlowPlan} of
-        {?chargeback_status_pending(), _CashFlowPlan} ->
+        {?chargeback_status_pending(_), _CashFlowPlan} ->
             StatusEvent = ?chargeback_status_changed(TargetStatus),
             CBEvent     = ?chargeback_ev(ID, StatusEvent),
             {done, {[CBEvent], Action}};
@@ -316,13 +330,14 @@ make_chargeback(PaymentState, ChargebackParams) ->
     HoldFunds     = get_params_hold_funds(ChargebackParams),
     ParamsCash    = get_params_cash(ChargebackParams),
     Reason        = get_params_reason(ChargebackParams),
+    %% REWORK DEFINE CASH
     Cash          = define_cash(ParamsCash, Payment),
     _             = assert_cash(Cash, PaymentState),
     #domain_InvoicePaymentChargeback{
         id              = construct_id(PaymentState),
         created_at      = hg_datetime:format_now(),
         stage           = ?chargeback_stage_chargeback(),
-        status          = ?chargeback_status_pending(),
+        status          = ?chargeback_status_pending(Cash),
         domain_revision = Revision,
         party_revision  = PartyRevision,
         reason          = Reason,
@@ -348,12 +363,12 @@ make_cancel_result(ChargebackState, PaymentState) ->
         {_LaterStage, _HoldFunds = true} ->
             _      = rollback_cash_flow(ChargebackState, CashFlowPlan, PaymentState),
             Action = hg_machine_action:instant(),
-            Change = ?chargeback_changed(undefined, undefined, Status),
+            Change = ?chargeback_changed(undefined, Status),
             Events = [?chargeback_ev(ID, Change)],
             {Events, Action};
         {_LaterStage, _HoldFunds = false} ->
             Action = hg_machine_action:instant(),
-            Change = ?chargeback_changed(undefined, undefined, Status),
+            Change = ?chargeback_changed(undefined, Status),
             Events = [?chargeback_ev(ID, Change)],
             {Events, Action}
     end.
@@ -381,7 +396,7 @@ make_reject_result(ChargebackState, PaymentState) ->
         {_LaterStage, _HoldFunds = true} ->
             _      = rollback_cash_flow(ChargebackState, CashFlowPlan, PaymentState),
             Action = hg_machine_action:instant(),
-            Change = ?chargeback_changed(undefined, undefined, Status),
+            Change = ?chargeback_changed(undefined, Status),
             Events = [?chargeback_ev(ID, Change)],
             {Events, Action}
     end.
@@ -410,12 +425,12 @@ make_accept_result(ChargebackState, PaymentState, AcceptParams) ->
         {?chargeback_stage_chargeback(), Cash, HoldFunds} ->
             _         = rollback_cash_flow(ChargebackState, CashFlowPlan, PaymentState),
             Action    = hg_machine_action:instant(),
-            Change    = ?chargeback_changed(Cash, HoldFunds, Status),
+            Change    = ?chargeback_changed(HoldFunds, Status),
             Events    = [?chargeback_ev(ID, Change)],
             {Events, Action};
         {_LaterStage, Cash, HoldFunds} ->
             Action    = hg_machine_action:instant(),
-            Change    = ?chargeback_changed(Cash, HoldFunds, Status),
+            Change    = ?chargeback_changed(HoldFunds, Status),
             Events    = [?chargeback_ev(ID, Change)],
             {Events, Action}
     end.
@@ -432,9 +447,9 @@ make_reopen_result(ChargebackState, PaymentState, ReopenParams) ->
     ID              = get_id(ChargebackState),
     Stage           = get_next_stage(ChargebackState),
     Action          = hg_machine_action:instant(),
-    Status          = ?chargeback_status_pending(),
+    Status          = ?chargeback_status_pending(Cash),
     StageChange     = ?chargeback_stage_changed(Stage),
-    Change          = ?chargeback_changed(Cash, ParamsHoldFunds, Status),
+    Change          = ?chargeback_changed(ParamsHoldFunds, Status),
     Events          = [?chargeback_ev(ID, StageChange), ?chargeback_ev(ID, Change)],
     {Events, Action}.
 
@@ -673,7 +688,7 @@ assert_chargeback_rejected(#domain_InvoicePaymentChargeback{status = Status}) ->
 
 assert_chargeback_pending(#chargeback_st{chargeback = Chargeback}) ->
     assert_chargeback_pending(Chargeback);
-assert_chargeback_pending(#domain_InvoicePaymentChargeback{status = ?chargeback_status_pending()}) ->
+assert_chargeback_pending(#domain_InvoicePaymentChargeback{status = ?chargeback_status_pending(_)}) ->
     ok;
 assert_chargeback_pending(#domain_InvoicePaymentChargeback{status = Status}) ->
     throw(#payproc_InvoicePaymentChargebackInvalidStatus{status = Status}).
@@ -688,7 +703,7 @@ assert_no_pending_chargebacks(PaymentState) ->
 
 filter_pending(#domain_InvoicePaymentChargeback{status = Status}) ->
     case Status of
-        ?chargeback_status_pending() -> true;
+        ?chargeback_status_pending(_) -> true;
         _NotPending                  -> false
     end.
 

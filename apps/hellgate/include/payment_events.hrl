@@ -219,35 +219,26 @@
     }
 ).
 
--define(chargeback_changed(Cash),
-    {invoice_payment_chargeback_changed,
-        #payproc_InvoicePaymentChargebackChanged{cash = Cash}
-    }
-).
-
--define(chargeback_changed(Cash, HoldFunds),
+-define(chargeback_changed(HoldFunds),
     {invoice_payment_chargeback_changed,
         #payproc_InvoicePaymentChargebackChanged{
-            cash       = Cash,
             hold_funds = HoldFunds
         }
     }
 ).
 
--define(chargeback_changed(Cash, HoldFunds, Status),
+-define(chargeback_changed(HoldFunds, Status),
     {invoice_payment_chargeback_changed,
         #payproc_InvoicePaymentChargebackChanged{
-            cash          = Cash,
             hold_funds    = HoldFunds,
             target_status = Status
         }
     }
 ).
 
--define(chargeback_changed(Cash, HoldFunds, Status, Stage),
+-define(chargeback_changed(HoldFunds, Status, Stage),
     {invoice_payment_chargeback_changed,
         #payproc_InvoicePaymentChargebackChanged{
-            cash          = Cash,
             hold_funds    = HoldFunds,
             target_status = Status,
             stage         = Stage
@@ -262,8 +253,8 @@
 -define(chargeback_stage_arbitration(),
     {arbitration,     #domain_InvoicePaymentChargebackStageArbitration{}}).
 
--define(chargeback_status_pending(),
-    {pending,  #domain_InvoicePaymentChargebackPending{}}).
+-define(chargeback_status_pending(Cash),
+    {pending,  #domain_InvoicePaymentChargebackPending{cash = Cash}}).
 -define(chargeback_status_accepted(Cash),
     {accepted, #domain_InvoicePaymentChargebackAccepted{cash = Cash}}).
 -define(chargeback_status_rejected(),

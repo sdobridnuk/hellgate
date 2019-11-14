@@ -1106,7 +1106,7 @@ assert_no_active_chargebacks(St) ->
     CBs = get_chargebacks(St),
     ActiveChargebacks = lists:filter(
         fun
-            (#domain_InvoicePaymentChargeback{status = ?chargeback_status_pending()}) -> true;
+            (#domain_InvoicePaymentChargeback{status = ?chargeback_status_pending(_)}) -> true;
             (#domain_InvoicePaymentChargeback{}) -> false
         end,
         CBs
@@ -2505,7 +2505,7 @@ merge_change(Change = ?chargeback_ev(ID, Event), St, Opts) ->
         ?chargeback_stage_changed(_) ->
             _ = validate_transition(idle, Change, St, Opts),
             St;
-        ?chargeback_changed(_, _, _) ->
+        ?chargeback_changed(_, _) ->
             _ = validate_transition(idle, Change, St, Opts),
             St#st{activity = {chargeback_accounter, ID}};
         ?chargeback_cash_flow_changed(_) ->
