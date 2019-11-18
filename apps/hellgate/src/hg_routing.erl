@@ -212,7 +212,7 @@ score_route({_Provider, {_TerminalRef, Terminal, Priority}, ProviderStatus}, VS)
         RiskCoverage,
         Conversion,
         Availability
-    }
+    }.
 
 get_availability_score({alive, FailRate}) -> {1, 1.0 - FailRate};
 get_availability_score({dead,  FailRate}) -> {0, 1.0 - FailRate}.
