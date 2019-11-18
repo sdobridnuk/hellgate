@@ -20,6 +20,8 @@
 
 %%
 
+-type payment_state() :: hg_invoice_payment:st().
+
 -type trx_info() :: dmsl_domain_thrift:'TransactionInfo'().
 -type route() :: dmsl_domain_thrift:'PaymentRoute'().
 
@@ -53,10 +55,20 @@ collect_proxy_options(#domain_PaymentRoute{provider = ProviderRef, terminal = Te
 
 %%
 
--spec process_payment(_ProxyContext, route()) ->
+-spec process_payment(_ProxyContext, payment_state()) ->
     term().
-process_payment(ProxyContext, Route) ->
-    issue_call('ProcessPayment', [ProxyContext], Route).
+process_payment(ProxyContext, St) ->
+    Route = hg_invoice_payment:get_route(St),
+    _ = fd_provider_conversion_service(start, Route, St),
+    Result = issue_call('ProcessPayment', [ProxyContext], Route),
+    case Result of
+        {ok, #prxprv_PaymentProxyResult{intent = {finish, #prxprv_FinishIntent{status = {success, _}}}}} ->
+            _ = fd_provider_conversion_service(finish, Route, St);
+        {ok, #prxprv_PaymentProxyResult{intent = {finish, #prxprv_FinishIntent{status = {failure, _}}}}} ->
+            _ = fd_provider_conversion_service(finish, Route, St);
+        Result ->
+            Result
+    end.
 
 -spec generate_token(_ProxyContext, route()) ->
     term().
@@ -65,13 +77,15 @@ generate_token(ProxyContext, Route) ->
 
 -spec handle_payment_callback(_Payload, _ProxyContext, route()) ->
     term().
-handle_payment_callback(Payload, ProxyContext, St) ->
-    issue_call('HandlePaymentCallback', [Payload, ProxyContext], St).
+handle_payment_callback(Payload, ProxyContext, Route) ->
+    issue_call('HandlePaymentCallback', [Payload, ProxyContext], Route).
 
 -spec handle_recurrent_token_callback(_Payload, _ProxyContext, route()) ->
     term().
-handle_recurrent_token_callback(Payload, ProxyContext, St) ->
-    issue_call('HandleRecurrentTokenCallback', [Payload, ProxyContext], St).
+handle_recurrent_token_callback(Payload, ProxyContext, Route) ->
+    issue_call('HandleRecurrentTokenCallback', [Payload, ProxyContext], Route).
+
+
 
 -spec issue_call(woody:func(), list(), route()) ->
     term().
@@ -104,7 +118,24 @@ fd_adapter_availability_service(Status, Route) ->
         Status -> _ = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig)
     end.
 
-% fd_provider_conversion_service(Status, Route, St) ->
+fd_provider_conversion_service(Status, Route, St) ->
+    ServiceType   = provider_conversion,
+    ProviderRef   = get_route_provider(Route),
+    ProviderID    = ProviderRef#domain_ProviderRef.id,
+    BinaryID      = erlang:integer_to_binary(ProviderID),
+    Payment       = hg_invoice_payment:get_payment(St),
+    PaymentID     = get_payment_id(Payment),
+    Config        = genlib_app:env(hellgate, fault_detector_conversion, #{}),
+    SlidingWindow = genlib_map:get(sliding_window,       Config, 6000000),
+    OpTimeLimit   = genlib_map:get(operation_time_limit, Config, 1200000),
+    PreAggrSize   = genlib_map:get(pre_aggregation_size, Config, 2),
+    ServiceConfig = hg_fault_detector_client:build_config(SlidingWindow, OpTimeLimit, PreAggrSize),
+    ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
+    OperationID   = hg_fault_detector_client:build_operation_id(ServiceType, PaymentID),
+    case Status of
+        start  -> _ = fd_maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig);
+        Status -> _ = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig)
+    end.
 
 fd_maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig) ->
     case hg_fault_detector_client:register_operation(start, ServiceID, OperationID, ServiceConfig) of
@@ -122,6 +153,9 @@ get_call_options(Route) ->
 
 get_route_provider(#domain_PaymentRoute{provider = ProviderRef}) ->
     ProviderRef.
+
+get_payment_id(#domain_InvoicePayment{id = ID}) ->
+    ID.
 
 %%
 
