@@ -29,6 +29,7 @@
 -export([get_payment/1]).
 -export([get_refunds/1]).
 -export([get_refund/2]).
+-export([get_route/1]).
 -export([get_adjustments/1]).
 -export([get_adjustment/2]).
 
@@ -201,6 +202,11 @@ get_party_revision(#st{activity = Activity}) ->
 
 get_payment(#st{payment = Payment}) ->
     Payment.
+
+-spec get_route(st()) -> route().
+
+get_route(#st{route = Route}) ->
+    Route.
 
 -spec get_adjustments(st()) -> [adjustment()].
 
@@ -1509,42 +1515,12 @@ process_routing(Action, St) ->
     VS1 = VS0#{risk_score => RiskScore},
     case choose_route(PaymentInstitution, VS1, Revision, St) of
         {ok, Route} ->
-            _ = provider_conversion_service(start, Route, St),
             process_cash_flow_building(Route, VS1, Payment, PaymentInstitution, Revision, Opts, Events0, Action);
         {error, {no_route_found, {Reason, _Details}}} ->
             Failure = {failure, payproc_errors:construct('PaymentFailure',
                 {no_route_found, {Reason, #payprocerr_GeneralFailure{}}}
             )},
             process_failure(get_activity(St), Events0, Action, Failure, St)
-    end.
-
-% TODO: maybe use custom settings per provider
-provider_conversion_service(Status, Route, St) ->
-    Payment       = get_payment(St),
-    ProviderRef   = get_route_provider_ref(Route),
-    ProviderID    = ProviderRef#domain_ProviderRef.id,
-    ServiceType   = provider_conversion,
-    BinaryID      = erlang:integer_to_binary(ProviderID),
-    PaymentID     = get_payment_id(Payment),
-    Config        = genlib_app:env(hellgate, fault_detector_conversion, #{}),
-    SlidingWindow = genlib_map:get(sliding_window,       Config, 6000000),
-    OpTimeLimit   = genlib_map:get(operation_time_limit, Config, 1200000),
-    PreAggrSize   = genlib_map:get(pre_aggregation_size, Config, 2),
-    ServiceConfig = hg_fault_detector_client:build_config(SlidingWindow, OpTimeLimit, PreAggrSize),
-    ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
-    OperationID   = hg_fault_detector_client:build_operation_id(ServiceType, PaymentID),
-    case Status of
-        start  -> _ = maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig);
-        Status -> _ = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig)
-    end.
-
-maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig) ->
-    case hg_fault_detector_client:register_operation(start, ServiceID, OperationID, ServiceConfig) of
-        {error, not_found} ->
-            _ = hg_fault_detector_client:init_service(ServiceID, ServiceConfig),
-            _ = hg_fault_detector_client:register_operation(start, ServiceID, OperationID, ServiceConfig);
-        Result ->
-            Result
     end.
 
 process_cash_flow_building(Route, VS, Payment, PaymentInstitution, Revision, Opts, Events0, Action) ->
@@ -1673,8 +1649,7 @@ repair_session(St = #st{repair_scenario = Scenario}) ->
             {ok, Result};
         call ->
             ProxyContext = construct_proxy_context(St),
-            Route        = get_route(St),
-            hg_proxy_provider:process_payment(ProxyContext, Route)
+            hg_proxy_provider:process_payment(ProxyContext, St)
     end.
 
 -spec finalize_payment(action(), st()) -> machine_result().
@@ -1706,7 +1681,7 @@ process_callback_timeout(Action, Session, Events, St) ->
     case get_session_timeout_behaviour(Session) of
         {callback, Payload} ->
             ProxyContext = construct_proxy_context(St),
-            Route = get_route(St),
+            Route        = get_route(St),
             {ok, CallbackResult} = hg_proxy_provider:handle_payment_callback(Payload, ProxyContext, Route),
             {_Response, Result} = handle_callback_result(CallbackResult, Action, get_activity_session(St)),
             finish_session_processing(Result, St);
@@ -1770,9 +1745,6 @@ process_result({payment, processing_accounter}, Action, St) ->
 
 process_result({payment, finalizing_accounter}, Action, St) ->
     Target = get_target(St),
-    Route  = get_route(St),
-    _      = provider_conversion_service(finish, Route, St),
-             % could cancel be an error as well?
     _AffectedAccounts = case Target of
         ?captured() ->
             commit_payment_cashflow(St);
@@ -1817,8 +1789,6 @@ process_failure({payment, Step}, Events, Action, Failure, St, _RefundSt) when
             {SessionEvents, SessionAction} = retry_session(Action, Target, Timeout),
             {next, {Events ++ SessionEvents, SessionAction}};
         fatal ->
-            Route = get_route(St),
-            _     = provider_conversion_service(error, Route, St),
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
 process_failure({refund_new, ID}, Events, Action, Failure, St, RefundSt) ->
@@ -2777,9 +2747,6 @@ get_customer(CustomerID) ->
         {exception, Error} ->
             error({<<"Can't get customer">>, Error})
     end.
-
-get_route(#st{route = Route}) ->
-    Route.
 
 get_route_provider_ref(#domain_PaymentRoute{provider = ProviderRef}) ->
     ProviderRef.
