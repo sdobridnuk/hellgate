@@ -72,9 +72,16 @@ handle_function_('Create', [CustomerParams], _Opts) ->
     ok = start(CustomerID, CustomerParams),
     get_customer(get_state(CustomerID));
 
-handle_function_('Get', [CustomerID], _Opts) ->
+%% TODO Удалить после перехода на новый протокол
+handle_function_('Get', [CustomerID, undefined], _Opts) ->
     ok = set_meta(CustomerID),
     St = get_state(CustomerID),
+    ok = assert_customer_accessible(St),
+    get_customer(St);
+
+handle_function_('Get', [CustomerID, #payproc_EventRange{'after' = AfterID, limit = Limit}], _Opts) ->
+    ok = set_meta(CustomerID),
+    St = get_state(CustomerID, AfterID, Limit),
     ok = assert_customer_accessible(St),
     get_customer(St);
 
@@ -116,6 +123,9 @@ get_history(Ref, AfterID, Limit) ->
 
 get_state(Ref) ->
     collapse_history(get_history(Ref)).
+
+get_state(Ref, AfterID, Limit) ->
+    collapse_history(get_history(Ref, AfterID, Limit)).
 
 get_initial_state(Ref) ->
     collapse_history(get_history(Ref, undefined, 1)).
@@ -318,11 +328,10 @@ start_binding(BindingParams, St) ->
     PaytoolParams = create_paytool_params(Binding, St),
     _ = validate_paytool_params(PaytoolParams),
     Changes = [?customer_binding_changed(BindingID, ?customer_binding_started(Binding, hg_datetime:format_now()))],
-    {ok, _} = create_recurrent_paytool(PaytoolParams), %% @TODO: Remove after migration
     #{
         response => {ok, Binding},
         changes  => Changes,
-        action   => set_event_poll_timer(actual) %% @TODO: `hg_machine_action:instant()` after migration
+        action   => hg_machine_action:instant()
     }.
 
 validate_paytool_params(PaytoolParams) ->

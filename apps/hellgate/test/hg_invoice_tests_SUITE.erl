@@ -63,8 +63,12 @@
 -export([external_account_posting/1]).
 -export([terminal_cashflow_overrides_provider/1]).
 -export([payment_hold_cancellation/1]).
+-export([payment_hold_double_cancellation/1]).
+-export([payment_hold_cancellation_captured/1]).
 -export([payment_hold_auto_cancellation/1]).
 -export([payment_hold_capturing/1]).
+-export([payment_hold_double_capturing/1]).
+-export([payment_hold_capturing_cancelled/1]).
 -export([deadline_doesnt_affect_payment_capturing/1]).
 -export([payment_hold_partial_capturing/1]).
 -export([payment_hold_partial_capturing_with_cart/1]).
@@ -108,6 +112,7 @@
 -export([repair_fail_pre_processing_succeeded/1]).
 -export([repair_skip_inspector_succeeded/1]).
 -export([repair_fail_session_succeeded/1]).
+-export([repair_fail_session_on_pre_processing/1]).
 -export([repair_complex_succeeded_first/1]).
 -export([repair_complex_succeeded_second/1]).
 
@@ -249,8 +254,12 @@ groups() ->
 
         {holds_management, [parallel], [
             payment_hold_cancellation,
+            payment_hold_double_cancellation,
+            payment_hold_cancellation_captured,
             payment_hold_auto_cancellation,
             payment_hold_capturing,
+            payment_hold_double_capturing,
+            payment_hold_capturing_cancelled,
             deadline_doesnt_affect_payment_capturing,
             invalid_currency_partial_capture,
             invalid_amount_partial_capture,
@@ -281,6 +290,7 @@ groups() ->
             repair_fail_pre_processing_succeeded,
             repair_skip_inspector_succeeded,
             repair_fail_session_succeeded,
+            repair_fail_session_on_pre_processing,
             repair_complex_succeeded_first,
             repair_complex_succeeded_second
         ]}
@@ -294,7 +304,6 @@ init_per_suite(C) ->
     % _ = dbg:tracer(),
     % _ = dbg:p(all, c),
     % _ = dbg:tpl({'hg_invoice_payment', 'p', '_'}, x),
-    application:set_env(hackney, max_connections, 200),
     CowboySpec = hg_dummy_provider:get_http_cowboy_spec(),
 
     {Apps, Ret} = hg_ct_helper:start_apps([
@@ -879,10 +888,13 @@ payment_has_optional_fields(C) ->
     Client = cfg(client, C),
     InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(10), 42000, C),
     PaymentParams = make_payment_params(),
-    ?payment_state(Payment) = hg_client_invoicing:start_payment(InvoiceID, PaymentParams, Client),
+    PaymentID = process_payment(InvoiceID, PaymentParams, Client),
+    PaymentID = await_payment_capture(InvoiceID, PaymentID, Client),
+    ?payment_state(Payment) = hg_client_invoicing:get_payment(InvoiceID, PaymentID, Client),
     PartyID = cfg(party_id, C),
     ShopID = cfg(shop_id, C),
-    #domain_InvoicePayment{owner_id = PartyID, shop_id = ShopID} = Payment.
+    #domain_InvoicePayment{owner_id = PartyID, shop_id = ShopID, route = Route} = Payment,
+    false = Route =:= undefined.
 
 -spec payment_capture_failed(config()) -> test_return().
 
@@ -897,7 +909,7 @@ payment_capture_failed(C) ->
         ?payment_ev(PaymentID, ?payment_capture_started(_)),
         ?payment_ev(PaymentID, ?session_ev(?captured(), ?session_started()))
     ] = next_event(InvoiceID, Client),
-    timeout = next_event(InvoiceID, 3000, Client),
+    timeout = next_event(InvoiceID, 5000, Client),
     ?assertException(
         error,
         {{woody_error, _}, _},
@@ -921,7 +933,7 @@ payment_capture_retries_exceeded(C) ->
         ?payment_ev(PaymentID, ?session_ev(?captured(Reason, Cost), ?session_started()))
     ] = next_event(InvoiceID, Client),
     PaymentID = await_sessions_restarts(PaymentID, Target, InvoiceID, Client, 3),
-    timeout = next_event(InvoiceID, 1000, Client),
+    timeout = next_event(InvoiceID, 5000, Client),
     ?assertException(
         error,
         {{woody_error, _}, _},
@@ -1466,7 +1478,7 @@ get_cashflow_account(Type, CF) ->
             account_type = T
         }
     } <- CF, T == Type],
-    hg_ct_helper:get_account(ID).
+    hg_ct_helper:get_balance(ID).
 
 get_adjustment_fixture(Revision) ->
     PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
@@ -2198,7 +2210,7 @@ consistent_history(C) ->
 
 payment_hold_cancellation(C) ->
     Client = cfg(client, C),
-    InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(6), 10000, C),
+    InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(10), 10000, C),
     PaymentParams = make_payment_params({hold, capture}),
     PaymentID = process_payment(InvoiceID, PaymentParams, Client),
     ok = hg_client_invoicing:cancel_payment(InvoiceID, PaymentID, <<"whynot">>, Client),
@@ -2209,11 +2221,32 @@ payment_hold_cancellation(C) ->
     ) = hg_client_invoicing:get(InvoiceID, Client),
     [?invoice_status_changed(?invoice_cancelled(<<"overdue">>))] = next_event(InvoiceID, Client).
 
+-spec payment_hold_double_cancellation(config()) -> _ | no_return().
+
+payment_hold_double_cancellation(C) ->
+    Client = cfg(client, C),
+    InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(10), 10000, C),
+    PaymentParams = make_payment_params({hold, capture}),
+    PaymentID = process_payment(InvoiceID, PaymentParams, Client),
+    ?assertEqual(ok, hg_client_invoicing:cancel_payment(InvoiceID, PaymentID, <<"whynot">>, Client)),
+    Result = hg_client_invoicing:cancel_payment(InvoiceID, PaymentID, <<"whynot">>, Client),
+    ?assertMatch({exception, #payproc_InvalidPaymentStatus{}}, Result).
+
+-spec payment_hold_cancellation_captured(config()) -> _ | no_return().
+
+payment_hold_cancellation_captured(C) ->
+    Client = cfg(client, C),
+    InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentID = process_payment(InvoiceID, make_payment_params({hold, cancel}), Client),
+    ?assertEqual(ok, hg_client_invoicing:capture_payment(InvoiceID, PaymentID, <<"ok">>, Client)),
+    Result = hg_client_invoicing:cancel_payment(InvoiceID, PaymentID, <<"whynot">>, Client),
+    ?assertMatch({exception, #payproc_InvalidPaymentStatus{}}, Result).
+
 -spec payment_hold_auto_cancellation(config()) -> _ | no_return().
 
 payment_hold_auto_cancellation(C) ->
     Client = cfg(client, C),
-    InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(6), 10000, C),
+    InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(20), 10000, C),
     PaymentParams = make_payment_params({hold, cancel}),
     PaymentID = process_payment(InvoiceID, PaymentParams, Client),
     PaymentID = await_payment_cancel(InvoiceID, PaymentID, undefined, Client),
@@ -2231,6 +2264,26 @@ payment_hold_capturing(C) ->
     PaymentID = process_payment(InvoiceID, make_payment_params({hold, cancel}), Client),
     ok = hg_client_invoicing:capture_payment(InvoiceID, PaymentID, <<"ok">>, Client),
     PaymentID = await_payment_capture(InvoiceID, PaymentID, <<"ok">>, Client).
+
+-spec payment_hold_double_capturing(config()) -> _ | no_return().
+
+payment_hold_double_capturing(C) ->
+    Client = cfg(client, C),
+    InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentID = process_payment(InvoiceID, make_payment_params({hold, cancel}), Client),
+    ?assertEqual(ok, hg_client_invoicing:capture_payment(InvoiceID, PaymentID, <<"ok">>, Client)),
+    Result = hg_client_invoicing:capture_payment(InvoiceID, PaymentID, <<"ok">>, Client),
+    ?assertMatch({exception, #payproc_InvalidPaymentStatus{}}, Result).
+
+-spec payment_hold_capturing_cancelled(config()) -> _ | no_return().
+
+payment_hold_capturing_cancelled(C) ->
+    Client = cfg(client, C),
+    InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentID = process_payment(InvoiceID, make_payment_params({hold, cancel}), Client),
+    ?assertEqual(ok, hg_client_invoicing:cancel_payment(InvoiceID, PaymentID, <<"whynot">>, Client)),
+    Result = hg_client_invoicing:capture_payment(InvoiceID, PaymentID, <<"ok">>, Client),
+    ?assertMatch({exception, #payproc_InvalidPaymentStatus{}}, Result).
 
 -spec deadline_doesnt_affect_payment_capturing(config()) -> _ | no_return().
 
@@ -2255,8 +2308,8 @@ payment_hold_partial_capturing(C) ->
     Reason = <<"ok">>,
     ok = hg_client_invoicing:capture_payment(InvoiceID, PaymentID, Reason, Cash, Client),
     [
-        ?payment_ev(PaymentID, ?payment_capture_started(Reason, Cash, _)),
-        ?payment_ev(PaymentID, ?cash_flow_changed(_))
+       ?payment_ev(PaymentID, ?payment_capture_started(Reason, Cash, _)),
+       ?payment_ev(PaymentID, ?cash_flow_changed(_))
     ] = next_event(InvoiceID, Client),
     [
         ?payment_ev(PaymentID, ?session_ev(?captured(Reason, Cash), ?session_started()))
@@ -2275,8 +2328,8 @@ payment_hold_partial_capturing_with_cart(C) ->
     Reason = <<"ok">>,
     ok = hg_client_invoicing:capture_payment(InvoiceID, PaymentID, Reason, Cash, Cart, Client),
     [
-        ?payment_ev(PaymentID, ?payment_capture_started(Reason, Cash, _)),
-        ?payment_ev(PaymentID, ?cash_flow_changed(_))
+       ?payment_ev(PaymentID, ?payment_capture_started(Reason, Cash, _)),
+       ?payment_ev(PaymentID, ?cash_flow_changed(_))
     ] = next_event(InvoiceID, Client),
     [
         ?payment_ev(PaymentID, ?session_ev(?captured(Reason, Cash, Cart), ?session_started()))
@@ -2295,8 +2348,8 @@ payment_hold_partial_capturing_with_cart_missing_cash(C) ->
     Reason = <<"ok">>,
     ok = hg_client_invoicing:capture_payment(InvoiceID, PaymentID, Reason, undefined, Cart, Client),
     [
-        ?payment_ev(PaymentID, ?payment_capture_started(Reason, Cash, Cart)),
-        ?payment_ev(PaymentID, ?cash_flow_changed(_))
+       ?payment_ev(PaymentID, ?payment_capture_started(Reason, Cash, _)),
+       ?payment_ev(PaymentID, ?cash_flow_changed(_))
     ] = next_event(InvoiceID, Client),
     [
         ?payment_ev(PaymentID, ?session_ev(?captured(Reason, Cash, Cart), ?session_started()))
@@ -2486,7 +2539,8 @@ get_cashflow_volume(Source, Destination, CF) ->
 terms_retrieval(C) ->
     Client = cfg(client, C),
     InvoiceID = start_invoice(<<"rubberduck">>, make_due_date(10), 1500, C),
-    TermSet1 = hg_client_invoicing:compute_terms(InvoiceID, Client),
+    Timestamp = hg_datetime:format_now(),
+    TermSet1 = hg_client_invoicing:compute_terms(InvoiceID, {timestamp, Timestamp}, Client),
     #domain_TermSet{payments = #domain_PaymentsServiceTerms{
         payment_methods = {value, [
             ?pmt(bank_card, jcb),
@@ -2502,7 +2556,7 @@ terms_retrieval(C) ->
     }} = TermSet1,
     Revision = hg_domain:head(),
     ok = hg_domain:update(construct_term_set_for_cost(1000, 2000)),
-    TermSet2 = hg_client_invoicing:compute_terms(InvoiceID, Client),
+    TermSet2 = hg_client_invoicing:compute_terms(InvoiceID, {timestamp, Timestamp}, Client),
     #domain_TermSet{payments = #domain_PaymentsServiceTerms{
         payment_methods = {value, [?pmt(bank_card, visa)]}
     }} = TermSet2,
@@ -2771,6 +2825,31 @@ repair_fail_session_succeeded(C) ->
         ?payment_ev(PaymentID, ?payment_status_changed(?failed({failure, Failure})))
     ] = next_event(InvoiceID, Client).
 
+-spec repair_fail_session_on_pre_processing(config()) -> test_return().
+
+repair_fail_session_on_pre_processing(C) ->
+    Client = cfg(client, C),
+    PartyClient = cfg(party_client, C),
+    ShopID = hg_ct_helper:create_battle_ready_shop(?cat(7), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
+    InvoiceID = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), 42000, C),
+    PaymentParams = make_payment_params(),
+    ?payment_state(?payment(PaymentID)) = hg_client_invoicing:start_payment(InvoiceID, PaymentParams, Client),
+    [
+        ?payment_ev(PaymentID, ?payment_started(?payment_w_status(?pending())))
+    ] = next_event(InvoiceID, Client),
+
+    timeout = next_event(InvoiceID, 2000, Client),
+    ?assertException(
+        error,
+        {{woody_error, {external, result_unexpected, _}}, _},
+        repair_invoice_with_scenario(InvoiceID, fail_session, Client)
+    ),
+    ok = repair_invoice_with_scenario(InvoiceID, fail_pre_processing, Client),
+
+    [
+        ?payment_ev(PaymentID, ?payment_status_changed(?failed({failure, _Failure})))
+    ] = next_event(InvoiceID, Client).
+
 -spec repair_complex_succeeded_first(config()) -> test_return().
 
 repair_complex_succeeded_first(C) ->
@@ -2838,7 +2917,7 @@ consistent_account_balances(C) ->
     ].
 
 consistent_account_balance(AccountID, Comment) ->
-    case hg_ct_helper:get_account(AccountID) of
+    case hg_ct_helper:get_balance(AccountID) of
         #{own_amount := V, min_available_amount := V, max_available_amount := V} ->
             ok;
         #{} = Account ->
@@ -3217,8 +3296,8 @@ await_payment_partial_capture(InvoiceID, PaymentID, Reason, Cash, Client) ->
 
 await_payment_partial_capture(InvoiceID, PaymentID, Reason, Cash, Client, Restarts) ->
     [
-        ?payment_ev(PaymentID, ?payment_capture_started(Reason, Cash, _)),
-        ?payment_ev(PaymentID, ?cash_flow_changed(_))
+       ?payment_ev(PaymentID, ?payment_capture_started(Reason, Cash, _)),
+       ?payment_ev(PaymentID, ?cash_flow_changed(_))
     ] = next_event(InvoiceID, Client),
     [
         ?payment_ev(PaymentID, ?session_ev(?captured(Reason, Cash), ?session_started()))
@@ -3600,7 +3679,8 @@ construct_domain_fixture() ->
                 ?cat(3),
                 ?cat(4),
                 ?cat(5),
-                ?cat(6)
+                ?cat(6),
+                ?cat(7)
             ])},
             payment_methods = {value, ?ordset([
                 ?pmt(bank_card, visa),
@@ -3695,6 +3775,7 @@ construct_domain_fixture() ->
         hg_ct_fixture:construct_category(?cat(4), <<"Offliner">>, live),
         hg_ct_fixture:construct_category(?cat(5), <<"Timeouter">>, live),
         hg_ct_fixture:construct_category(?cat(6), <<"MachineFailer">>, live),
+        hg_ct_fixture:construct_category(?cat(7), <<"TempFailer">>, live),
 
         hg_ct_fixture:construct_payment_method(?pmt(bank_card, visa)),
         hg_ct_fixture:construct_payment_method(?pmt(bank_card, mastercard)),
@@ -3718,6 +3799,8 @@ construct_domain_fixture() ->
             #{<<"link_state">> => <<"timeout">>}, low),
         hg_ct_fixture:construct_inspector(?insp(6), <<"Offliner">>, ?prx(2),
             #{<<"link_state">> => <<"unexpected_failure">>}),
+        hg_ct_fixture:construct_inspector(?insp(7), <<"TempFailer">>, ?prx(2),
+            #{<<"link_state">> => <<"temporary_failure">>}),
 
         hg_ct_fixture:construct_contract_template(?tmpl(1), ?trms(1)),
         hg_ct_fixture:construct_contract_template(?tmpl(2), ?trms(2)),
@@ -3813,6 +3896,10 @@ construct_domain_fixture() ->
                             #domain_InspectorDecision{
                                 if_ = {condition, {category_is, ?cat(6)}},
                                 then_ = {value, ?insp(6)}
+                            },
+                            #domain_InspectorDecision{
+                                if_ = {condition, {category_is, ?cat(7)}},
+                                then_ = {value, ?insp(7)}
                             },
                             #domain_InspectorDecision{
                                 if_ = {condition, {cost_in, ?cashrng(

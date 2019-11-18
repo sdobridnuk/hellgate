@@ -263,12 +263,10 @@ no_route_found_for_payment(_C) ->
     {Routes1, RejectContext1} = hg_routing:gather_routes(payment, PaymentInstitution, VS1, Revision),
     FailRatedRoutes1 = hg_routing:gather_fail_rates(Routes1),
 
-    Result1 = {ok, #domain_PaymentRoute{
+    {ok, #domain_PaymentRoute{
         provider = ?prv(3),
         terminal = ?trm(10)
-    }},
-
-    Result1 = hg_routing:choose_route(FailRatedRoutes1, RejectContext1, VS1),
+    }, _Meta} = hg_routing:choose_route(FailRatedRoutes1, RejectContext1, VS1),
     hg_context:cleanup(),
     ok.
 
@@ -347,9 +345,10 @@ prefer_normal_conversion(_C) ->
     Result1 = hg_routing:choose_route(FailRatedRoutes1, RC, VS),
     Result2 = hg_routing:choose_route(FailRatedRoutes2, RC, VS),
 
-    {ok, #domain_PaymentRoute{provider = ?prv(200)}} = Result0,
-    {ok, #domain_PaymentRoute{provider = ?prv(201)}} = Result1,
-    {ok, #domain_PaymentRoute{provider = ?prv(202)}} = Result2,
+    {ok, #domain_PaymentRoute{provider = ?prv(202)}, #{reject_reason := provider_condition}} = Result0,
+    {ok, #domain_PaymentRoute{provider = ?prv(201)}, Meta} = Result1,
+    false = maps:is_key(reject_reason, Meta),
+    {ok, #domain_PaymentRoute{provider = ?prv(200)}, #{reject_reason := provider_condition}} = Result2,
 
     ok.
 
@@ -377,7 +376,8 @@ prefer_better_risk_score(_C) ->
 
     Result = hg_routing:choose_route(FailRatedRoutes, RC, VS),
 
-    {ok, #domain_PaymentRoute{provider = ?prv(201)}} = Result,
+    {ok, #domain_PaymentRoute{provider = ?prv(201)}, Meta} = Result,
+    false = maps:is_key(reject_reason, Meta),
 
     ok.
 
@@ -405,7 +405,7 @@ prefer_higher_availability(_C) ->
 
     Result = hg_routing:choose_route(FailRatedRoutes, RC, VS),
 
-    {ok, #domain_PaymentRoute{provider = ?prv(201)}} = Result,
+    {ok, #domain_PaymentRoute{provider = ?prv(200)}, #{reject_reason := conversion}} = Result,
 
     ok.
 
@@ -433,7 +433,7 @@ prefer_higher_conversion(_C) ->
 
     Result = hg_routing:choose_route(FailRatedRoutes, RC, VS),
 
-    {ok, #domain_PaymentRoute{provider = ?prv(201)}} = Result,
+    {ok, #domain_PaymentRoute{provider = ?prv(200)}, #{reject_reason := success_rate}} = Result,
 
     ok.
 
@@ -445,11 +445,11 @@ terminal_priority_for_shop(C) ->
     {ok, #domain_PaymentRoute{
         provider = ?prv(300),
         terminal = ?trm(111)
-    }} = terminal_priority_for_shop(?dummy_party_id, ?dummy_shop_id, C),
+    }, _Meta0} = terminal_priority_for_shop(?dummy_party_id, ?dummy_shop_id, C),
     {ok, #domain_PaymentRoute{
         provider = ?prv(300),
         terminal = ?trm(222)
-    }} = terminal_priority_for_shop(?dummy_party_id, ?dummy_another_shop_id, C),
+    }, _Meta1} = terminal_priority_for_shop(?dummy_party_id, ?dummy_another_shop_id, C),
     ok = hg_context:cleanup().
 
 terminal_priority_for_shop(PartyID, ShopID, _C) ->
