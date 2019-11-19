@@ -67,9 +67,11 @@ process_payment(ProxyContext, St) ->
     Result = issue_call('ProcessPayment', [ProxyContext], Route),
     case Result of
         {ok, ?PAYMENT_PROXY_RESULT_FINISHED({success, _})} ->
-            _ = fd_provider_conversion_service(finish, Route, St);
+            _ = fd_provider_conversion_service(finish, Route, St),
+            Result;
         {ok, ?PAYMENT_PROXY_RESULT_FINISHED({failure, _})} ->
-            _ = fd_provider_conversion_service(error, Route, St);
+            _ = fd_provider_conversion_service(error, Route, St),
+            Result;
         Result ->
             Result
     end.
