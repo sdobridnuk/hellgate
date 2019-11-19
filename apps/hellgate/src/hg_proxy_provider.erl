@@ -18,6 +18,10 @@
 -include("domain.hrl").
 -include("payment_events.hrl").
 
+-define(PAYMENT_PROXY_RESULT_FINISHED(Status), #prxprv_PaymentProxyResult{intent =
+    {finish, #prxprv_FinishIntent{status = Status}}
+}).
+
 %%
 
 -type payment_state() :: hg_invoice_payment:st().
@@ -62,9 +66,9 @@ process_payment(ProxyContext, St) ->
     _ = fd_provider_conversion_service(start, Route, St),
     Result = issue_call('ProcessPayment', [ProxyContext], Route),
     case Result of
-        {ok, #prxprv_PaymentProxyResult{intent = {finish, #prxprv_FinishIntent{status = {success, _}}}}} ->
+        {ok, ?PAYMENT_PROXY_RESULT_FINISHED({success, _})} ->
             _ = fd_provider_conversion_service(finish, Route, St);
-        {ok, #prxprv_PaymentProxyResult{intent = {finish, #prxprv_FinishIntent{status = {failure, _}}}}} ->
+        {ok, ?PAYMENT_PROXY_RESULT_FINISHED({failure, _})} ->
             _ = fd_provider_conversion_service(error, Route, St);
         Result ->
             Result
@@ -113,10 +117,7 @@ fd_adapter_availability_service(Status, Route) ->
     ServiceConfig = hg_fault_detector_client:build_config(SlidingWindow, OpTimeLimit, PreAggrSize),
     ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
     OperationID   = hg_fault_detector_client:build_operation_id(ServiceType),
-    case Status of
-        start  -> _ = fd_maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig);
-        Status -> _ = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig)
-    end.
+    fd_register(Status, ServiceID, OperationID, ServiceConfig).
 
 fd_provider_conversion_service(Status, Route, St) ->
     ServiceType   = provider_conversion,
@@ -132,10 +133,12 @@ fd_provider_conversion_service(Status, Route, St) ->
     ServiceConfig = hg_fault_detector_client:build_config(SlidingWindow, OpTimeLimit, PreAggrSize),
     ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
     OperationID   = hg_fault_detector_client:build_operation_id(ServiceType, PaymentID),
-    case Status of
-        start  -> _ = fd_maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig);
-        Status -> _ = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig)
-    end.
+    fd_register(Status, ServiceID, OperationID, ServiceConfig).
+
+fd_register(start, ServiceID, OperationID, ServiceConfig) ->
+    _ = fd_maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig);
+fd_register(Status, ServiceID, OperationID, ServiceConfig) ->
+    _ = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig)
 
 fd_maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig) ->
     case hg_fault_detector_client:register_operation(start, ServiceID, OperationID, ServiceConfig) of
