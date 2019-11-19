@@ -65,7 +65,7 @@ process_payment(ProxyContext, St) ->
         {ok, #prxprv_PaymentProxyResult{intent = {finish, #prxprv_FinishIntent{status = {success, _}}}}} ->
             _ = fd_provider_conversion_service(finish, Route, St);
         {ok, #prxprv_PaymentProxyResult{intent = {finish, #prxprv_FinishIntent{status = {failure, _}}}}} ->
-            _ = fd_provider_conversion_service(finish, Route, St);
+            _ = fd_provider_conversion_service(error, Route, St);
         Result ->
             Result
     end.

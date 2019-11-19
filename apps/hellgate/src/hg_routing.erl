@@ -389,9 +389,8 @@ calc_random_condition(StartFrom, Random, [Route | Rest], Routes) ->
 score_routes(Routes, VS) ->
     [{score_route(R, VS), {Provider, Terminal}} || {Provider, Terminal, _ProviderStatus} = R <- Routes].
 
-score_route({Provider, {_TerminalRef, Terminal, Priority}, ProviderStatus}, VS) ->
+score_route({_Provider, {_TerminalRef, Terminal, Priority}, ProviderStatus}, VS) ->
     RiskCoverage = score_risk_coverage(Terminal, VS),
-    ct:print("Provider\n~p\nStatus\n~p\n", [Provider, ProviderStatus]),
     {AvailabilityStatus,    ConversionStatus} = ProviderStatus,
     {AvailabilityCondition, Availability}     = get_availability_score(AvailabilityStatus),
     {ConversionCondition,   Conversion}       = get_conversion_score(ConversionStatus),
