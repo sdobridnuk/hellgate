@@ -140,7 +140,7 @@ fd_provider_conversion_service(Status, Route, St) ->
 fd_register(start, ServiceID, OperationID, ServiceConfig) ->
     _ = fd_maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig);
 fd_register(Status, ServiceID, OperationID, ServiceConfig) ->
-    _ = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig)
+    _ = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig).
 
 fd_maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig) ->
     case hg_fault_detector_client:register_operation(start, ServiceID, OperationID, ServiceConfig) of
