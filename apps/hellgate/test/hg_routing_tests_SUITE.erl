@@ -162,9 +162,9 @@ gathers_fail_rated_routes(_C) ->
     {Routes0, _RejectContext0} = hg_routing:gather_routes(payment, PaymentInstitution, VS, Revision),
     Result = hg_routing:gather_fail_rates(Routes0),
     [
-        {?prv(200), _, {{dead,  0.9}, {lacking, 0.9}}},
-        {?prv(201), _, {{alive, 0.1}, {normal, 0.1}}},
-        {?prv(202), _, {{alive, 0.0}, {normal, 0.0}}}
+        {{?prv(200), _}, _, {{dead,  0.9}, {lacking, 0.9}}},
+        {{?prv(201), _}, _, {{alive, 0.1}, {normal, 0.1}}},
+        {{?prv(202), _}, _, {{alive, 0.0}, {normal, 0.0}}}
     ] = Result,
 
     hg_context:cleanup(),
@@ -305,9 +305,13 @@ prefer_alive(_C) ->
     Result1           = hg_routing:choose_route(FailRatedRoutes1, RejectContext, VS),
     Result2           = hg_routing:choose_route(FailRatedRoutes2, RejectContext, VS),
 
-    {ok, #domain_PaymentRoute{provider = ?prv(200)}} = Result0,
-    {ok, #domain_PaymentRoute{provider = ?prv(201)}} = Result1,
-    {ok, #domain_PaymentRoute{provider = ?prv(202)}} = Result2,
+    {ok, #domain_PaymentRoute{provider = ?prv(200)}, Meta0} = Result0,
+    {ok, #domain_PaymentRoute{provider = ?prv(201)}, Meta1} = Result1,
+    {ok, #domain_PaymentRoute{provider = ?prv(202)}, Meta2} = Result2,
+
+    #{reject_reason := availability_condition} = Meta0,
+    false = maps:is_key(reject_reason, Meta1),
+    #{reject_reason := availability_condition} = Meta2,
 
     ok.
 
@@ -328,7 +332,7 @@ prefer_normal_conversion(_C) ->
 
     {Routes, RC} = hg_routing:gather_routes(payment, PaymentInstitution, VS, Revision),
 
-    {ProviderRefs, TerminalData} = lists:unzip(Routes),
+    {Providers, TerminalData} = lists:unzip(Routes),
 
     Alive   = {alive,   0.0},
     Normal  = {normal,  0.0},
@@ -337,18 +341,21 @@ prefer_normal_conversion(_C) ->
     ProviderStatuses0   = [{Alive, Normal},  {Alive, Lacking}, {Alive, Lacking}],
     ProviderStatuses1   = [{Alive, Lacking}, {Alive, Normal},  {Alive, Lacking}],
     ProviderStatuses2   = [{Alive, Lacking}, {Alive, Lacking}, {Alive, Normal}],
-    FailRatedRoutes0 = lists:zip3(ProviderRefs, TerminalData, ProviderStatuses0),
-    FailRatedRoutes1 = lists:zip3(ProviderRefs, TerminalData, ProviderStatuses1),
-    FailRatedRoutes2 = lists:zip3(ProviderRefs, TerminalData, ProviderStatuses2),
+    FailRatedRoutes0 = lists:zip3(Providers, TerminalData, ProviderStatuses0),
+    FailRatedRoutes1 = lists:zip3(Providers, TerminalData, ProviderStatuses1),
+    FailRatedRoutes2 = lists:zip3(Providers, TerminalData, ProviderStatuses2),
 
     Result0 = hg_routing:choose_route(FailRatedRoutes0, RC, VS),
     Result1 = hg_routing:choose_route(FailRatedRoutes1, RC, VS),
     Result2 = hg_routing:choose_route(FailRatedRoutes2, RC, VS),
 
-    {ok, #domain_PaymentRoute{provider = ?prv(202)}, #{reject_reason := provider_condition}} = Result0,
-    {ok, #domain_PaymentRoute{provider = ?prv(201)}, Meta} = Result1,
-    false = maps:is_key(reject_reason, Meta),
-    {ok, #domain_PaymentRoute{provider = ?prv(200)}, #{reject_reason := provider_condition}} = Result2,
+    {ok, #domain_PaymentRoute{provider = ?prv(200)}, Meta0} = Result0,
+    {ok, #domain_PaymentRoute{provider = ?prv(201)}, Meta1} = Result1,
+    {ok, #domain_PaymentRoute{provider = ?prv(202)}, Meta2} = Result2,
+
+    #{reject_reason := conversion_condition} = Meta0,
+    false = maps:is_key(reject_reason, Meta1),
+    #{reject_reason := conversion_condition} = Meta2,
 
     ok.
 
@@ -400,12 +407,12 @@ prefer_higher_availability(_C) ->
 
     {ProviderRefs, TerminalData} = lists:unzip(Routes),
 
-    ProviderStatuses = [{{alive, 0.6}, {normal, 0.5}}, {{alive, 0.5}, {normal, 0.5}}, {{dead, 0.8}, {lacking, 1.0}}],
+    ProviderStatuses = [{{alive, 0.5}, {normal, 0.5}}, {{alive, 0.6}, {normal, 0.5}}, {{dead, 0.8}, {lacking, 1.0}}],
     FailRatedRoutes  = lists:zip3(ProviderRefs, TerminalData, ProviderStatuses),
 
     Result = hg_routing:choose_route(FailRatedRoutes, RC, VS),
 
-    {ok, #domain_PaymentRoute{provider = ?prv(200)}, #{reject_reason := conversion}} = Result,
+    {ok, #domain_PaymentRoute{provider = ?prv(200)}, #{reject_reason := availability}} = Result,
 
     ok.
 
@@ -426,14 +433,14 @@ prefer_higher_conversion(_C) ->
 
     {Routes, RC} = hg_routing:gather_routes(payment, PaymentInstitution, VS, Revision),
 
-    {ProviderRefs, TerminalData} = lists:unzip(Routes),
+    {Providers, TerminalData} = lists:unzip(Routes),
 
-    ProviderStatuses = [{{alive, 0.5}, {normal, 0.5}}, {{alive, 0.5}, {normal, 0.3}}, {{dead, 0.8}, {lacking, 1.0}}],
-    FailRatedRoutes  = lists:zip3(ProviderRefs, TerminalData, ProviderStatuses),
+    ProviderStatuses = [{{alive, 0.5}, {normal, 0.3}}, {{alive, 0.5}, {normal, 0.5}}, {{dead, 0.8}, {lacking, 1.0}}],
+    FailRatedRoutes  = lists:zip3(Providers, TerminalData, ProviderStatuses),
 
     Result = hg_routing:choose_route(FailRatedRoutes, RC, VS),
 
-    {ok, #domain_PaymentRoute{provider = ?prv(200)}, #{reject_reason := success_rate}} = Result,
+    {ok, #domain_PaymentRoute{provider = ?prv(200)}, #{reject_reason := conversion}} = Result,
 
     ok.
 
