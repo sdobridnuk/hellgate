@@ -1660,7 +1660,7 @@ repair_session(St = #st{repair_scenario = Scenario}) ->
             {ok, Result};
         call ->
             ProxyContext = construct_proxy_context(St),
-            hg_proxy_provider:process_payment(ProxyContext, St)
+            hg_proxy_provider:process_payment(ProxyContext, get_route(St))
     end.
 
 -spec finalize_payment(action(), st()) -> machine_result().

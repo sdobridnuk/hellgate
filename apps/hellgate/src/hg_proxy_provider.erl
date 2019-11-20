@@ -59,22 +59,10 @@ collect_proxy_options(#domain_PaymentRoute{provider = ProviderRef, terminal = Te
 
 %%
 
--spec process_payment(_ProxyContext, payment_state()) ->
+-spec process_payment(_ProxyContext, route()) ->
     term().
-process_payment(ProxyContext, St) ->
-    Route = hg_invoice_payment:get_route(St),
-    _ = fd_provider_conversion_service(start, Route, St),
-    Result = issue_call('ProcessPayment', [ProxyContext], Route),
-    case Result of
-        {ok, ?PAYMENT_PROXY_RESULT_FINISHED({success, _})} ->
-            _ = fd_provider_conversion_service(finish, Route, St),
-            Result;
-        {ok, ?PAYMENT_PROXY_RESULT_FINISHED({failure, _})} ->
-            _ = fd_provider_conversion_service(error, Route, St),
-            Result;
-        Result ->
-            Result
-    end.
+process_payment(ProxyContext, Route) ->
+    issue_call('ProcessPayment', [ProxyContext], Route).
 
 -spec generate_token(_ProxyContext, route()) ->
     term().
