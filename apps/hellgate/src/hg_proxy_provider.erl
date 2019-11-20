@@ -24,8 +24,6 @@
 
 %%
 
--type payment_state() :: hg_invoice_payment:st().
-
 -type trx_info() :: dmsl_domain_thrift:'TransactionInfo'().
 -type route() :: dmsl_domain_thrift:'PaymentRoute'().
 
@@ -129,9 +127,6 @@ get_call_options(Route) ->
 
 get_route_provider(#domain_PaymentRoute{provider = ProviderRef}) ->
     ProviderRef.
-
-get_payment_id(#domain_InvoicePayment{id = ID}) ->
-    ID.
 
 %%
 

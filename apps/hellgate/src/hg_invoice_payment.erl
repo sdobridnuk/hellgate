@@ -32,7 +32,6 @@
 -export([get_route/1]).
 -export([get_adjustments/1]).
 -export([get_adjustment/2]).
--export([get_route/1]).
 -export([get_cashflow/1]).
 -export([get_sessions/1]).
 
@@ -1664,7 +1663,7 @@ process_session(Action, St) ->
     process_session(Session, Action, St).
 
 process_session(undefined, Action, St0) ->
-    _ = fd_provider_conversion_service(start, St),
+    _ = fd_provider_conversion_service(start, St0),
     case validate_processing_deadline(get_payment(St0), get_target_type(get_target(St0))) of
         ok ->
             Events = start_session(get_target(St0)),
@@ -2834,11 +2833,6 @@ collapse_changes(Changes, St, Opts) ->
         St,
         Changes
     ).
-
--spec get_route(st()) -> route().
-
-get_route(#st{route = Route}) ->
-    Route.
 
 %%
 
