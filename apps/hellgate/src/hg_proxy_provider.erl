@@ -111,30 +111,13 @@ fd_adapter_availability_service(Status, Route) ->
     ServiceType   = adapter_availability,
     ProviderRef   = get_route_provider(Route),
     ProviderID    = ProviderRef#domain_ProviderRef.id,
-    BinaryID      = erlang:integer_to_binary(ProviderID),
     Config        = genlib_app:env(hellgate, fault_detector_availability, #{}),
     SlidingWindow = genlib_map:get(sliding_window,       Config, 60000),
     OpTimeLimit   = genlib_map:get(operation_time_limit, Config, 10000),
     PreAggrSize   = genlib_map:get(pre_aggregation_size, Config, 2),
     ServiceConfig = hg_fault_detector_client:build_config(SlidingWindow, OpTimeLimit, PreAggrSize),
-    ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
+    ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, ProviderID),
     OperationID   = hg_fault_detector_client:build_operation_id(ServiceType),
-    fd_register(Status, ServiceID, OperationID, ServiceConfig).
-
-fd_provider_conversion_service(Status, Route, St) ->
-    ServiceType   = provider_conversion,
-    ProviderRef   = get_route_provider(Route),
-    ProviderID    = ProviderRef#domain_ProviderRef.id,
-    BinaryID      = erlang:integer_to_binary(ProviderID),
-    Payment       = hg_invoice_payment:get_payment(St),
-    PaymentID     = get_payment_id(Payment),
-    Config        = genlib_app:env(hellgate, fault_detector_conversion, #{}),
-    SlidingWindow = genlib_map:get(sliding_window,       Config, 6000000),
-    OpTimeLimit   = genlib_map:get(operation_time_limit, Config, 1200000),
-    PreAggrSize   = genlib_map:get(pre_aggregation_size, Config, 2),
-    ServiceConfig = hg_fault_detector_client:build_config(SlidingWindow, OpTimeLimit, PreAggrSize),
-    ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, BinaryID),
-    OperationID   = hg_fault_detector_client:build_operation_id(ServiceType, PaymentID),
     fd_register(Status, ServiceID, OperationID, ServiceConfig).
 
 fd_register(start, ServiceID, OperationID, ServiceConfig) ->

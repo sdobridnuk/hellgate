@@ -1625,6 +1625,7 @@ process_session(Action, St) ->
     process_session(Session, Action, St).
 
 process_session(undefined, Action, St0) ->
+    _ = fd_provider_conversion_service(start, St),
     case validate_processing_deadline(get_payment(St0), get_target_type(get_target(St0))) of
         ok ->
             Events = start_session(get_target(St0)),
@@ -1722,6 +1723,7 @@ finish_session_processing({payment, Step} = Activity, {Events, Action}, St) when
     St1 = collapse_changes(Events, St),
     case get_session(Target, St1) of
         #{status := finished, result := ?session_succeeded(), target := Target} ->
+            Step =:= processing_session andalso fd_provider_conversion_service(finish, St),
             NewAction = hg_machine_action:set_timeout(0, Action),
             {next, {Events, NewAction}};
         #{status := finished, result := ?session_failed(Failure)} ->
@@ -1799,6 +1801,7 @@ process_failure({payment, Step}, Events, Action, Failure, St, _RefundSt) when
             {SessionEvents, SessionAction} = retry_session(Action, Target, Timeout),
             {next, {Events ++ SessionEvents, SessionAction}};
         fatal ->
+            Step =:= processing_session andalso fd_provider_conversion_service(error, St),
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
 process_failure({refund_new, ID}, Events, Action, Failure, St, RefundSt) ->
@@ -1818,6 +1821,36 @@ process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
                 ?refund_ev(ID, ?refund_status_changed(?refund_failed(Failure)))
             ],
             {done, {Events ++ Events1, Action}}
+    end.
+
+fd_provider_conversion_service(Status, St) ->
+    ServiceType   = provider_conversion,
+    Route         = get_route(St),
+    ProviderRef   = get_route_provider(Route),
+    ProviderID    = ProviderRef#domain_ProviderRef.id,
+    Payment       = get_payment(St),
+    PaymentID     = get_payment_id(Payment),
+    Config        = genlib_app:env(hellgate, fault_detector_conversion, #{}),
+    SlidingWindow = genlib_map:get(sliding_window,       Config, 6000000),
+    OpTimeLimit   = genlib_map:get(operation_time_limit, Config, 1200000),
+    PreAggrSize   = genlib_map:get(pre_aggregation_size, Config, 2),
+    ServiceConfig = hg_fault_detector_client:build_config(SlidingWindow, OpTimeLimit, PreAggrSize),
+    ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, ProviderID),
+    OperationID   = hg_fault_detector_client:build_operation_id(ServiceType, PaymentID),
+    fd_register(Status, ServiceID, OperationID, ServiceConfig).
+
+fd_register(start, ServiceID, OperationID, ServiceConfig) ->
+    _ = fd_maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig);
+fd_register(Status, ServiceID, OperationID, ServiceConfig) ->
+    _ = hg_fault_detector_client:register_operation(Status, ServiceID, OperationID, ServiceConfig).
+
+fd_maybe_init_service_and_start(ServiceID, OperationID, ServiceConfig) ->
+    case hg_fault_detector_client:register_operation(start, ServiceID, OperationID, ServiceConfig) of
+        {error, not_found} ->
+            _ = hg_fault_detector_client:init_service(ServiceID, ServiceConfig),
+            _ = hg_fault_detector_client:register_operation(start, ServiceID, OperationID, ServiceConfig);
+        Result ->
+            Result
     end.
 
 process_fatal_payment_failure(?captured(), _Events, _Action, Failure, _St) ->
@@ -2763,6 +2796,9 @@ get_customer(CustomerID) ->
     end.
 
 get_route_provider_ref(#domain_PaymentRoute{provider = ProviderRef}) ->
+    ProviderRef.
+
+get_route_provider(#domain_PaymentRoute{provider = ProviderRef}) ->
     ProviderRef.
 
 get_route_provider(Route, Revision) ->
