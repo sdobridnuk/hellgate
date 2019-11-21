@@ -23,6 +23,8 @@
 -export([prefer_better_risk_score/1]).
 -export([prefer_higher_availability/1]).
 -export([prefer_higher_conversion/1]).
+-export([prefer_weight_over_availability/1]).
+-export([prefer_weight_over_conversion/1]).
 -export([handle_uncomputable_provider_terms/1]).
 
 -export([terminal_priority_for_shop/1]).
@@ -62,7 +64,9 @@ groups() -> [
         prefer_normal_conversion,
         prefer_better_risk_score,
         prefer_higher_availability,
-        prefer_higher_conversion
+        prefer_higher_conversion,
+        prefer_weight_over_availability,
+        prefer_weight_over_conversion
     ]},
     {terminal_priority, [], [
         terminal_priority_for_shop
@@ -378,7 +382,7 @@ prefer_better_risk_score(_C) ->
 
     {ProviderRefs, TerminalData} = lists:unzip(Routes),
 
-    ProviderStatuses = [{{alive, 0.6}, {normal, 0.0}}, {{alive, 0.6}, {normal, 0.0}}, {{dead, 0.8}, {normal, 0.0}}],
+    ProviderStatuses = [{{dead, 1.0}, {normal, 0.0}}, {{alive, 0.3}, {normal, 0.3}}, {{alive, 0.0}, {normal, 0.0}}],
     FailRatedRoutes  = lists:zip3(ProviderRefs, TerminalData, ProviderStatuses),
 
     Result = hg_routing:choose_route(FailRatedRoutes, RC, VS),
@@ -441,6 +445,62 @@ prefer_higher_conversion(_C) ->
     Result = hg_routing:choose_route(FailRatedRoutes, RC, VS),
 
     {ok, #domain_PaymentRoute{provider = ?prv(200)}, #{reject_reason := conversion}} = Result,
+
+    ok.
+
+-spec prefer_weight_over_availability(config()) -> test_return().
+prefer_weight_over_availability(_C) ->
+    VS = #{
+        category        => ?cat(1),
+        currency        => ?cur(<<"RUB">>),
+        cost            => ?cash(1000, <<"RUB">>),
+        payment_tool    => {payment_terminal, #domain_PaymentTerminal{terminal_type = euroset}},
+        party_id        => <<"54321">>,
+        risk_score      => low,
+        flow            => instant
+    },
+
+    Revision = hg_domain:head(),
+    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
+
+    {Routes, RC} = hg_routing:gather_routes(payment, PaymentInstitution, VS, Revision),
+
+    {Providers, TerminalData} = lists:unzip(Routes),
+
+    ProviderStatuses = [{{alive, 0.3}, {normal, 0.3}}, {{alive, 0.5}, {normal, 0.3}}, {{alive, 0.3}, {normal, 0.3}}],
+    FailRatedRoutes  = lists:zip3(Providers, TerminalData, ProviderStatuses),
+
+    Result = hg_routing:choose_route(FailRatedRoutes, RC, VS),
+
+    {ok, #domain_PaymentRoute{provider = ?prv(201)}, _Meta} = Result,
+
+    ok.
+
+-spec prefer_weight_over_conversion(config()) -> test_return().
+prefer_weight_over_conversion(_C) ->
+    VS = #{
+        category        => ?cat(1),
+        currency        => ?cur(<<"RUB">>),
+        cost            => ?cash(1000, <<"RUB">>),
+        payment_tool    => {payment_terminal, #domain_PaymentTerminal{terminal_type = euroset}},
+        party_id        => <<"54321">>,
+        risk_score      => low,
+        flow            => instant
+    },
+
+    Revision = hg_domain:head(),
+    PaymentInstitution = hg_domain:get(Revision, {payment_institution, ?pinst(1)}),
+
+    {Routes, RC} = hg_routing:gather_routes(payment, PaymentInstitution, VS, Revision),
+
+    {Providers, TerminalData} = lists:unzip(Routes),
+
+    ProviderStatuses = [{{alive, 0.3}, {normal, 0.3}}, {{alive, 0.3}, {normal, 0.5}}, {{alive, 0.3}, {normal, 0.3}}],
+    FailRatedRoutes  = lists:zip3(Providers, TerminalData, ProviderStatuses),
+
+    Result = hg_routing:choose_route(FailRatedRoutes, RC, VS),
+
+    {ok, #domain_PaymentRoute{provider = ?prv(201)}, _Meta} = Result,
 
     ok.
 
@@ -512,7 +572,20 @@ routing_with_fail_rate_fixture(Revision) ->
             data = #domain_Provider{
                 name = <<"Biba">>,
                 description = <<"Payment terminal provider">>,
-                terminal = {value, [?prvtrm(111)]},
+                terminal = {decisions, [
+                    #domain_TerminalDecision{
+                        if_ = {condition,
+                            {party, #domain_PartyCondition{ id = <<"12345">> }}
+                        },
+                        then_ = {value, [ #domain_ProviderTerminalRef{id = 111} ]}
+                    },
+                    #domain_TerminalDecision{
+                        if_ = {condition,
+                            {party, #domain_PartyCondition{ id = <<"54321">> }}
+                        },
+                        then_ = {value, [ #domain_ProviderTerminalRef{id = 111} ]}
+                    }
+                ]},
                 proxy = #domain_Proxy{
                     ref = ?prx(1),
                     additional = #{
@@ -556,7 +629,20 @@ routing_with_fail_rate_fixture(Revision) ->
             data = #domain_Provider{
                 name = <<"Boba">>,
                 description = <<"Payment terminal provider">>,
-                terminal = {value, [?prvtrm(111)]},
+                terminal = {decisions, [
+                    #domain_TerminalDecision{
+                        if_ = {condition,
+                            {party, #domain_PartyCondition{ id = <<"12345">> }}
+                        },
+                        then_ = {value, [ #domain_ProviderTerminalRef{id = 111} ]}
+                    },
+                    #domain_TerminalDecision{
+                        if_ = {condition,
+                            {party, #domain_PartyCondition{ id = <<"54321">> }}
+                        },
+                        then_ = {value, [ #domain_ProviderTerminalRef{id = 111, priority = 1005} ]}
+                    }
+                ]},
                 proxy = #domain_Proxy{
                     ref = ?prx(1),
                     additional = #{
@@ -600,7 +686,20 @@ routing_with_fail_rate_fixture(Revision) ->
             data = #domain_Provider{
                 name = <<"Buba">>,
                 description = <<"Payment terminal provider">>,
-                terminal = {value, [?prvtrm(222)]},
+                terminal = {decisions, [
+                    #domain_TerminalDecision{
+                        if_ = {condition,
+                            {party, #domain_PartyCondition{ id = <<"12345">> }}
+                        },
+                        then_ = {value, [ #domain_ProviderTerminalRef{id = 222} ]}
+                    },
+                    #domain_TerminalDecision{
+                        if_ = {condition,
+                            {party, #domain_PartyCondition{ id = <<"54321">> }}
+                        },
+                        then_ = {value, [ #domain_ProviderTerminalRef{id = 111} ]}
+                    }
+                ]},
                 proxy = #domain_Proxy{
                     ref = ?prx(1),
                     additional = #{
@@ -768,7 +867,7 @@ construct_domain_fixture() ->
                 #domain_CashLimitDecision{
                     if_ = {condition, {currency_is, ?cur(<<"RUB">>)}},
                     then_ = {value, ?cashrng(
-                        {inclusive, ?cash(     10, <<"RUB">>)},
+                        {inclusive, ?cash(       10, <<"RUB">>)},
                         {exclusive, ?cash(  4200000, <<"RUB">>)}
                     )}
                 },
