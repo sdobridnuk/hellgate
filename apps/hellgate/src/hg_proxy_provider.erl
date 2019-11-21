@@ -18,10 +18,6 @@
 -include("domain.hrl").
 -include("payment_events.hrl").
 
--define(PAYMENT_PROXY_RESULT_FINISHED(Status), #prxprv_PaymentProxyResult{intent =
-    {finish, #prxprv_FinishIntent{status = Status}}
-}).
-
 %%
 
 -type trx_info() :: dmsl_domain_thrift:'TransactionInfo'().
@@ -82,18 +78,18 @@ handle_recurrent_token_callback(Payload, ProxyContext, Route) ->
 -spec issue_call(woody:func(), list(), route()) ->
     term().
 issue_call(Func, Args, Route) ->
-    _ = fd_adapter_availability_service(start, Route),
+    _ = notify_fault_detector(start, Route),
     try hg_woody_wrapper:call(proxy_provider, Func, Args, get_call_options(Route)) of
         Result ->
-            _ = fd_adapter_availability_service(finish, Route),
+            _ = notify_fault_detector(finish, Route),
             Result
     catch
         error:{woody_error, _ErrorType} = Reason ->
-            _ = fd_adapter_availability_service(error, Route),
+            _ = notify_fault_detector(error, Route),
             error(Reason)
     end.
 
-fd_adapter_availability_service(Status, Route) ->
+notify_fault_detector(Status, Route) ->
     ServiceType   = adapter_availability,
     ProviderRef   = get_route_provider(Route),
     ProviderID    = ProviderRef#domain_ProviderRef.id,
