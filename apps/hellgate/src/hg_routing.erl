@@ -92,12 +92,12 @@
 
 -record(route_scores, {
     availability_condition  :: condition_score(),
-    availability            :: float(),
     conversion_condition    :: condition_score(),
-    conversion              :: float(),
     priority_rating         :: terminal_priority_rating(),
     random_condition        :: integer(),
-    risk_coverage           :: float()
+    risk_coverage           :: float(),
+    availability            :: float(),
+    conversion              :: float()
 }).
 
 -type route_scores() :: #route_scores{}.
@@ -397,8 +397,8 @@ score_route({_Provider, {_TerminalRef, Terminal, Priority}, ProviderStatus}, VS)
     {PriorityRate, RandomCondition} = Priority,
     #route_scores{
         availability_condition = AvailabilityCondition,
-        availability = Availability,
         conversion_condition = ConversionCondition,
+        availability = Availability,
         conversion = Conversion,
         priority_rating = PriorityRate,
         random_condition = RandomCondition,
@@ -470,12 +470,10 @@ build_fd_ids({{ProviderRef, _Provider}, _Terminal}, IDs) ->
     [AvailabilityID, ConversionID | IDs].
 
 build_fd_availability_service_id(#domain_ProviderRef{id = ID}) ->
-    BinaryID = erlang:integer_to_binary(ID),
-    hg_fault_detector_client:build_service_id(adapter_availability, BinaryID).
+    hg_fault_detector_client:build_service_id(adapter_availability, ID).
 
 build_fd_conversion_service_id(#domain_ProviderRef{id = ID}) ->
-    BinaryID = erlang:integer_to_binary(ID),
-    hg_fault_detector_client:build_service_id(provider_conversion, BinaryID).
+    hg_fault_detector_client:build_service_id(provider_conversion, ID).
 
 %% NOTE
 %% Score ∈ [0.0 .. 1.0]
@@ -485,10 +483,6 @@ score_risk_coverage(Terminal, VS) ->
     RiskScore = getv(risk_score, VS),
     RiskCoverage = Terminal#domain_Terminal.risk_coverage,
     math:exp(-hg_inspector:compare_risk_score(RiskCoverage, RiskScore)).
-
-% build_fd_service_id(#domain_ProviderRef{id = ID}) ->
-%     BinaryID = erlang:integer_to_binary(ID),
-%     hg_fault_detector_client:build_service_id(adapter_availability, BinaryID).
 
 -spec get_payments_terms(route(), hg_domain:revision()) -> terms().
 
