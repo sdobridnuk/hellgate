@@ -23,7 +23,7 @@
 -export([prefer_better_risk_score/1]).
 -export([prefer_higher_availability/1]).
 -export([prefer_higher_conversion/1]).
--export([handle_uncomputale_provider_terms/1]).
+-export([handle_uncomputable_provider_terms/1]).
 
 -export([terminal_priority_for_shop/1]).
 
@@ -49,7 +49,7 @@ init([]) ->
 all() -> [
     fatal_risk_score_for_route_found,
     no_route_found_for_payment,
-    handle_uncomputale_provider_terms,
+    handle_uncomputable_provider_terms,
     {group, routing_with_fail_rate},
     {group, terminal_priority}
 ].
@@ -118,8 +118,8 @@ end_per_testcase(_Name, _C) -> ok.
 cfg(Key, C) ->
     hg_ct_helper:cfg(Key, C).
 
--spec handle_uncomputale_provider_terms(config()) -> test_return().
-handle_uncomputale_provider_terms(_C) ->
+-spec handle_uncomputable_provider_terms(config()) -> test_return().
+handle_uncomputable_provider_terms(_C) ->
     ok = hg_context:save(hg_context:create()),
     VS0 = #{
         category        => ?cat(1),
