@@ -1563,6 +1563,7 @@ process_routing(Action, St) ->
     VS1 = VS0#{risk_score => RiskScore},
     case choose_route(PaymentInstitution, VS1, Revision, St) of
         {ok, Route} ->
+            _ = notify_fault_detector(start, St#st{route = Route}),
             process_cash_flow_building(Route, VS1, Payment, PaymentInstitution, Revision, Opts, Events0, Action);
         {error, {no_route_found, {Reason, _Details}}} ->
             Failure = {failure, payproc_errors:construct('PaymentFailure',
@@ -1663,7 +1664,6 @@ process_session(Action, St) ->
     process_session(Session, Action, St).
 
 process_session(undefined, Action, St0) ->
-    _ = fd_provider_conversion_service(start, St0),
     case validate_processing_deadline(get_payment(St0), get_target_type(get_target(St0))) of
         ok ->
             Events = start_session(get_target(St0)),
@@ -1761,7 +1761,7 @@ finish_session_processing({payment, Step} = Activity, {Events, Action}, St) when
     St1 = collapse_changes(Events, St),
     case get_session(Target, St1) of
         #{status := finished, result := ?session_succeeded(), target := Target} ->
-            Step =:= processing_session andalso fd_provider_conversion_service(finish, St),
+            _ = maybe_notify_fault_detector(Step, finish, St),
             NewAction = hg_machine_action:set_timeout(0, Action),
             {next, {Events, NewAction}};
         #{status := finished, result := ?session_failed(Failure)} ->
@@ -1839,7 +1839,7 @@ process_failure({payment, Step}, Events, Action, Failure, St, _RefundSt) when
             {SessionEvents, SessionAction} = retry_session(Action, Target, Timeout),
             {next, {Events ++ SessionEvents, SessionAction}};
         fatal ->
-            Step =:= processing_session andalso fd_provider_conversion_service(error, St),
+            _ = maybe_notify_fault_detector(Step, finish, St),
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
 process_failure({refund_new, ID}, Events, Action, Failure, St, RefundSt) ->
@@ -1861,7 +1861,12 @@ process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
             {done, {Events ++ Events1, Action}}
     end.
 
-fd_provider_conversion_service(Status, St) ->
+maybe_notify_fault_detector(processing_session, Status, St) ->
+    notify_fault_detector(Status, St);
+maybe_notify_fault_detector(_Step, _Status, _St) ->
+    ok.
+
+notify_fault_detector(Status, St) ->
     ServiceType   = provider_conversion,
     Route         = get_route(St),
     ProviderRef   = get_route_provider(Route),
