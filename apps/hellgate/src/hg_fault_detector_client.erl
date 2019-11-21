@@ -44,7 +44,7 @@
 -type operation_time_limit()    :: fd_proto_fault_detector_thrift:'Milliseconds'().
 -type pre_aggregation_size()    :: fd_proto_fault_detector_thrift:'Seconds'() | undefined.
 
--type id()                      :: iodata() | atom() | number().
+-type id()                      :: binary() | atom() | number().
 -type fd_service_type()         :: adapter_availability
                                  | provider_conversion.
 
