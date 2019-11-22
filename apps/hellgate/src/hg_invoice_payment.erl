@@ -1496,6 +1496,7 @@ process_timeout({payment, Step}, Action, St) when
     Step =:= processing_session orelse
     Step =:= finalizing_session
 ->
+    _ = maybe_notify_fault_detector(Step, start, St),
     process_session(Action, St);
 process_timeout({payment, Step}, Action, St) when
     Step =:= processing_accounter orelse
@@ -1663,7 +1664,6 @@ process_session(Action, St) ->
     process_session(Session, Action, St).
 
 process_session(undefined, Action, St0) ->
-    _ = notify_fault_detector(start, St0),
     case validate_processing_deadline(get_payment(St0), get_target_type(get_target(St0))) of
         ok ->
             Events = start_session(get_target(St0)),
