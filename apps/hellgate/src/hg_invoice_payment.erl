@@ -1563,7 +1563,6 @@ process_routing(Action, St) ->
     VS1 = VS0#{risk_score => RiskScore},
     case choose_route(PaymentInstitution, VS1, Revision, St) of
         {ok, Route} ->
-            _ = notify_fault_detector(start, St#st{route = Route}),
             process_cash_flow_building(Route, VS1, Payment, PaymentInstitution, Revision, Opts, Events0, Action);
         {error, {no_route_found, {Reason, _Details}}} ->
             Failure = {failure, payproc_errors:construct('PaymentFailure',
@@ -1664,6 +1663,7 @@ process_session(Action, St) ->
     process_session(Session, Action, St).
 
 process_session(undefined, Action, St0) ->
+    _ = notify_fault_detector(start, St0),
     case validate_processing_deadline(get_payment(St0), get_target_type(get_target(St0))) of
         ok ->
             Events = start_session(get_target(St0)),
@@ -1839,7 +1839,7 @@ process_failure({payment, Step}, Events, Action, Failure, St, _RefundSt) when
             {SessionEvents, SessionAction} = retry_session(Action, Target, Timeout),
             {next, {Events ++ SessionEvents, SessionAction}};
         fatal ->
-            _ = maybe_notify_fault_detector(Step, finish, St),
+            _ = maybe_notify_fault_detector(Step, error, St),
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
 process_failure({refund_new, ID}, Events, Action, Failure, St, RefundSt) ->
@@ -1873,7 +1873,8 @@ notify_fault_detector(Status, St) ->
     ProviderID    = ProviderRef#domain_ProviderRef.id,
     Payment       = get_payment(St),
     PaymentID     = get_payment_id(Payment),
-    Config        = genlib_app:env(hellgate, fault_detector_conversion, #{}),
+    FDConfig      = genlib_app:env(hellgate, fault_detector, #{}),
+    Config        = genlib_map:get(conversion, FDConfig, #{}),
     SlidingWindow = genlib_map:get(sliding_window,       Config, 6000000),
     OpTimeLimit   = genlib_map:get(operation_time_limit, Config, 1200000),
     PreAggrSize   = genlib_map:get(pre_aggregation_size, Config, 2),
