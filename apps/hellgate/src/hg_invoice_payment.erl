@@ -1663,12 +1663,14 @@ process_session(Action, St) ->
     process_session(Session, Action, St).
 
 process_session(undefined, Action, St0) ->
-    Activity = get_activity(St0),
-    _ = maybe_notify_fault_detector(Activity, start, St0),
-    case validate_processing_deadline(get_payment(St0), get_target_type(get_target(St0))) of
+    Target     = get_target(St0),
+    TargetType = get_target_type(Target),
+    Activity   = get_activity(St0),
+    _ = maybe_notify_fault_detector(Activity, TargetType, start, St0),
+    case validate_processing_deadline(get_payment(St0), TargetType) of
         ok ->
-            Events = start_session(get_target(St0)),
-            St1 = collapse_changes(Events, St0),
+            Events = start_session(Target),
+            St1    = collapse_changes(Events, St0),
             Result = {start_session(get_target(St0)), hg_machine_action:set_timeout(0, Action)},
             finish_session_processing(Result, St1);
         Failure ->
@@ -1758,11 +1760,14 @@ finish_session_processing({payment, Step} = Activity, {Events, Action}, St) when
     Step =:= processing_session orelse
     Step =:= finalizing_session
 ->
-    Target = get_target(St),
+    Target   = get_target(St),
+    Activity = get_activity(St),
     St1 = collapse_changes(Events, St),
     case get_session(Target, St1) of
         #{status := finished, result := ?session_succeeded(), target := Target} ->
-            _ = maybe_notify_fault_detector(Activity, finish, St),
+            TargetType = get_target_type(Target),
+            _ = maybe_notify_fault_detector(Activity, TargetType, finish, St0),
+            % _ = maybe_notify_fault_detector(Activity, finish, St),
             NewAction = hg_machine_action:set_timeout(0, Action),
             {next, {Events, NewAction}};
         #{status := finished, result := ?session_failed(Failure)} ->
@@ -1840,7 +1845,8 @@ process_failure({payment, Step} = Activity, Events, Action, Failure, St, _Refund
             {SessionEvents, SessionAction} = retry_session(Action, Target, Timeout),
             {next, {Events ++ SessionEvents, SessionAction}};
         fatal ->
-            _ = maybe_notify_fault_detector(Activity, error, St),
+            Target = get_target_type(Target),
+            _ = maybe_notify_fault_detector(Activity, TargetType, error, St),
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
 process_failure({refund_new, ID}, Events, Action, Failure, St, RefundSt) ->
@@ -1862,9 +1868,9 @@ process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
             {done, {Events ++ Events1, Action}}
     end.
 
-maybe_notify_fault_detector({payment, processing_session}, Status, St) ->
+maybe_notify_fault_detector({payment, processing_session}, processed, Status, St) ->
     notify_fault_detector(Status, St);
-maybe_notify_fault_detector(_Activity, _Status, _St) ->
+maybe_notify_fault_detector(_Activity, _TargetType, _Status, _St) ->
     ok.
 
 notify_fault_detector(Status, St) ->
