@@ -1766,8 +1766,7 @@ finish_session_processing({payment, Step} = Activity, {Events, Action}, St) when
     case get_session(Target, St1) of
         #{status := finished, result := ?session_succeeded(), target := Target} ->
             TargetType = get_target_type(Target),
-            _ = maybe_notify_fault_detector(Activity, TargetType, finish, St0),
-            % _ = maybe_notify_fault_detector(Activity, finish, St),
+            _ = maybe_notify_fault_detector(Activity, TargetType, finish, St),
             NewAction = hg_machine_action:set_timeout(0, Action),
             {next, {Events, NewAction}};
         #{status := finished, result := ?session_failed(Failure)} ->
@@ -1845,7 +1844,7 @@ process_failure({payment, Step} = Activity, Events, Action, Failure, St, _Refund
             {SessionEvents, SessionAction} = retry_session(Action, Target, Timeout),
             {next, {Events ++ SessionEvents, SessionAction}};
         fatal ->
-            Target = get_target_type(Target),
+            TargetType = get_target_type(Target),
             _ = maybe_notify_fault_detector(Activity, TargetType, error, St),
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
