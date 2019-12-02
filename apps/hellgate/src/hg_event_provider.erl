@@ -13,11 +13,14 @@
     public_event().
 
 -export([publish_event/4]).
+-export([publish_rec_payment_tool_event/4]).
 
 %%
 
 -type event_id() :: dmsl_base_thrift:'EventID'().
 -type event()    :: dmsl_payment_processing_thrift:'Event'().
+
+-type rec_payment_tool_event() :: dmsl_payment_processing_thrift:'RecurrentPaymentToolEvent'().
 
 -spec publish_event(hg_machine:ns(), event_id(), hg_machine:id(), hg_machine:event()) ->
     event().
@@ -26,6 +29,20 @@ publish_event(Ns, EventID, MachineID, {ID, Dt, Ev}) ->
     Module = hg_machine:get_handler_module(Ns),
     {Source, Payload} = Module:publish_event(MachineID, Ev),
     #payproc_Event{
+        id         = EventID,
+        source     = Source,
+        created_at = Dt,
+        payload    = Payload,
+        sequence   = ID
+    }.
+
+-spec publish_rec_payment_tool_event(hg_machine:ns(), event_id(), hg_machine:id(), hg_machine:event()) ->
+    rec_payment_tool_event().
+
+publish_rec_payment_tool_event(Ns, EventID, MachineID, {ID, Dt, Ev}) ->
+    Module = hg_machine:get_handler_module(Ns),
+    {Source, Payload} = Module:publish_event(MachineID, Ev),
+    #payproc_RecurrentPaymentToolEvent{
         id         = EventID,
         source     = Source,
         created_at = Dt,
