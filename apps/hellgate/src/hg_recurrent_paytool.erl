@@ -29,6 +29,11 @@
 -export([process_signal/2]).
 -export([process_call  /2]).
 
+%% Event provider callbacks
+
+-behaviour(hg_event_provider).
+-export([publish_event/2]).
+
 %% Types
 -record(st, {
     rec_payment_tool     :: undefined | rec_payment_tool(),
@@ -41,6 +46,7 @@
 -export_type([st/0]).
 
 -type rec_payment_tool()        :: dmsl_payment_processing_thrift:'RecurrentPaymentTool'().
+-type rec_payment_tool_id()     :: dmsl_payment_processing_thrift:'RecurrentPaymentToolID'().
 -type rec_payment_tool_change() :: dmsl_payment_processing_thrift:'RecurrentPaymentToolChange'().
 -type rec_payment_tool_params() :: dmsl_payment_processing_thrift:'RecurrentPaymentToolParams'().
 
@@ -143,7 +149,8 @@ get_paytool_id(#payproc_RecurrentPaymentToolParams{id = ID}) ->
     ID.
 
 get_public_history(RecPaymentToolID, #payproc_EventRange{'after' = AfterID, limit = Limit}) ->
-    [publish_rec_payment_tool_event(RecPaymentToolID, Ev) || Ev <- get_history(RecPaymentToolID, AfterID, Limit)].
+    Events = get_history(RecPaymentToolID, AfterID, Limit),
+    [publish_rec_payment_tool_event(RecPaymentToolID, Ev) || Ev <- Events].
 
 publish_rec_payment_tool_event(RecPaymentToolID, Event) ->
     {ID, Dt, Payload} = Event,
@@ -1257,6 +1264,15 @@ maybe_unmarshal_party_revision(PartyRevision) ->
     unmarshal(int, PartyRevision).
 
 %%
+%% Event provider callbacks
+%%
+
+-spec publish_event(rec_payment_tool_id(), hg_machine:event_payload()) ->
+    hg_event_provider:public_event().
+publish_event(RecPaymentToolID, Payload) ->
+    {RecPaymentToolID, unmarshal_event_payload(Payload)}.
+
+%%
 %% Event sink
 %%
 
@@ -1264,4 +1280,4 @@ publish_events(Events) ->
     [publish_event(Event) || Event <- Events].
 
 publish_event({ID, Ns, SourceID, {EventID, Dt, Payload}}) ->
-    hg_event_provider:publish_event(Ns, ID, SourceID, {EventID, Dt, mg_msgpack_marshalling:unmarshal(Payload)}).
+    hg_event_provider:publish_rec_payment_tool_event(Ns, ID, SourceID, {EventID, Dt, Payload}).
