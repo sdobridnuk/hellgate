@@ -85,7 +85,7 @@
 handle_function('GetEvents', [#payproc_EventRange{'after' = After, limit = Limit}], _Opts) ->
     case hg_event_sink:get_events(?NS, After, Limit) of
         {ok, Events} ->
-            publish_events(Events);
+            publish_rec_payment_tool_events(Events);
         {error, event_not_found} ->
             throw(#payproc_EventNotFound{})
     end;
@@ -1276,8 +1276,8 @@ publish_event(RecPaymentToolID, Payload) ->
 %% Event sink
 %%
 
-publish_events(Events) ->
-    [publish_event(Event) || Event <- Events].
+publish_rec_payment_tool_events(Events) ->
+    [publish_rec_payment_tool_event(Event) || Event <- Events].
 
-publish_event({ID, Ns, SourceID, {EventID, Dt, Payload}}) ->
+publish_rec_payment_tool_event({ID, Ns, SourceID, {EventID, Dt, Payload}}) ->
     hg_event_provider:publish_rec_payment_tool_event(Ns, ID, SourceID, {EventID, Dt, Payload}).
