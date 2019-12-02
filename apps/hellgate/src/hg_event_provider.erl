@@ -5,7 +5,8 @@
 -type source_event() :: _.
 -type public_event() :: {source(), payload()}.
 -type source()   :: dmsl_payment_processing_thrift:'EventSource'().
--type payload()  :: dmsl_payment_processing_thrift:'EventPayload'().
+-type payload()  :: dmsl_payment_processing_thrift:'EventPayload'()
+                  | [dmsl_payment_processing_thrift:'RecurrentPaymentToolChange'()].
 
 -export_type([public_event/0]).
 
