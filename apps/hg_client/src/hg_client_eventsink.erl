@@ -5,6 +5,7 @@
 -export([start_link/1]).
 -export([stop/1]).
 
+-export([get_events/2]).
 -export([get_last_event_id/1]).
 -export([pull_events/2]).
 -export([pull_events/3]).
@@ -47,6 +48,17 @@ stop(Client) ->
 %%
 
 -define(DEFAULT_POLL_TIMEOUT, 1000).
+
+-spec get_events(any(), pid()) ->
+    any() | woody_error:business_error().
+
+get_events(Range, Client) ->
+    case gen_server:call(Client, {call, 'GetEvents', [Range]}) of
+        {ok, Result} ->
+            Result;
+        Error ->
+            Error
+    end.
 
 -spec get_last_event_id(pid()) ->
     event_id() | none | woody_error:business_error().
