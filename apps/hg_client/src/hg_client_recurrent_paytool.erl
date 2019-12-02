@@ -9,6 +9,8 @@
 
 -export([create/2]).
 -export([get/2]).
+-export([get_events/2]).
+-export([get_events/3]).
 -export([abandon/2]).
 
 -export([pull_event/2]).
@@ -29,6 +31,8 @@
 -type recurrent_paytool_id()     :: dmsl_payment_processing_thrift:'RecurrentPaymentToolID'().
 -type recurrent_paytool()        :: dmsl_payment_processing_thrift:'RecurrentPaymentTool'().
 -type recurrent_paytool_params() :: dmsl_payment_processing_thrift:'RecurrentPaymentToolParams'().
+
+-type range() :: dmsl_payment_processing_thrift:'EventRange'().
 
 %% API
 
@@ -63,6 +67,16 @@ create(Params, Client) ->
     recurrent_paytool() | woody_error:business_error().
 get(ID, Client) ->
     map_result_error(gen_server:call(Client, {call, 'Get', [ID]})).
+
+-spec get_events(range(), pid()) ->
+    recurrent_paytool() | woody_error:business_error().
+get_events(Range, Client) ->
+    map_result_error(gen_server:call(Client, {call, 'GetEvents', [Range]})).
+
+-spec get_events(recurrent_paytool_id(), range(), pid()) ->
+    recurrent_paytool() | woody_error:business_error().
+get_events(ID, Range, Client) ->
+    map_result_error(gen_server:call(Client, {call, 'GetEvents', [ID, Range]})).
 
 -spec abandon(recurrent_paytool_id(), pid()) ->
     ok | woody_error:business_error().
@@ -113,6 +127,10 @@ init(ApiClient) ->
 
 -spec handle_call(term(), callref(), st()) ->
     {reply, term(), st()} | {noreply, st()}.
+
+handle_call({call, 'GetEvents' = Function, [_Range] = Args}, _From, St = #st{client = Client}) ->
+    {Result, ClientNext} = hg_client_api:call(recurrent_paytool_eventsink, Function, Args, Client),
+    {reply, Result, St#st{client = ClientNext}};
 
 handle_call({call, Function, Args}, _From, St = #st{client = Client}) ->
     {Result, ClientNext} = hg_client_api:call(?SERVICE, Function, Args, Client),
