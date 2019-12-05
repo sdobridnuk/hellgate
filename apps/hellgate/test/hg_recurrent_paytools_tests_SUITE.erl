@@ -284,15 +284,23 @@ recurrent_paytool_event_sink(C) ->
     PartyID = cfg(party_id, C),
     ShopID = cfg(shop_id, C),
     Params = make_recurrent_paytool_params(PartyID, ShopID),
-    RecurrentPaytool = hg_client_recurrent_paytool:create(Params, Client),
-    #payproc_RecurrentPaymentTool{id = RecurrentPaytoolID} = RecurrentPaytool,
-    [Event] = hg_client_recurrent_paytool:get_events(RecurrentPaytoolID, #payproc_EventRange{}, Client),
-    #payproc_RecurrentPaymentToolEvent{payload = EventPayload} = Event,
-    EventSinkLatestID = hg_client_recurrent_paytool:get_last_event_id(Client),
-    Range = #payproc_EventRange{'after' = EventSinkLatestID - 1, limit = 1},
-    [EventSinkLatestEvent] = hg_client_recurrent_paytool:get_events(Range, Client),
-    EventSinkLatestPayload = EventSinkLatestEvent#payproc_RecurrentPaymentToolEvent.payload,
-    ?assertEqual(EventPayload, EventSinkLatestPayload).
+    CreateResult =  hg_client_recurrent_paytool:create(Params, Client),
+    #payproc_RecurrentPaymentTool{id = RecurrentPaytoolID} = CreateResult,
+    ok = await_acquirement(RecurrentPaytoolID, Client),
+    AbandonResult = hg_client_recurrent_paytool:abandon(RecurrentPaytoolID, Client),
+    #payproc_RecurrentPaymentTool{status = {abandoned, _}} = AbandonResult,
+    [?recurrent_payment_tool_has_abandoned()] = next_event(RecurrentPaytoolID, Client),
+    Events = hg_client_recurrent_paytool:get_events(RecurrentPaytoolID, #payproc_EventRange{}, Client),
+    EventSinkEvents = hg_client_recurrent_paytool:get_events(#payproc_EventRange{}, Client),
+    SourceEventSinkEvents = lists:filter(fun(Event) ->
+        Event#payproc_RecurrentPaymentToolEvent.source =:= RecurrentPaytoolID
+    end, EventSinkEvents),
+    EventIDs           = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.id       end, Events),
+    ESEventSequenceIDs = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.sequence end, SourceEventSinkEvents),
+    ?assertEqual(EventIDs, ESEventSequenceIDs),
+    EventPayloads   = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.payload end, Events),
+    ESEventPayloads = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.payload end, SourceEventSinkEvents),
+    ?assertEqual(EventPayloads, ESEventPayloads).
 
 recurrent_paytool_cost(C) ->
     Client = cfg(client, C),
