@@ -291,15 +291,15 @@ recurrent_paytool_event_sink(C) ->
     #payproc_RecurrentPaymentTool{status = {abandoned, _}} = AbandonResult,
     [?recurrent_payment_tool_has_abandoned()] = next_event(RecurrentPaytoolID, Client),
     Events = hg_client_recurrent_paytool:get_events(RecurrentPaytoolID, #payproc_EventRange{}, Client),
-    EventSinkEvents = hg_client_recurrent_paytool:get_events(#payproc_EventRange{}, Client),
-    SourceEventSinkEvents = lists:filter(fun(Event) ->
+    ESEvents = hg_client_recurrent_paytool:get_events(#payproc_EventRange{}, Client),
+    SourceESEvents = lists:filter(fun(Event) ->
         Event#payproc_RecurrentPaymentToolEvent.source =:= RecurrentPaytoolID
-    end, EventSinkEvents),
+    end, ESEvents),
     EventIDs           = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.id       end, Events),
-    ESEventSequenceIDs = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.sequence end, SourceEventSinkEvents),
+    ESEventSequenceIDs = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.sequence end, SourceESEvents),
     ?assertEqual(EventIDs, ESEventSequenceIDs),
     EventPayloads   = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.payload end, Events),
-    ESEventPayloads = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.payload end, SourceEventSinkEvents),
+    ESEventPayloads = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.payload end, SourceESEvents),
     ?assertEqual(EventPayloads, ESEventPayloads).
 
 recurrent_paytool_cost(C) ->
