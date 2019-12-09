@@ -24,7 +24,8 @@
     dmsl_domain_thrift:'HoldLifetimeSelector'() |
     dmsl_domain_thrift:'CashValueSelector'() |
     dmsl_domain_thrift:'CumulativeLimitSelector'() |
-    dmsl_domain_thrift:'TimeSpanSelector'().
+    dmsl_domain_thrift:'TimeSpanSelector'() |
+    dmsl_domain_thrift:'P2PProviderSelector'().
 
 -type value() ::
     _. %% FIXME
@@ -40,8 +41,11 @@
     flow            => instant | {hold, dmsl_domain_thrift:'HoldLifetime'()},
     payout_method   => dmsl_domain_thrift:'PayoutMethodRef'(),
     wallet_id       => dmsl_domain_thrift:'WalletID'(),
-    identification_level => dmsl_domain_thrift:'ContractorIdentificationLevel'()
+    identification_level => dmsl_domain_thrift:'ContractorIdentificationLevel'(),
+    p2p_tool        => dmsl_domain_thrift:'P2PTool'()
 }.
+
+-type predicate() :: dmsl_domain_thrift:'Predicate'().
 
 -export_type([varset/0]).
 
@@ -49,6 +53,7 @@
 -export([collect/1]).
 -export([reduce/3]).
 -export([reduce_to_value/3]).
+-export([reduce_predicate/3]).
 
 -define(const(Bool), {constant, Bool}).
 
@@ -113,6 +118,9 @@ reduce_decisions([{Type, V, S} | Rest], VS, Rev) ->
 reduce_decisions([], _, _) ->
     [].
 
+-spec reduce_predicate(predicate(), varset(), hg_domain:revision()) ->
+    predicate().
+
 reduce_predicate(?const(B), _, _) ->
     ?const(B);
 
@@ -160,3 +168,83 @@ reduce_condition(C, VS, Rev) ->
             % Irreducible, return as is
             C
     end.
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-include_lib("damsel/include/dmsl_domain_thrift.hrl").
+
+-spec test() -> _.
+
+-spec p2p_provider_test() -> _.
+p2p_provider_test() ->
+    BankCardCondition = #domain_BankCardCondition{definition = {issuer_country_is, rus}},
+    BankCardCondition2 = #domain_BankCardCondition{definition = {issuer_country_is, usa}},
+    P2PCondition1 = #domain_P2PToolCondition{
+        sender_is = {bank_card, BankCardCondition},
+        receiver_is = {bank_card, BankCardCondition}
+    },
+    P2PCondition2 = #domain_P2PToolCondition{
+        sender_is = {payment_tool, {bank_card, BankCardCondition}},
+        receiver_is = {payment_tool, {bank_card, BankCardCondition2}}
+    },
+    P2PProviderSelector = {decisions, [
+        #domain_P2PProviderDecision{
+            if_ = {condition, {p2p_tool, P2PCondition1}},
+            then_ = {value, [#domain_ProviderRef{id = 1}]}
+        },
+        #domain_P2PProviderDecision{
+            if_ = {condition, {p2p_tool, P2PCondition2}},
+            then_ = {value, [#domain_ProviderRef{id = 2}]}
+        }
+    ]},
+    BankCard1 = #domain_BankCard{
+        token          = <<"TOKEN1">>,
+        payment_system = mastercard,
+        bin            = <<"888888">>,
+        masked_pan     = <<"888">>,
+        issuer_country = rus
+    },
+    BankCard2 = #domain_BankCard{
+        token          = <<"TOKEN2">>,
+        payment_system = mastercard,
+        bin            = <<"777777">>,
+        masked_pan     = <<"777">>,
+        issuer_country = rus
+    },
+    Vs = #{
+        p2p_tool => #domain_P2PTool{
+            sender   = {bank_card, BankCard1},
+            receiver = {bank_card, BankCard2}
+        }
+    },
+    ?assertEqual([{domain_ProviderRef, 1}], reduce_to_value(P2PProviderSelector, Vs, 1)).
+
+-spec p2p_allow_test() -> _.
+p2p_allow_test() ->
+    FunGenCard = fun(PS, Country) -> #domain_BankCard{
+        token          = <<"TOKEN1">>,
+        payment_system = PS,
+        bin            = <<"888888">>,
+        masked_pan     = <<"888">>,
+        issuer_country = Country}
+    end,
+    FunGenVS = fun(PS1, PS2) -> #{p2p_tool => #domain_P2PTool{
+            sender   = {bank_card, FunGenCard(PS1, rus)},
+            receiver = {bank_card, FunGenCard(PS2, rus)}
+        }}
+    end,
+    Condition = #domain_BankCardCondition{definition = {payment_system_is, visa}},
+    CardCondition1 = #domain_P2PToolCondition{
+        sender_is = {bank_card, Condition},
+        receiver_is = {bank_card, Condition}
+    },
+    Predicate = {any_of, [{condition, {p2p_tool, CardCondition1}}]},
+    VS1 = FunGenVS(nspkmir, visa),
+    Allow = reduce_predicate(Predicate, VS1, 1),
+    ?assertEqual({constant, false}, Allow),
+
+    VS2 = FunGenVS(visa, visa),
+    Allow2 = reduce_predicate(Predicate, VS2, 1),
+    ?assertEqual({constant, true}, Allow2).
+
+-endif.

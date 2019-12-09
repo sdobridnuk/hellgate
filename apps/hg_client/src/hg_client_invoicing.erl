@@ -9,6 +9,7 @@
 -export([create/2]).
 -export([create_with_tpl/2]).
 -export([get/2]).
+-export([get/3]).
 -export([fulfill/3]).
 -export([rescind/3]).
 -export([repair/5]).
@@ -37,7 +38,7 @@
 -export([capture_adjustment/4]).
 -export([cancel_adjustment/4]).
 
--export([compute_terms/2]).
+-export([compute_terms/3]).
 
 -export([pull_event/2]).
 -export([pull_event/3]).
@@ -54,24 +55,20 @@
 
 %%
 
--type user_info()                 :: dmsl_payment_processing_thrift:'UserInfo'().
-
--type invoice_id()                :: dmsl_domain_thrift:'InvoiceID'().
--type invoice_state()             :: dmsl_payment_processing_thrift:'Invoice'().
--type invoice_params()            :: dmsl_payment_processing_thrift:'InvoiceParams'().
--type invoice_params_tpl()        :: dmsl_payment_processing_thrift:'InvoiceWithTemplateParams'().
-
--type payment()                   :: dmsl_domain_thrift:'InvoicePayment'().
--type payment_id()                :: dmsl_domain_thrift:'InvoicePaymentID'().
--type payment_params()            :: dmsl_payment_processing_thrift:'InvoicePaymentParams'().
-
--type adjustment()                :: dmsl_domain_thrift:'InvoicePaymentAdjustment'().
--type adjustment_id()             :: dmsl_domain_thrift:'InvoicePaymentAdjustmentID'().
--type adjustment_params()         :: dmsl_payment_processing_thrift:'InvoicePaymentAdjustmentParams'().
-
--type refund()                    :: dmsl_domain_thrift:'InvoicePaymentRefund'().
--type refund_id()                 :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
--type refund_params()             :: dmsl_payment_processing_thrift:'InvoicePaymentRefundParams'().
+-type user_info()          :: dmsl_payment_processing_thrift:'UserInfo'().
+-type invoice_id()         :: dmsl_domain_thrift:'InvoiceID'().
+-type invoice_state()      :: dmsl_payment_processing_thrift:'Invoice'().
+-type payment()            :: dmsl_domain_thrift:'InvoicePayment'().
+-type payment_id()         :: dmsl_domain_thrift:'InvoicePaymentID'().
+-type invoice_params()     :: dmsl_payment_processing_thrift:'InvoiceParams'().
+-type invoice_params_tpl() :: dmsl_payment_processing_thrift:'InvoiceWithTemplateParams'().
+-type payment_params()     :: dmsl_payment_processing_thrift:'InvoicePaymentParams'().
+-type adjustment()         :: dmsl_domain_thrift:'InvoicePaymentAdjustment'().
+-type adjustment_id()      :: dmsl_domain_thrift:'InvoicePaymentAdjustmentID'().
+-type adjustment_params()  :: dmsl_payment_processing_thrift:'InvoicePaymentAdjustmentParams'().
+-type refund()             :: dmsl_domain_thrift:'InvoicePaymentRefund'().
+-type refund_id()          :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
+-type refund_params()      :: dmsl_payment_processing_thrift:'InvoicePaymentRefundParams'().
 
 -type chargeback()                :: dmsl_domain_thrift:'InvoicePaymentChargeback'().
 -type chargeback_id()             :: dmsl_domain_thrift:'InvoicePaymentChargebackID'().
@@ -79,9 +76,11 @@
 -type chargeback_accept_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackAcceptParams'().
 -type chargeback_reopen_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackReopenParams'().
 
--type term_set()                  :: dmsl_domain_thrift:'TermSet'().
--type cash()                      :: undefined | dmsl_domain_thrift:'Cash'().
--type cart()                      :: undefined | dmsl_domain_thrift:'InvoiceCart'().
+-type term_set()           :: dmsl_domain_thrift:'TermSet'().
+-type cash()               :: undefined | dmsl_domain_thrift:'Cash'().
+-type cart()               :: undefined | dmsl_domain_thrift:'InvoiceCart'().
+-type event_range()        :: dmsl_payment_processing_thrift:'EventRange'().
+-type party_revision_param() :: dmsl_payment_processing_thrift:'PartyRevisionParam'().
 
 -spec start(hg_client_api:t()) -> pid().
 
@@ -126,7 +125,14 @@ create_with_tpl(Params, Client) ->
     invoice_state() | woody_error:business_error().
 
 get(InvoiceID, Client) ->
-    map_result_error(gen_server:call(Client, {call, 'Get', [InvoiceID]})).
+    get(InvoiceID, Client, #payproc_EventRange{}).
+
+-spec get(invoice_id(), pid(), event_range()) ->
+    invoice_state() | woody_error:business_error().
+
+get(InvoiceID, Client, EventRange) ->
+    map_result_error(gen_server:call(Client, {call, 'Get', [InvoiceID, EventRange]})).
+
 
 -spec fulfill(invoice_id(), binary(), pid()) ->
     ok | woody_error:business_error().
@@ -283,10 +289,10 @@ cancel_adjustment(InvoiceID, PaymentID, ID, Client) ->
     Args = [InvoiceID, PaymentID, ID],
     map_result_error(gen_server:call(Client, {call, 'CancelPaymentAdjustment', Args})).
 
--spec compute_terms(invoice_id(), pid()) -> term_set().
+-spec compute_terms(invoice_id(), party_revision_param(), pid()) -> term_set().
 
-compute_terms(InvoiceID, Client) ->
-    map_result_error(gen_server:call(Client, {call, 'ComputeTerms', [InvoiceID]})).
+compute_terms(InvoiceID, PartyRevision, Client) ->
+    map_result_error(gen_server:call(Client, {call, 'ComputeTerms', [InvoiceID, PartyRevision]})).
 
 
 -define(DEFAULT_NEXT_EVENT_TIMEOUT, 5000).

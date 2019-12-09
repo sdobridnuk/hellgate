@@ -18,7 +18,7 @@ services:
     mem_limit: 256M
 
   dominant:
-    image: dr2.rbkmoney.com/rbkmoney/dominant:8db109ae806e4fc333ba32751f57f659a7cb4ad7
+    image: dr2.rbkmoney.com/rbkmoney/dominant:3487abaea51958dee6e26118d82d97b50d2f7dc4
     command: /opt/dominant/bin/dominant foreground
     depends_on:
       machinegun:
@@ -36,7 +36,7 @@ services:
       retries: 20
 
   shumway:
-    image: dr.rbkmoney.com/rbkmoney/shumway:7a5f95ee1e8baa42fdee9c08cc0ae96cd7187d55
+    image: dr2.rbkmoney.com/rbkmoney/shumway:d36bcf5eb8b1dbba634594cac11c97ae9c66db9f
     restart: unless-stopped
     entrypoint:
       - java
@@ -46,6 +46,7 @@ services:
       - --spring.datasource.url=jdbc:postgresql://shumway-db:5432/shumway
       - --spring.datasource.username=postgres
       - --spring.datasource.password=postgres
+      - --management.metrics.export.statsd.enabled=false
     depends_on:
       - shumway-db
     healthcheck:

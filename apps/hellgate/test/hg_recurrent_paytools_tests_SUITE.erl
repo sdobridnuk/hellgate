@@ -1,5 +1,6 @@
 -module(hg_recurrent_paytools_tests_SUITE).
 -include_lib("common_test/include/ct.hrl").
+-include_lib("stdlib/include/assert.hrl").
 -include("hg_ct_domain.hrl").
 -include("hg_ct_json.hrl").
 -include_lib("damsel/include/dmsl_payment_processing_thrift.hrl").
@@ -27,6 +28,7 @@
 -export([recurrent_paytool_abandoned/1]).
 -export([recurrent_paytool_acquirement_failed/1]).
 -export([recurrent_paytool_acquired/1]).
+-export([recurrent_paytool_event_sink/1]).
 -export([recurrent_paytool_cost/1]).
 -export([recurrent_paytool_w_tds_acquired/1]).
 
@@ -103,6 +105,7 @@ all() ->
         get_recurrent_paytool,
         recurrent_paytool_acquirement_failed,
         recurrent_paytool_acquired,
+        recurrent_paytool_event_sink,
         recurrent_paytool_cost,
         recurrent_paytool_w_tds_acquired,
         recurrent_paytool_abandoned,
@@ -229,6 +232,7 @@ invalid_payment_method(C) ->
 -spec get_recurrent_paytool(config()) -> test_case_result().
 -spec recurrent_paytool_acquirement_failed(config()) -> test_case_result().
 -spec recurrent_paytool_acquired(config()) -> test_case_result().
+-spec recurrent_paytool_event_sink(config()) -> test_case_result().
 -spec recurrent_paytool_cost(config()) -> test_case_result().
 -spec recurrent_paytool_w_tds_acquired(config()) -> test_case_result().
 -spec recurrent_paytool_abandoned(config()) -> test_case_result().
@@ -259,7 +263,9 @@ recurrent_paytool_acquirement_failed(C) ->
     RecurrentPaytool = hg_client_recurrent_paytool:create(Params, cfg(client, C)),
     #payproc_RecurrentPaymentTool{id = RecurrentPaytoolID} = RecurrentPaytool,
     [
-        ?recurrent_payment_tool_has_created(_, _, _),
+        ?recurrent_payment_tool_has_created(_),
+        ?recurrent_payment_tool_risk_score_changed(_),
+        ?recurrent_payment_tool_route_changed(_),
         ?session_ev(?session_started())
     ] = next_event(RecurrentPaytoolID, Client),
     ok = await_failure(RecurrentPaytoolID, Client).
@@ -269,9 +275,32 @@ recurrent_paytool_acquired(C) ->
     PartyID = cfg(party_id, C),
     ShopID = cfg(shop_id, C),
     Params = make_recurrent_paytool_params(PartyID, ShopID),
-    RecurrentPaytool = hg_client_recurrent_paytool:create(Params, cfg(client, C)),
+    RecurrentPaytool = hg_client_recurrent_paytool:create(Params, Client),
     #payproc_RecurrentPaymentTool{id = RecurrentPaytoolID} = RecurrentPaytool,
     ok = await_acquirement(RecurrentPaytoolID, Client).
+
+recurrent_paytool_event_sink(C) ->
+    Client = cfg(client, C),
+    PartyID = cfg(party_id, C),
+    ShopID = cfg(shop_id, C),
+    Params = make_recurrent_paytool_params(PartyID, ShopID),
+    CreateResult =  hg_client_recurrent_paytool:create(Params, Client),
+    #payproc_RecurrentPaymentTool{id = RecurrentPaytoolID} = CreateResult,
+    ok = await_acquirement(RecurrentPaytoolID, Client),
+    AbandonResult = hg_client_recurrent_paytool:abandon(RecurrentPaytoolID, Client),
+    #payproc_RecurrentPaymentTool{status = {abandoned, _}} = AbandonResult,
+    [?recurrent_payment_tool_has_abandoned()] = next_event(RecurrentPaytoolID, Client),
+    Events = hg_client_recurrent_paytool:get_events(RecurrentPaytoolID, #payproc_EventRange{}, Client),
+    ESEvents = hg_client_recurrent_paytool:get_events(#payproc_EventRange{}, Client),
+    SourceESEvents = lists:filter(fun(Event) ->
+        Event#payproc_RecurrentPaymentToolEvent.source =:= RecurrentPaytoolID
+    end, ESEvents),
+    EventIDs           = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.id       end, Events),
+    ESEventSequenceIDs = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.sequence end, SourceESEvents),
+    ?assertEqual(EventIDs, ESEventSequenceIDs),
+    EventPayloads   = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.payload end, Events),
+    ESEventPayloads = lists:map(fun(Event) -> Event#payproc_RecurrentPaymentToolEvent.payload end, SourceESEvents),
+    ?assertEqual(EventPayloads, ESEventPayloads).
 
 recurrent_paytool_cost(C) ->
     Client = cfg(client, C),
@@ -288,7 +317,9 @@ recurrent_paytool_cost(C) ->
     } = RecurrentPaytool,
     RecurrentPaytool2 = RecurrentPaytool#payproc_RecurrentPaymentTool{route = undefined},
     [
-        ?recurrent_payment_tool_has_created(RecurrentPaytool2, _, _),
+        ?recurrent_payment_tool_has_created(RecurrentPaytool2),
+        ?recurrent_payment_tool_risk_score_changed(_),
+        ?recurrent_payment_tool_route_changed(_),
         ?session_ev(?session_started())
     ] = next_event(RecurrentPaytoolID, Client),
     ok = await_acquirement_finish(RecurrentPaytoolID, Client).
@@ -301,7 +332,9 @@ recurrent_paytool_w_tds_acquired(C) ->
     RecurrentPaytool = hg_client_recurrent_paytool:create(Params, cfg(client, C)),
     #payproc_RecurrentPaymentTool{id = RecurrentPaytoolID} = RecurrentPaytool,
     [
-        ?recurrent_payment_tool_has_created(_, _, _),
+        ?recurrent_payment_tool_has_created(_),
+        ?recurrent_payment_tool_risk_score_changed(_),
+        ?recurrent_payment_tool_route_changed(_),
         ?session_ev(?session_started())
     ] = next_event(RecurrentPaytoolID, Client),
     [
@@ -421,7 +454,9 @@ construct_proxy(ID, Url, Options) ->
 
 await_acquirement(RecurrentPaytoolID, Client) ->
     [
-        ?recurrent_payment_tool_has_created(_, _, _),
+        ?recurrent_payment_tool_has_created(_),
+        ?recurrent_payment_tool_risk_score_changed(_),
+        ?recurrent_payment_tool_route_changed(_),
         ?session_ev(?session_started())
     ] = next_event(RecurrentPaytoolID, Client),
     await_acquirement_finish(RecurrentPaytoolID, Client).
