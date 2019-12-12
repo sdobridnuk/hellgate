@@ -789,8 +789,8 @@ wrap_payment_impact(PaymentID, {Response, {Changes, Action}}, St) ->
         state    => St
     }.
 
-handle_result(#{state := St} = Result) ->
-    _ = validate_result(Result),
+handle_result(#{} = Result) ->
+    St = validate_changes(Result),
     _ = log_changes(maps:get(changes, Result, []), St),
     MachineResult = handle_result_changes(Result, handle_result_action(Result, #{})),
     case maps:get(response, Result, undefined) of
@@ -812,13 +812,12 @@ handle_result_action(#{action := Action}, Acc) ->
 handle_result_action(#{}, Acc) ->
     Acc.
 
-validate_result(#{validate := false}) ->
-    ok;
-validate_result(#{changes := Changes = [_ | _], state := St}) ->
-    _St = collapse_changes(Changes, St, #{validation => strict}),
-    ok;
-validate_result(_Result) ->
-    ok.
+validate_changes(#{validate := false, changes := Changes = [_ | _], state := St}) ->
+    collapse_changes(Changes, St, #{});
+validate_changes(#{changes := Changes = [_ | _], state := St}) ->
+    collapse_changes(Changes, St, #{validation => strict});
+validate_changes(#{state := St}) ->
+    St.
 
 %%
 
@@ -948,8 +947,8 @@ process_repair(Scenario, St = #st{activity = {payment, PaymentID}}) ->
 
 collapse_history(History) ->
     lists:foldl(
-        fun ({_ID, _, Changes}, St0) ->
-            collapse_changes(Changes, St0, #{})
+        fun ({_ID, Dt, Changes}, St0) ->
+            collapse_changes(Changes, St0, #{timestamp => Dt})
         end,
         #st{},
         History
