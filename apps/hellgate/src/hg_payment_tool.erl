@@ -276,12 +276,6 @@ marshal({bank_card, metadata}, MD) when is_map(MD) ->
 marshal({payment_terminal, type}, euroset) ->
     <<"euroset">>;
 
-marshal({payment_terminal, type}, wechat) ->
-    <<"wechat">>;
-
-marshal({payment_terminal, type}, alipay) ->
-    <<"alipay">>;
-
 marshal({digital_wallet, provider}, qiwi) ->
     <<"qiwi">>;
 
@@ -446,12 +440,6 @@ unmarshal({bank_card, metadata}, MD) when is_map(MD) ->
 
 unmarshal({payment_terminal, type}, <<"euroset">>) ->
     euroset;
-
-unmarshal({payment_terminal, type}, <<"wechat">>) ->
-    wechat;
-
-unmarshal({payment_terminal, type}, <<"alipay">>) ->
-    alipay;
 
 unmarshal({digital_wallet, provider}, <<"qiwi">>) ->
     qiwi;
