@@ -3012,7 +3012,7 @@ get_log_params(_, _) ->
 make_log_params(Params) ->
     LogParams = maps:fold(
         fun(K, V, Acc) ->
-            Acc ++ make_log_params(K, V)
+            make_log_params(K, V) ++ Acc
         end,
         [],
         Params
