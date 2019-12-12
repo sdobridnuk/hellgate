@@ -2987,13 +2987,13 @@ make_log_params(flow, ?invoice_payment_flow_hold(OnHoldExpiration, _)) ->
 make_log_params(cashflow, undefined) ->
     [];
 make_log_params(cashflow, CashFlow) ->
-    Reminders = maps:to_list(hg_cashflow:get_partial_remainders(CashFlow)),
+    Remainders = maps:to_list(hg_cashflow:get_partial_remainders(CashFlow)),
     Accounts = lists:map(
         fun ({Account, ?cash(Amount, SymCode)}) ->
             Remainder = [{remainder, [{amount, Amount}, {currency, SymCode}]}],
             {get_account_key(Account), Remainder}
         end,
-        Reminders
+        Remainders
     ),
     [{accounts, Accounts}];
 make_log_params(risk_score, Score) ->
