@@ -43,7 +43,6 @@
 -export([get_remaining_payment_balance/1]).
 -export([get_activity/1]).
 -export([get_tags/1]).
--export([get_route/1]).
 -export([get_opts/1]).
 
 -export([construct_payment_info/2]).
@@ -80,7 +79,6 @@
 
 %%
 
--export_type([st/0]).
 -export_type([activity/0]).
 -export_type([machine_result/0]).
 -export_type([opts/0]).
@@ -117,7 +115,6 @@
                              | finalizing_accounter.
 
 -record(st, {
-
     activity               :: activity(),
     payment                :: undefined | payment(),
     risk_score             :: undefined | risk_score(),
@@ -144,13 +141,9 @@
     transaction_info  :: undefined | trx_info()
 }).
 
+-type chargeback_state() :: hg_invoice_payment_chargeback:st().
 -type refund_state() :: #refund_st{}.
-
 -type st() :: #st{}.
-
--export_type([st/0]).
--export_type([activity/0]).
--export_type([machine_result/0]).
 
 -type cash()                :: dmsl_domain_thrift:'Cash'().
 -type cart()                :: dmsl_domain_thrift:'InvoiceCart'().
@@ -1152,7 +1145,7 @@ assert_no_active_chargebacks(St) ->
     CBs = get_chargebacks(St),
     ActiveChargebacks = lists:filter(
         fun
-            (#domain_InvoicePaymentChargeback{status = ?chargeback_status_pending(_)}) -> true;
+            (#domain_InvoicePaymentChargeback{status = ?chargeback_status_pending(_, _)}) -> true;
             (#domain_InvoicePaymentChargeback{}) -> false
         end,
         CBs
@@ -1164,8 +1157,8 @@ assert_no_active_chargebacks(St) ->
             throw(#payproc_InvoicePaymentChargebackPending{})
     end.
 
-get_chargeback_cash(#domain_InvoicePaymentChargeback{cash = Cash}) ->
-    Cash.
+get_chargeback_body(#domain_InvoicePaymentChargeback{body = Body}) ->
+    Body.
 
 -spec refund(refund_params(), st(), opts()) ->
     {domain_refund(), result()}.
@@ -1292,7 +1285,7 @@ get_remaining_payment_balance(St) ->
            (CB = #domain_InvoicePaymentChargeback{}, Acc) ->
             case get_chargeback_status(CB) of
                 {S, _} when S == accepted ->
-                    hg_cash:sub(Acc, get_chargeback_cash(CB));
+                    hg_cash:sub(Acc, get_chargeback_body(CB));
                 _ ->
                     Acc
             end
@@ -2597,7 +2590,7 @@ merge_change(Change = ?chargeback_ev(ID, Event), St, Opts) ->
         ?chargeback_stage_changed(_) ->
             _ = validate_transition(idle, Change, St, Opts),
             St;
-        ?chargeback_changed(_, _) ->
+        ?chargeback_changed(_) ->
             _ = validate_transition(idle, Change, St, Opts),
             St#st{activity = {chargeback_accounter, ID}};
         ?chargeback_cash_flow_changed(_) ->
@@ -3018,10 +3011,6 @@ get_customer(CustomerID) ->
         {exception, Error} ->
             error({<<"Can't get customer">>, Error})
     end.
-
--spec get_route(st()) -> route().
-get_route(#st{route = Route}) ->
-    Route.
 
 get_route_provider_ref(#domain_PaymentRoute{provider = ProviderRef}) ->
     ProviderRef.
