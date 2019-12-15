@@ -284,7 +284,7 @@ get_payment_state(PaymentSession) ->
     #payproc_InvoicePayment{
         payment     = hg_invoice_payment:get_payment(PaymentSession),
         adjustments = hg_invoice_payment:get_adjustments(PaymentSession),
-        chargebacks = hg_invoice_payment:get_chargebacks(PaymentSession)
+        chargebacks = hg_invoice_payment:get_chargebacks(PaymentSession),
         route = hg_invoice_payment:get_route(PaymentSession),
         cash_flow = hg_invoice_payment:get_cashflow(PaymentSession),
         legacy_refunds = LegacyRefunds,
@@ -642,13 +642,13 @@ handle_call({{'Invoicing', 'CancelChargeback'}, [_UserInfo, _InvoiceID, PaymentI
     CancelResult    = hg_invoice_payment_chargeback:cancel(ChargebackID, SessionWithOpts),
     wrap_payment_impact(PaymentID, CancelResult, St);
 
-handle_call({{'Invoicing', 'RejectChargeback'}, [_UserInfo, _InvoiceID, PaymentID, ChargebackID]}, St) ->
+handle_call({{'Invoicing', 'RejectChargeback'}, [_UserInfo, _InvoiceID, PaymentID, ChargebackID, Params]}, St) ->
     _ = assert_invoice_accessible(St),
     _ = assert_invoice_operable(St),
     PaymentSession  = get_payment_session(PaymentID, St),
     PaymentOpts     = get_payment_opts(St),
     SessionWithOpts = hg_invoice_payment:set_opts(PaymentOpts, PaymentSession),
-    RejectResult    = hg_invoice_payment_chargeback:reject(ChargebackID, SessionWithOpts),
+    RejectResult    = hg_invoice_payment_chargeback:reject(ChargebackID, SessionWithOpts, Params),
     wrap_payment_impact(PaymentID, RejectResult, St);
 
 handle_call({{'Invoicing', 'AcceptChargeback'}, [_UserInfo, _InvoiceID, PaymentID, ChargebackID, Params]}, St) ->

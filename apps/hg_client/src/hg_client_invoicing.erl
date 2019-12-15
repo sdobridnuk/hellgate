@@ -28,7 +28,7 @@
 
 -export([create_chargeback/4]).
 -export([cancel_chargeback/4]).
--export([reject_chargeback/4]).
+-export([reject_chargeback/5]).
 -export([accept_chargeback/5]).
 -export([reopen_chargeback/5]).
 -export([get_payment_chargeback/4]).
@@ -70,10 +70,11 @@
 -type refund_id()          :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
 -type refund_params()      :: dmsl_payment_processing_thrift:'InvoicePaymentRefundParams'().
 
--type chargeback()                :: dmsl_domain_thrift:'InvoicePaymentChargeback'().
--type chargeback_id()             :: dmsl_domain_thrift:'InvoicePaymentChargebackID'().
+-type chargeback()               :: dmsl_domain_thrift:'InvoicePaymentChargeback'().
+-type chargeback_id()            :: dmsl_domain_thrift:'InvoicePaymentChargebackID'().
 -type chargeback_params()        :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackParams'().
 -type chargeback_accept_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackAcceptParams'().
+-type chargeback_reject_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackRejectParams'().
 -type chargeback_reopen_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackReopenParams'().
 
 -type term_set()           :: dmsl_domain_thrift:'TermSet'().
@@ -219,11 +220,11 @@ create_chargeback(InvoiceID, PaymentID, Params, Client) ->
 cancel_chargeback(InvoiceID, PaymentID, ChargebackID, Client) ->
     map_result_error(gen_server:call(Client, {call, 'CancelChargeback', [InvoiceID, PaymentID, ChargebackID]})).
 
--spec reject_chargeback(invoice_id(), payment_id(), chargeback_id(), pid()) ->
+-spec reject_chargeback(invoice_id(), payment_id(), chargeback_id(), chargeback_reject_params(), pid()) ->
     chargeback() | woody_error:business_error().
 
-reject_chargeback(InvoiceID, PaymentID, ChargebackID, Client) ->
-    map_result_error(gen_server:call(Client, {call, 'RejectChargeback', [InvoiceID, PaymentID, ChargebackID]})).
+reject_chargeback(InvoiceID, PaymentID, ChargebackID, Params, Client) ->
+    map_result_error(gen_server:call(Client, {call, 'RejectChargeback', [InvoiceID, PaymentID, ChargebackID, Params]})).
 
 -spec accept_chargeback(invoice_id(), payment_id(), chargeback_id(), chargeback_accept_params(), pid()) ->
     chargeback() | woody_error:business_error().
