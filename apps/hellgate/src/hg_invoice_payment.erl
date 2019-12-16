@@ -1145,7 +1145,7 @@ assert_no_active_chargebacks(St) ->
     CBs = get_chargebacks(St),
     ActiveChargebacks = lists:filter(
         fun
-            (#domain_InvoicePaymentChargeback{status = ?chargeback_status_pending(_, _)}) -> true;
+            (#domain_InvoicePaymentChargeback{status = ?chargeback_status_pending(_)}) -> true;
             (#domain_InvoicePaymentChargeback{}) -> false
         end,
         CBs
