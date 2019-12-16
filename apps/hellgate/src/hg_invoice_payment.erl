@@ -29,7 +29,6 @@
 -export([get_payment/1]).
 -export([get_refunds/1]).
 -export([get_chargebacks/1]).
--export([get_chargeback/2]).
 -export([get_chargeback_state/2]).
 -export([get_refund/2]).
 -export([get_route/1]).
@@ -216,7 +215,8 @@ get_party_revision(#st{activity = {_, ID} = Activity} = St) when
     Activity =:= {chargeback_new               , ID} orelse
     Activity =:= {chargeback_accounter         , ID} orelse
     Activity =:= {chargeback_accounter_finalise, ID} ->
-        #domain_InvoicePaymentChargeback{party_revision = Revision, created_at = Timestamp} = get_chargeback(ID, St),
+        CB = hg_invoice_payment_chargeback:get(get_chargeback_state(ID, St)),
+        #domain_InvoicePaymentChargeback{party_revision = Revision, created_at = Timestamp} = CB,
         {Revision, Timestamp};
 get_party_revision(#st{activity = {_, ID} = Activity} = St) when
     Activity =:= {refund_new, ID} orelse
@@ -253,16 +253,6 @@ get_adjustment(ID, St) ->
             Adjustment;
         undefined ->
             throw(#payproc_InvoicePaymentAdjustmentNotFound{})
-    end.
-
--spec get_chargeback(chargeback_id(), st()) -> chargeback() | no_return().
-
-get_chargeback(ID, St) ->
-    case try_get_chargeback_state(ID, St) of
-        undefined ->
-            throw(#payproc_InvoicePaymentChargebackNotFound{});
-        ChargebackState ->
-            hg_invoice_payment_chargeback:get(ChargebackState)
     end.
 
 -spec get_chargeback_state(chargeback_id(), st()) -> chargeback_state() | no_return().

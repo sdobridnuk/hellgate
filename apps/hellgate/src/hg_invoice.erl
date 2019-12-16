@@ -193,7 +193,8 @@ handle_function_('GetPaymentChargeback', [UserInfo, InvoiceID, PaymentID, ID], _
     ok = assume_user_identity(UserInfo),
     _ = set_invoicing_meta(InvoiceID, PaymentID),
     St = assert_invoice_accessible(get_state(InvoiceID)),
-    hg_invoice_payment:get_chargeback(ID, get_payment_session(PaymentID, St));
+    CBSt = hg_invoice_payment:get_chargeback_state(ID, get_payment_session(PaymentID, St)),
+    hg_invoice_payment_chargeback:get(CBSt);
 
 handle_function_('GetPaymentAdjustment', [UserInfo, InvoiceID, PaymentID, ID], _Opts) ->
     ok = assume_user_identity(UserInfo),
