@@ -180,6 +180,14 @@
 
 %% Chargebacks
 
+-define(chargeback_params(Levy, Body, Reason),
+    #payproc_InvoicePaymentChargebackParams{
+        body   = Body,
+        levy   = Levy,
+        reason = Reason
+    }
+).
+
 -define(reject_params(Levy),
     #payproc_InvoicePaymentChargebackRejectParams{levy = Levy}).
 

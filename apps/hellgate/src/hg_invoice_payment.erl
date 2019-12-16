@@ -78,6 +78,7 @@
 
 %%
 
+-export_type([st/0]).
 -export_type([activity/0]).
 -export_type([machine_result/0]).
 -export_type([opts/0]).
