@@ -99,6 +99,15 @@ start_app(dmt_client = AppName) ->
             elements => 20,
             memory => 52428800 % 50Mb
         }},
+        {woody_event_handlers, [
+            {scoper_woody_event_handler, #{
+                event_handler_opts => #{
+                    formatter_opts => #{
+                        max_length => 1000
+                    }
+                }
+            }}
+        ]},
         {service_urls, #{
             'Repository' => <<"http://dominant:8022/v1/domain/repository">>,
             'RepositoryClient' => <<"http://dominant:8022/v1/domain/repository_client">>
@@ -114,7 +123,7 @@ start_app(hellgate = AppName) ->
             max_connections => 8096
         }},
         {scoper_event_handler_options, #{
-            scoper_event_handler_options => #{
+            event_handler_opts => #{
                 formatter_opts => #{
                     max_length => 1000
                 }
@@ -180,7 +189,7 @@ start_app(party_client = AppName) ->
             options => #{
                 woody_client => #{
                     event_handler => {scoper_woody_event_handler, #{
-                        scoper_event_handler_options => #{
+                        event_handler_opts => #{
                             formatter_opts => #{
                                 max_length => 1000
                             }
