@@ -1966,11 +1966,10 @@ maybe_notify_fault_detector(_Activity, _TargetType, _Status, _St) ->
 
 notify_fault_detector(Status, St) ->
     ServiceType   = provider_conversion,
-    Route         = get_route(St),
-    ProviderRef   = get_route_provider(Route),
+    ProviderRef   = get_route_provider(get_route(St)),
     ProviderID    = ProviderRef#domain_ProviderRef.id,
-    Payment       = get_payment(St),
-    PaymentID     = get_payment_id(Payment),
+    PaymentID     = get_payment_id(get_payment(St)),
+    InvoiceID     = get_invoice_id(get_invoice(get_opts(St))),
     FDConfig      = genlib_app:env(hellgate, fault_detector, #{}),
     Config        = genlib_map:get(conversion, FDConfig, #{}),
     SlidingWindow = genlib_map:get(sliding_window,       Config, 6000000),
@@ -1978,7 +1977,7 @@ notify_fault_detector(Status, St) ->
     PreAggrSize   = genlib_map:get(pre_aggregation_size, Config, 2),
     ServiceConfig = hg_fault_detector_client:build_config(SlidingWindow, OpTimeLimit, PreAggrSize),
     ServiceID     = hg_fault_detector_client:build_service_id(ServiceType, ProviderID),
-    OperationID   = hg_fault_detector_client:build_operation_id(ServiceType, PaymentID),
+    OperationID   = hg_fault_detector_client:build_operation_id(ServiceType, [InvoiceID, PaymentID]),
     fd_register(Status, ServiceID, OperationID, ServiceConfig).
 
 fd_register(start, ServiceID, OperationID, ServiceConfig) ->
