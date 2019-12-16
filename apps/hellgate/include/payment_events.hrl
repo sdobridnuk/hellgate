@@ -185,11 +185,21 @@
 
 -define(accept_params(Levy),
     #payproc_InvoicePaymentChargebackAcceptParams{levy = Levy}).
--define(reject_params(Body, Levy),
+-define(accept_params(Levy, Body),
     #payproc_InvoicePaymentChargebackAcceptParams{
         body = Body,
         levy = Levy
-    }}).
+    }
+).
+
+-define(reopen_params(Levy),
+    #payproc_InvoicePaymentChargebackReopenParams{levy = Levy}).
+-define(reopen_params(Levy, Body),
+    #payproc_InvoicePaymentChargebackReopenParams{
+        body = Body,
+        levy = Levy
+    }
+).
 
 -define(chargeback_ev(ChargebackID, Payload),
     {invoice_payment_chargeback_change, #payproc_InvoicePaymentChargebackChange{
@@ -238,11 +248,11 @@
     }
 ).
 
--define(chargeback_changed(Status, Stage),
+-define(chargeback_changed(Status, Levy),
     {invoice_payment_chargeback_changed,
         #payproc_InvoicePaymentChargebackChanged{
             target_status = Status,
-            stage         = Stage
+            levy          = Levy
         }
     }
 ).
@@ -254,22 +264,18 @@
 -define(chargeback_stage_arbitration(),
     {arbitration,     #domain_InvoicePaymentChargebackStageArbitration{}}).
 
--define(chargeback_status_pending(Body, Levy),
+-define(chargeback_status_pending(Body),
     {pending,  #domain_InvoicePaymentChargebackPending{
-        body = Body,
-        levy = Levy
+        body = Body
     }}
 ).
--define(chargeback_status_accepted(Body, Levy),
+-define(chargeback_status_accepted(Body),
     {accepted, #domain_InvoicePaymentChargebackAccepted{
-        body = Body,
-        levy = Levy
+        body = Body
     }}
 ).
--define(chargeback_status_rejected(Levy),
-    {rejected, #domain_InvoicePaymentChargebackRejected{
-        levy = Levy
-    }}
+-define(chargeback_status_rejected(),
+    {rejected, #domain_InvoicePaymentChargebackRejected{}}
 ).
 -define(chargeback_status_cancelled(),
     {cancelled, #domain_InvoicePaymentChargebackCancelled{}}
