@@ -99,6 +99,15 @@ start_app(dmt_client = AppName) ->
             elements => 20,
             memory => 52428800 % 50Mb
         }},
+        {woody_event_handlers, [
+            {scoper_woody_event_handler, #{
+                event_handler_opts => #{
+                    formatter_opts => #{
+                        max_length => 1000
+                    }
+                }
+            }}
+        ]},
         {service_urls, #{
             'Repository' => <<"http://dominant:8022/v1/domain/repository">>,
             'RepositoryClient' => <<"http://dominant:8022/v1/domain/repository_client">>
@@ -114,7 +123,7 @@ start_app(hellgate = AppName) ->
             max_connections => 8096
         }},
         {scoper_event_handler_options, #{
-            scoper_event_handler_options => #{
+            event_handler_opts => #{
                 formatter_opts => #{
                     max_length => 1000
                 }
@@ -122,23 +131,43 @@ start_app(hellgate = AppName) ->
         {services, #{
             accounter           => <<"http://shumway:8022/shumpune">>,
             automaton           => <<"http://machinegun:8022/v1/automaton">>,
-            customer_management => <<"http://hellgate:8022/v1/processing/customer_management">>,
+            customer_management => #{
+                url => <<"http://hellgate:8022/v1/processing/customer_management">>,
+                transport_opts => #{
+                    pool => customer_management,
+                    max_connections => 300
+                }
+            },
             eventsink           => <<"http://machinegun:8022/v1/event_sink">>,
             fault_detector      => <<"http://127.0.0.1:20001/">>,
             invoice_templating  => #{
                 url => <<"http://hellgate:8022/v1/processing/invoice_templating">>,
                 transport_opts => #{
+                    pool => invoice_templating,
                     max_connections => 300
                 }
             },
             invoicing           => #{
                 url => <<"http://hellgate:8022/v1/processing/invoicing">>,
                 transport_opts => #{
+                    pool => invoicing,
                     max_connections => 300
                 }
             },
-            party_management    => <<"http://hellgate:8022/v1/processing/partymgmt">>,
-            recurrent_paytool   => <<"http://hellgate:8022/v1/processing/recpaytool">>
+            party_management    => #{
+                url => <<"http://hellgate:8022/v1/processing/partymgmt">>,
+                transport_opts => #{
+                    pool => party_management,
+                    max_connections => 300
+                }
+            },
+            recurrent_paytool   => #{
+                url => <<"http://hellgate:8022/v1/processing/recpaytool">>,
+                transport_opts => #{
+                    pool => recurrent_paytool,
+                    max_connections => 300
+                }
+            }
         }},
         {proxy_opts, #{
             transport_opts => #{
@@ -180,7 +209,7 @@ start_app(party_client = AppName) ->
             options => #{
                 woody_client => #{
                     event_handler => {scoper_woody_event_handler, #{
-                        scoper_event_handler_options => #{
+                        event_handler_opts => #{
                             formatter_opts => #{
                                 max_length => 1000
                             }
