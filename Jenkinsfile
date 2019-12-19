@@ -20,15 +20,6 @@ build('hellgate', 'docker-host', finalHook) {
   }
 
   pipeDefault() {
-
-      echo "===> REPO_NAME = ${env.REPO_NAME}"
-      echo "===> WORKSPACE = ${env.WORKSPACE}"
-      echo "===> BUILD_URL = ${env.BUILD_URL}"
-      echo "===> JOB_NAME = ${env.JOB_NAME}"
-      echo "===> BRANCH_NAME = ${env.BRANCH_NAME}"
-      echo "===> CHANGE_ID = ${env.CHANGE_ID}"
-      echo "===> CHANGE_ID = ${env.CHANGE_ID}"
-
     if (env.BRANCH_NAME != 'master') {
       runStage('compile') {
         withGithubPrivkey {
