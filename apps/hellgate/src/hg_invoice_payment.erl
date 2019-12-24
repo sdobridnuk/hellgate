@@ -1848,7 +1848,7 @@ process_failure({payment, Step} = Activity, Events, Action, Failure, St, _Refund
         fatal ->
             TargetType = get_target_type(Target),
             FDStatus = get_fd_failure_status(Failure),
-            _ = maybe_notify_fault_detector(Activity, TargetType, error, St),
+            _ = maybe_notify_fault_detector(Activity, TargetType, FDStatus, St),
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
 process_failure({refund_new, ID}, Events, Action, Failure, St, RefundSt) ->
@@ -1874,26 +1874,9 @@ get_fd_failure_status(Failure) ->
     payproc_errors:match('PaymentFailure', Failure, fun do_get_fd_failure_status/1).
 
 do_get_fd_failure_status({authorization_failed, {FailType, _}})
-    % {'unknown', 'GeneralFailure'()} |
-    % {'merchant_blocked', 'GeneralFailure'()} |
-    % {'operation_blocked', 'GeneralFailure'()} |
-    % {'account_not_found', 'GeneralFailure'()} |
-    % {'account_blocked', 'GeneralFailure'()} |
-    % {'account_stolen', 'GeneralFailure'()} |
-    % {'insufficient_funds', 'GeneralFailure'()} |
-    % {'account_limit_exceeded', 'LimitExceeded'()} |
-    % {'provider_limit_exceeded', 'LimitExceeded'()} |
-    % {'payment_tool_rejected', 'PaymentToolReject'()} |
-    % {'security_policy_violated', 'GeneralFailure'()} |
-    % {'temporarily_unavailable', 'GeneralFailure'()} |
-    % {'rejected_by_issuer', 'GeneralFailure'()} |
-    % {'processing_deadline_reached', 'GeneralFailure'()}.
-    when FailType =:= merchant_blocked;
-         FailType =:= account_not_found;
-         FailType =:= account_blocked;
-         FailType =:= account_stolen;
-         FailType =:= rejected_by_issuer;
-         FailType =:= insufficient_funds ->
+    when FailType =/= process_fatal_payment_failure,
+         FailType =/= temporarily_unavailable,
+         FailType =/= unknown ->
     finish;
 do_get_fd_failure_status(_Failure) ->
     error.
