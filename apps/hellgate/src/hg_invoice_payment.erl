@@ -1874,7 +1874,7 @@ get_fd_failure_status(Failure) ->
     payproc_errors:match('PaymentFailure', Failure, fun do_get_fd_failure_status/1).
 
 do_get_fd_failure_status({authorization_failed, {FailType, _}})
-    when FailType =/= process_fatal_payment_failure,
+    when FailType =/= processing_deadline_reached,
          FailType =/= temporarily_unavailable,
          FailType =/= unknown ->
     finish;
