@@ -1870,8 +1870,10 @@ process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
             {done, {Events ++ Events1, Action}}
     end.
 
-get_fd_failure_status(Failure) ->
-    payproc_errors:match('PaymentFailure', Failure, fun do_get_fd_failure_status/1).
+get_fd_failure_status({failture, Failure}) ->
+    payproc_errors:match('PaymentFailure', Failure, fun do_get_fd_failure_status/1);
+get_fd_failure_status(_Failure) ->
+    error.
 
 do_get_fd_failure_status({authorization_failed, {FailType, _}})
     when FailType =/= processing_deadline_reached,
