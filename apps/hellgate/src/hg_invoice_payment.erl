@@ -1847,8 +1847,8 @@ process_failure({payment, Step} = Activity, Events, Action, Failure, St, _Refund
             {next, {Events ++ SessionEvents, SessionAction}};
         fatal ->
             TargetType = get_target_type(Target),
-            FDStatus = get_fd_failure_status(Failure),
-            _ = maybe_notify_fault_detector(Activity, TargetType, FDStatus, St),
+            OperationStatus = choose_fd_operation_status_for_failure(Failure),
+            _ = maybe_notify_fault_detector(Activity, TargetType, OperationStatus, St),
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
 process_failure({refund_new, ID}, Events, Action, Failure, St, RefundSt) ->
@@ -1870,17 +1870,17 @@ process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
             {done, {Events ++ Events1, Action}}
     end.
 
-get_fd_failure_status({failure, Failure}) ->
-    payproc_errors:match('PaymentFailure', Failure, fun do_get_fd_failure_status/1);
-get_fd_failure_status(_Failure) ->
+choose_fd_operation_status_for_failure({failure, Failure}) ->
+    payproc_errors:match('PaymentFailure', Failure, fun do_choose_fd_operation_status_for_failure/1);
+choose_fd_operation_status_for_failure(_Failure) ->
     error.
 
-do_get_fd_failure_status({authorization_failed, {FailType, _}})
+do_choose_fd_operation_status_for_failure({authorization_failed, {FailType, _}})
     when FailType =/= processing_deadline_reached,
          FailType =/= temporarily_unavailable,
          FailType =/= unknown ->
     finish;
-do_get_fd_failure_status(_Failure) ->
+do_choose_fd_operation_status_for_failure(_Failure) ->
     error.
 
 maybe_notify_fault_detector({payment, processing_session}, processed, Status, St) ->
