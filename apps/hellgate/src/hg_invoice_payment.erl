@@ -1873,15 +1873,23 @@ process_failure({refund_session, ID}, Events, Action, Failure, St, RefundSt) ->
 choose_fd_operation_status_for_failure({failure, Failure}) ->
     payproc_errors:match('PaymentFailure', Failure, fun do_choose_fd_operation_status_for_failure/1);
 choose_fd_operation_status_for_failure(_Failure) ->
-    error.
+    finish.
 
-do_choose_fd_operation_status_for_failure({authorization_failed, {FailType, _}})
-    when FailType =/= processing_deadline_reached,
-         FailType =/= temporarily_unavailable,
-         FailType =/= unknown ->
-    finish;
+do_choose_fd_operation_status_for_failure({authorization_failed, {FailType, _}}) ->
+    DefaultSafeFailures = [
+        insufficient_funds,
+        rejected_by_issuer,
+        processing_deadline_reached
+    ],
+    FDConfig = genlib_app:env(hellgate, fault_detector, #{}),
+    Config = genlib_map:get(conversion, FDConfig, #{}),
+    SafeFailures = genlib_map:get(provider_errors, Config, DefaultSafeErrors),
+    case lists:member(FailType, SafeFailures) of
+        false -> error;
+        true  -> finish
+    end;
 do_choose_fd_operation_status_for_failure(_Failure) ->
-    error.
+    finish.
 
 maybe_notify_fault_detector({payment, processing_session}, processed, Status, St) ->
     notify_fault_detector(Status, St);
@@ -1896,7 +1904,7 @@ notify_fault_detector(Status, St) ->
     InvoiceID     = get_invoice_id(get_invoice(get_opts(St))),
     FDConfig      = genlib_app:env(hellgate, fault_detector, #{}),
     Config        = genlib_map:get(conversion, FDConfig, #{}),
-    SlidingWindow = genlib_map:get(sliding_window,       Config, 6000000),
+    SlidingWindow = genlib_map:get(sliding_window,       Config, 60000),
     OpTimeLimit   = genlib_map:get(operation_time_limit, Config, 1200000),
     PreAggrSize   = genlib_map:get(pre_aggregation_size, Config, 2),
     ServiceConfig = hg_fault_detector_client:build_config(SlidingWindow, OpTimeLimit, PreAggrSize),
