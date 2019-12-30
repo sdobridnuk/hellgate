@@ -1883,7 +1883,7 @@ do_choose_fd_operation_status_for_failure({authorization_failed, {FailType, _}})
     ],
     FDConfig = genlib_app:env(hellgate, fault_detector, #{}),
     Config = genlib_map:get(conversion, FDConfig, #{}),
-    SafeFailures = genlib_map:get(provider_errors, Config, DefaultSafeErrors),
+    SafeFailures = genlib_map:get(safe_failures, Config, DefaultSafeFailures),
     case lists:member(FailType, SafeFailures) of
         false -> error;
         true  -> finish
