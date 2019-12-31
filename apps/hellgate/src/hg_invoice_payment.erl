@@ -1668,7 +1668,6 @@ process_session(undefined, Action, St0) ->
     Target     = get_target(St0),
     TargetType = get_target_type(Target),
     Activity   = get_activity(St0),
-    _ = maybe_notify_fault_detector(Activity, TargetType, start, St0),
     case validate_processing_deadline(get_payment(St0), TargetType) of
         ok ->
             Events = start_session(Target),
@@ -1768,6 +1767,7 @@ finish_session_processing({payment, Step} = Activity, {Events, Action}, St) when
     case get_session(Target, St1) of
         #{status := finished, result := ?session_succeeded(), target := Target} ->
             TargetType = get_target_type(Target),
+            _ = maybe_notify_fault_detector(Activity, TargetType, start, St0),
             _ = maybe_notify_fault_detector(Activity, TargetType, finish, St),
             NewAction = hg_machine_action:set_timeout(0, Action),
             {next, {Events, NewAction}};
@@ -1848,6 +1848,7 @@ process_failure({payment, Step} = Activity, Events, Action, Failure, St, _Refund
         fatal ->
             TargetType = get_target_type(Target),
             OperationStatus = choose_fd_operation_status_for_failure(Failure),
+            _ = maybe_notify_fault_detector(Activity, TargetType, start, St0),
             _ = maybe_notify_fault_detector(Activity, TargetType, OperationStatus, St),
             process_fatal_payment_failure(Target, Events, Action, Failure, St)
     end;
