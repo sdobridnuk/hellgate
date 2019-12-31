@@ -1876,15 +1876,15 @@ choose_fd_operation_status_for_failure(_Failure) ->
     finish.
 
 do_choose_fd_operation_status_for_failure({authorization_failed, {FailType, _}}) ->
-    DefaultSafeFailures = [
+    DefaultBenignFailures = [
         insufficient_funds,
         rejected_by_issuer,
         processing_deadline_reached
     ],
     FDConfig = genlib_app:env(hellgate, fault_detector, #{}),
     Config = genlib_map:get(conversion, FDConfig, #{}),
-    SafeFailures = genlib_map:get(safe_failures, Config, DefaultSafeFailures),
-    case lists:member(FailType, SafeFailures) of
+    BenignFailures = genlib_map:get(benign_failures, Config, DefaultBenignFailures),
+    case lists:member(FailType, BenignFailures) of
         false -> error;
         true  -> finish
     end;
