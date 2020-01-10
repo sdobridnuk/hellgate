@@ -242,6 +242,12 @@
     }
 ).
 
+-define(chargeback_target_status_changed(Status),
+    {invoice_payment_chargeback_target_status_changed,
+        #payproc_InvoicePaymentChargebackTargetStatusChanged{status = Status}
+    }
+).
+
 -define(chargeback_stage_changed(Stage),
     {invoice_payment_chargeback_stage_changed,
         #payproc_InvoicePaymentChargebackStageChanged{stage = Stage}
