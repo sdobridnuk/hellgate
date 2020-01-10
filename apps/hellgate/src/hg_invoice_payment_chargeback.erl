@@ -214,7 +214,7 @@ do_merge_change(?chargeback_stage_changed(Stage), ChargebackState) ->
 do_merge_change(?chargeback_target_status_changed(Status), ChargebackState) ->
     set_target_status(Status, ChargebackState);
 do_merge_change(?chargeback_status_changed(Status), ChargebackState) ->
-    set_status(Status, ChargebackState);
+    set_target_status(undefined, set_status(Status, ChargebackState));
 do_merge_change(?chargeback_cash_flow_changed(CashFlow), ChargebackState) ->
     set_cash_flow(CashFlow, ChargebackState).
 
@@ -243,15 +243,15 @@ do_update_cash_flow(ChargebackState = #chargeback_st{cash_flow = CashFlow, targe
             CBEvent      = ?chargeback_ev(get_id(ChargebackState), CFEvent),
             Action       = hg_machine_action:instant(),
             {done, {[CBEvent], Action}};
-        % {?chargeback_stage_pre_arbitration(), ?chargeback_status_pending()} ->
-        %     RevertedCF   = hg_cashflow:revert([lists:last(CashFlow)]),
-        %     NewCF        = lists:droplast(CashFlow) ++ RevertedCF ++ FinalCashFlow,
-        %     CashFlowPlan = {1, NewCF},
-        %     _            = prepare_cash_flow(ChargebackState, CashFlowPlan, PaymentState),
-        %     CFEvent      = ?chargeback_cash_flow_changed(NewCF),
-        %     CBEvent      = ?chargeback_ev(get_id(ChargebackState), CFEvent),
-        %     Action       = hg_machine_action:instant(),
-        %     {done, {[CBEvent], Action}};
+        {?chargeback_stage_pre_arbitration(), ?chargeback_status_pending()} ->
+            RevertedCF   = hg_cashflow:revert([lists:last(CashFlow)]),
+            NewCF        = lists:droplast(CashFlow) ++ RevertedCF ++ FinalCashFlow,
+            CashFlowPlan = {1, NewCF},
+            _            = prepare_cash_flow(ChargebackState, CashFlowPlan, PaymentState),
+            CFEvent      = ?chargeback_cash_flow_changed(NewCF),
+            CBEvent      = ?chargeback_ev(get_id(ChargebackState), CFEvent),
+            Action       = hg_machine_action:instant(),
+            {done, {[CBEvent], Action}};
         _ ->
             RevertedCF   = hg_cashflow:revert([lists:last(CashFlow)]),
             NewCF        = CashFlow ++ RevertedCF ++ FinalCashFlow,
@@ -367,7 +367,6 @@ build_accept_result(ChargebackState = #chargeback_st{chargeback =
                         #domain_InvoicePaymentChargeback{id = ID, body = Body, levy = Levy}},
                     PaymentState,
                     ?accept_params(ParamsLevy, ParamsBody)) ->
-    ct:print("LEVY\n~p\n\nParamsLevy\n~p", [Levy, ParamsLevy]),
     FinalBody     = define_params_body(ParamsBody, Body),
     FinalLevy     = define_params_levy(ParamsLevy, Levy),
     _             = validate_body_amount(FinalBody, PaymentState),
@@ -389,7 +388,6 @@ build_reopen_result(ChargebackState = #chargeback_st{chargeback =
                     ?reopen_params(ParamsLevy, ParamsBody)) ->
     FinalBody     = define_params_body(ParamsBody, Body),
     _             = validate_body_amount(FinalBody, PaymentState),
-    ct:print("LEVY\n~p\n\nParamsLevy\n~p", [Levy, ParamsLevy]),
     FinalLevy     = define_params_levy(ParamsLevy, Levy),
     ID            = get_id(ChargebackState),
     Stage         = get_next_stage(ChargebackState),
