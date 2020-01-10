@@ -759,28 +759,22 @@ set_status(Status, #chargeback_st{chargeback = Chargeback} = ChargebackState) ->
         chargeback = Chargeback#domain_InvoicePaymentChargeback{status = Status}
     }.
 
--spec set_body(cash() | undefined, chargeback_state()) ->
+-spec set_body(cash(),    chargeback_state()) ->
     chargeback_state().
-set_body(undefined, ChargebackState) ->
-    ChargebackState;
 set_body(Cash, #chargeback_st{chargeback = Chargeback} = ChargebackState) ->
     ChargebackState#chargeback_st{
         chargeback = Chargeback#domain_InvoicePaymentChargeback{body = Cash}
     }.
 
--spec set_levy(cash() | undefined, chargeback_state()) ->
+-spec set_levy(cash(), chargeback_state()) ->
     chargeback_state().
-set_levy(undefined, ChargebackState) ->
-    ChargebackState;
 set_levy(Cash, #chargeback_st{chargeback = Chargeback} = ChargebackState) ->
     ChargebackState#chargeback_st{
         chargeback = Chargeback#domain_InvoicePaymentChargeback{levy = Cash}
     }.
 
--spec set_stage(chargeback_stage() | undefined, chargeback_state()) ->
+-spec set_stage(chargeback_stage(), chargeback_state()) ->
     chargeback_state().
-set_stage(undefined, ChargebackState) ->
-    ChargebackState;
 set_stage(Stage, #chargeback_st{chargeback = Chargeback} = ChargebackState) ->
     ChargebackState#chargeback_st{
         chargeback = Chargeback#domain_InvoicePaymentChargeback{stage = Stage}
