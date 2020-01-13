@@ -324,28 +324,16 @@ build_cancel_result(ChargebackState = #chargeback_st{chargeback = #domain_Invoic
 
 -spec build_reject_result(chargeback_state(), payment_state(), reject_params()) ->
     result() | no_return().
-build_reject_result(ChargebackState = #chargeback_st{chargeback =
-                        #domain_InvoicePaymentChargeback{id = ID, levy = Levy}},
-                    PaymentState,
-                    ?reject_params(Levy)) ->
-    _      = commit_cash_flow(ChargebackState, PaymentState),
-    Action = hg_machine_action:new(),
-    Status = ?chargeback_status_rejected(),
-    Change = ?chargeback_status_changed(Status),
-    Events = [?chargeback_ev(ID, Change)],
-    {Events, Action};
-build_reject_result(ChargebackState = #chargeback_st{chargeback =
-                        #domain_InvoicePaymentChargeback{id = ID, levy = Levy}},
-                    PaymentState,
-                    ?reject_params(ParamsLevy)) ->
+build_reject_result(ChargebackState, PaymentState, ?reject_params(ParamsLevy)) ->
+    Levy         = get_levy(ChargebackState),
     FinalLevy    = define_params_levy(ParamsLevy, Levy),
     _            = rollback_cash_flow(ChargebackState, PaymentState),
     Action       = hg_machine_action:instant(),
     Status       = ?chargeback_status_rejected(),
-    LevyChange   = ?chargeback_levy_changed(FinalLevy),
-    StatusChange = ?chargeback_target_status_changed(Status),
-    Changes      = [LevyChange, StatusChange],
-    Events       = wrap_chargeback_events(ID, Changes),
+    LevyChange   = levy_change(FinalLevy, Levy),
+    StatusChange = [?chargeback_target_status_changed(Status)],
+    Changes      = lists:append([LevyChange, StatusChange]),
+    Events       = wrap_chargeback_events(get_id(ChargebackState), Changes),
     {Events, Action}.
 
 -spec build_accept_result(chargeback_state(), payment_state(), accept_params()) ->
@@ -399,7 +387,6 @@ build_reopen_result(ChargebackState = #chargeback_st{chargeback =
     StatusChange  = [?chargeback_target_status_changed(Status)],
     Changes       = lists:append([StageChange, BodyChange, LevyChange, StatusChange]),
     Events        = wrap_chargeback_events(ID, Changes),
-    % Events        = [?chargeback_ev(ID, StageChange), ?chargeback_ev(ID, Change)],
     {Events, Action}.
 
 -spec build_chargeback_cash_flow(chargeback_state(), payment_state()) ->
@@ -464,8 +451,11 @@ collect_account_map(
             M
     end.
 
+build_cash_flow_context(ChargebackState = #chargeback_st{target_status = ?chargeback_status_rejected()}) ->
+    #{operation_amount => get_levy(ChargebackState)};
 build_cash_flow_context(ChargebackState) ->
-    #{operation_amount => get_levy(ChargebackState)}.
+    Cost = hg_cash:add(get_levy(ChargebackState), get_body(ChargebackState)),
+    #{operation_amount => Cost}.
 
 construct_id(PaymentState) ->
     Chargebacks = hg_invoice_payment:get_chargebacks(PaymentState),
@@ -597,13 +587,12 @@ collect_validation_varset(Party, Shop, Payment, ChargebackState) ->
         category = Category,
         account  = #domain_ShopAccount{currency = Currency}
     } = Shop,
-    % Cost = hg_cash:add(get_levy(ChargebackState), get_body(ChargebackState)),
     #{
         party_id     => PartyID,
         shop_id      => ShopID,
         category     => Category,
         currency     => Currency,
-        cost         => get_levy(ChargebackState),
+        cost         => get_body(ChargebackState),
         payment_tool => get_payment_tool(Payment)
     }.
 
