@@ -1858,7 +1858,7 @@ cancel_payment_chargeback(C) ->
     Client     = cfg(client, C),
     Cost       = 42000,
     Fee        = 1890,
-    LevyAmount = 47000,
+    LevyAmount = 4000,
     Levy       = ?cash(LevyAmount, <<"RUB">>),
     CBParams   = make_chargeback_params(Levy),
     {IID, PID, SID, CB} = start_chargeback(C, Cost, CBParams),
@@ -1875,17 +1875,17 @@ cancel_payment_chargeback(C) ->
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
     Settlement1 = hg_ct_helper:get_balance(SID),
-    ?assertEqual(Cost - Fee - LevyAmount, maps:get(min_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee,              maps:get(max_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee,              maps:get(min_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee,              maps:get(max_available_amount, Settlement1)).
+    ?assertEqual(Cost - Fee - Cost - LevyAmount,  maps:get(min_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                      maps:get(max_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                      maps:get(min_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee,                      maps:get(max_available_amount, Settlement1)).
 
 -spec cancel_payment_chargeback_refund(config()) -> _ | no_return().
 
 cancel_payment_chargeback_refund(C) ->
     Client     = cfg(client, C),
     Cost       = 42000,
-    LevyAmount = 47000,
+    LevyAmount = 4000,
     Levy       = ?cash(LevyAmount, <<"RUB">>),
     CBParams   = make_chargeback_params(Levy),
     {IID, PID, _SID, CB} = start_chargeback(C, Cost, CBParams),
@@ -1911,7 +1911,7 @@ cancel_payment_chargeback_refund(C) ->
 reject_payment_chargeback_inconsistent(C) ->
     Client     = cfg(client, C),
     Cost       = 42000,
-    LevyAmount = 47000,
+    LevyAmount = 4000,
     Levy       = ?cash(LevyAmount, <<"RUB">>),
     CBParams   = make_chargeback_params(Levy),
     {IID, PID, _SID, CB} = start_chargeback(C, Cost, CBParams),
@@ -1936,7 +1936,7 @@ reject_payment_chargeback(C) ->
     Client     = cfg(client, C),
     Cost       = 42000,
     Fee        = 1890,
-    LevyAmount = 47000,
+    LevyAmount = 4000,
     Levy       = ?cash(LevyAmount, <<"RUB">>),
     CBParams   = make_chargeback_params(Levy),
     {IID, PID, SID, CB} = start_chargeback(C, Cost, CBParams),
@@ -1951,13 +1951,19 @@ reject_payment_chargeback(C) ->
     RejectParams = make_chargeback_reject_params(Levy),
     ok = hg_client_invoicing:reject_chargeback(IID, PID, CBID, RejectParams, Client),
     [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_rejected())))
+    ] = next_event(IID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+    ] = next_event(IID, Client),
+    [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ] = next_event(IID, Client),
     Settlement1 = hg_ct_helper:get_balance(SID),
-    ?assertEqual(Cost - Fee - LevyAmount, maps:get(min_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee,              maps:get(max_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee - LevyAmount, maps:get(min_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - LevyAmount, maps:get(max_available_amount, Settlement1)).
+    ?assertEqual(Cost - Fee - Cost - LevyAmount, maps:get(min_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                     maps:get(max_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee - LevyAmount,        maps:get(min_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee - LevyAmount,        maps:get(max_available_amount, Settlement1)).
 
 -spec reject_payment_chargeback_new_levy(config()) -> _ | no_return().
 
@@ -1965,7 +1971,7 @@ reject_payment_chargeback_new_levy(C) ->
     Client     = cfg(client, C),
     Cost       = 42000,
     Fee        = 1890,
-    LevyAmount = 4700,
+    LevyAmount = 4000,
     Levy       = ?cash(LevyAmount, <<"RUB">>),
     CBParams   = make_chargeback_params(Levy),
     {IID, PID, SID, CB} = start_chargeback(C, Cost, CBParams),
@@ -1976,7 +1982,7 @@ reject_payment_chargeback_new_levy(C) ->
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(CF0)))
     ] = next_event(IID, Client),
-    Settlement0 = hg_ct_helper:get_balance(SID),
+    Settlement0  = hg_ct_helper:get_balance(SID),
     RejectAmount = 5000,
     RejectLevy   = ?cash(RejectAmount, <<"RUB">>),
     RejectParams = make_chargeback_reject_params(RejectLevy),
@@ -1993,17 +1999,17 @@ reject_payment_chargeback_new_levy(C) ->
     ] = next_event(IID, Client),
     Settlement1  = hg_ct_helper:get_balance(SID),
     ?assertNotEqual(CF0, CF1),
-    ?assertEqual(Cost - Fee - LevyAmount,   maps:get(min_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee,                maps:get(max_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee - RejectAmount, maps:get(min_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - RejectAmount, maps:get(max_available_amount, Settlement1)).
+    ?assertEqual(Cost - Fee - Cost - LevyAmount,  maps:get(min_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                      maps:get(max_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee - RejectAmount,       maps:get(min_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee - RejectAmount,       maps:get(max_available_amount, Settlement1)).
 
 -spec accept_payment_chargeback_inconsistent(config()) -> _ | no_return().
 
 accept_payment_chargeback_inconsistent(C) ->
     Client     = cfg(client, C),
     Cost       = 42000,
-    LevyAmount = 47000,
+    LevyAmount = 4000,
     Levy       = ?cash(LevyAmount, <<"RUB">>),
     CBParams   = make_chargeback_params(Levy),
     {IID, PID, _SID, CB} = start_chargeback(C, Cost, CBParams),
@@ -2030,7 +2036,7 @@ accept_payment_chargeback_inconsistent(C) ->
 accept_payment_chargeback_exceeded(C) ->
     Client     = cfg(client, C),
     Cost       = 42000,
-    LevyAmount = 40000,
+    LevyAmount = 4000,
     Levy       = ?cash(LevyAmount, <<"RUB">>),
     CBParams   = make_chargeback_params(Levy),
     {IID, PID, _SID, CB} = start_chargeback(C, Cost, CBParams),
@@ -2056,7 +2062,7 @@ accept_payment_chargeback_empty_params(C) ->
     Client     = cfg(client, C),
     Cost       = 42000,
     Fee        = 1890,
-    LevyAmount = 47000,
+    LevyAmount = 4000,
     Levy       = ?cash(LevyAmount, <<"RUB">>),
     CBParams   = make_chargeback_params(Levy),
     {IID, PID, SID, CB} = start_chargeback(C, Cost, CBParams),
@@ -2075,10 +2081,10 @@ accept_payment_chargeback_empty_params(C) ->
         ?payment_ev(PID, ?payment_status_changed(?charged_back()))
     ]            = next_event(IID, Client),
     Settlement1  = hg_ct_helper:get_balance(SID),
-    ?assertEqual(Cost - Fee - LevyAmount, maps:get(min_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee,              maps:get(max_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee - LevyAmount, maps:get(min_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - LevyAmount, maps:get(max_available_amount, Settlement1)).
+    ?assertEqual(Cost - Fee - Cost - LevyAmount, maps:get(min_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                     maps:get(max_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee - Cost - LevyAmount, maps:get(min_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee - Cost - LevyAmount, maps:get(max_available_amount, Settlement1)).
 
 -spec accept_payment_chargeback_new_body(config()) -> _ | no_return().
 
@@ -2098,7 +2104,8 @@ accept_payment_chargeback_new_body(C) ->
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
     ] = next_event(IID, Client),
     Settlement0  = hg_ct_helper:get_balance(SID),
-    AcceptParams = make_chargeback_accept_params(undefined, ?cash(40000, <<"RUB">>)),
+    Body = 40000,
+    AcceptParams = make_chargeback_accept_params(undefined, ?cash(Body, <<"RUB">>)),
     ok           = hg_client_invoicing:accept_chargeback(IID, PID, CBID, AcceptParams, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_body_changed(_))),
@@ -2111,10 +2118,10 @@ accept_payment_chargeback_new_body(C) ->
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted())))
     ] = next_event(IID, Client),
     Settlement1  = hg_ct_helper:get_balance(SID),
-    ?assertEqual(Cost - Fee - LevyAmount, maps:get(min_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee,              maps:get(max_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee - LevyAmount, maps:get(min_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - LevyAmount, maps:get(max_available_amount, Settlement1)).
+    ?assertEqual(Cost - Fee - Cost - LevyAmount, maps:get(min_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                     maps:get(max_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee - Body - LevyAmount, maps:get(min_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee - Body - LevyAmount, maps:get(max_available_amount, Settlement1)).
 
 -spec accept_payment_chargeback_new_levy(config()) -> _ | no_return().
 
@@ -2149,10 +2156,10 @@ accept_payment_chargeback_new_levy(C) ->
         ?payment_ev(PID, ?payment_status_changed(?charged_back()))
     ] = next_event(IID, Client),
     Settlement1 = hg_ct_helper:get_balance(SID),
-    ?assertEqual(Cost - Fee - LevyAmount,    maps:get(min_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee,                 maps:get(max_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee - NewLevyAmount, maps:get(min_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - NewLevyAmount, maps:get(max_available_amount, Settlement1)).
+    ?assertEqual(Cost - Fee - Cost - LevyAmount,    maps:get(min_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                        maps:get(max_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee - Cost - NewLevyAmount, maps:get(min_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee - Cost - NewLevyAmount, maps:get(max_available_amount, Settlement1)).
 
 -spec reopen_accepted_payment_chargeback_fails(config()) -> _ | no_return().
 
@@ -2195,6 +2202,12 @@ reopen_payment_chargeback_inconsistent(C) ->
     RejectParams = make_chargeback_reject_params(Levy),
     ok = hg_client_invoicing:reject_chargeback(IID, PID, CBID, RejectParams, Client),
     [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_rejected())))
+    ] = next_event(IID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+    ] = next_event(IID, Client),
+    [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ] = next_event(IID, Client),
     InconsistentLevyParams = make_chargeback_reopen_params(?cash(10, <<"USD">>), undefined),
@@ -2222,6 +2235,12 @@ reopen_payment_chargeback_exceeded(C) ->
     ] = next_event(IID, Client),
     RejectParams = make_chargeback_reject_params(Levy),
     ok = hg_client_invoicing:reject_chargeback(IID, PID, CBID, RejectParams, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_rejected())))
+    ] = next_event(IID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+    ] = next_event(IID, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ] = next_event(IID, Client),
@@ -2252,6 +2271,12 @@ reopen_payment_chargeback_reject(C) ->
     RejectParams = make_chargeback_reject_params(Levy),
     ok = hg_client_invoicing:reject_chargeback(IID, PID, CBID, RejectParams, Client),
     [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_rejected())))
+    ] = next_event(IID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+    ] = next_event(IID, Client),
+    [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ] = next_event(IID, Client),
     Settlement1  = hg_ct_helper:get_balance(SID),
@@ -2281,14 +2306,14 @@ reopen_payment_chargeback_reject(C) ->
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ] = next_event(IID, Client),
     Settlement3 = hg_ct_helper:get_balance(SID),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee,                    maps:get(max_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - ReopenLevyAmount, maps:get(min_available_amount, Settlement2)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement2)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement3)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement3)).
+    ?assertEqual(Cost - Fee - Cost - LevyAmount,        maps:get(min_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                            maps:get(max_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(min_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee - Cost - ReopenLevyAmount,  maps:get(min_available_amount, Settlement2)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement2)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(min_available_amount, Settlement3)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement3)).
 
 -spec reopen_payment_chargeback_accept(config()) -> _ | no_return().
 
@@ -2312,6 +2337,12 @@ reopen_payment_chargeback_accept(C) ->
     Settlement0  = hg_ct_helper:get_balance(SID),
     RejectParams = make_chargeback_reject_params(Levy),
     ok = hg_client_invoicing:reject_chargeback(IID, PID, CBID, RejectParams, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_rejected())))
+    ] = next_event(IID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+    ] = next_event(IID, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ] = next_event(IID, Client),
@@ -2337,14 +2368,14 @@ reopen_payment_chargeback_accept(C) ->
         ?payment_ev(PID, ?payment_status_changed(?charged_back()))
     ] = next_event(IID, Client),
     Settlement3 = hg_ct_helper:get_balance(SID),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee,                    maps:get(max_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - ReopenLevyAmount, maps:get(min_available_amount, Settlement2)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement2)),
-    ?assertEqual(Cost - Fee - ReopenLevyAmount, maps:get(min_available_amount, Settlement3)),
-    ?assertEqual(Cost - Fee - ReopenLevyAmount, maps:get(max_available_amount, Settlement3)).
+    ?assertEqual(Cost - Fee - Cost - LevyAmount,        maps:get(min_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                            maps:get(max_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(min_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee - Cost - ReopenLevyAmount,  maps:get(min_available_amount, Settlement2)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement2)),
+    ?assertEqual(Cost - Fee - Cost - ReopenLevyAmount,  maps:get(min_available_amount, Settlement3)),
+    ?assertEqual(Cost - Fee - Cost - ReopenLevyAmount,  maps:get(max_available_amount, Settlement3)).
 
 -spec reopen_payment_chargeback_accept_new_levy(config()) -> _ | no_return().
 
@@ -2352,9 +2383,9 @@ reopen_payment_chargeback_accept_new_levy(C) ->
     Client           = cfg(client, C),
     Cost             = 42000,
     Fee              = 1890,
-    LevyAmount       = 40000,
-    ReopenLevyAmount = 45000,
-    AcceptLevyAmount = 50000,
+    LevyAmount       = 4000,
+    ReopenLevyAmount = 4500,
+    AcceptLevyAmount = 5000,
     Body             = ?cash(Cost, <<"RUB">>),
     Levy             = ?cash(LevyAmount, <<"RUB">>),
     ReopenLevy       = ?cash(ReopenLevyAmount, <<"RUB">>),
@@ -2371,6 +2402,12 @@ reopen_payment_chargeback_accept_new_levy(C) ->
     Settlement0  = hg_ct_helper:get_balance(SID),
     RejectParams = make_chargeback_reject_params(Levy),
     ok = hg_client_invoicing:reject_chargeback(IID, PID, CBID, RejectParams, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_rejected())))
+    ] = next_event(IID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+    ] = next_event(IID, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ] = next_event(IID, Client),
@@ -2403,14 +2440,14 @@ reopen_payment_chargeback_accept_new_levy(C) ->
         ?payment_ev(PID, ?payment_status_changed(?charged_back()))
     ] = next_event(IID, Client),
     Settlement3 = hg_ct_helper:get_balance(SID),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee,                    maps:get(max_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - ReopenLevyAmount, maps:get(min_available_amount, Settlement2)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement2)),
-    ?assertEqual(Cost - Fee - AcceptLevyAmount, maps:get(min_available_amount, Settlement3)),
-    ?assertEqual(Cost - Fee - AcceptLevyAmount, maps:get(max_available_amount, Settlement3)).
+    ?assertEqual(Cost - Fee - Cost - LevyAmount,        maps:get(min_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                            maps:get(max_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(min_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee - Cost - ReopenLevyAmount,  maps:get(min_available_amount, Settlement2)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement2)),
+    ?assertEqual(Cost - Fee - Cost - AcceptLevyAmount,  maps:get(min_available_amount, Settlement3)),
+    ?assertEqual(Cost - Fee - Cost - AcceptLevyAmount,  maps:get(max_available_amount, Settlement3)).
 
 -spec reopen_payment_chargeback_arbitration(config()) -> _ | no_return().
 
@@ -2436,6 +2473,12 @@ reopen_payment_chargeback_arbitration(C) ->
     Settlement0  = hg_ct_helper:get_balance(SID),
     RejectParams = make_chargeback_reject_params(Levy),
     ok = hg_client_invoicing:reject_chargeback(IID, PID, CBID, RejectParams, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_rejected())))
+    ] = next_event(IID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+    ] = next_event(IID, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ] = next_event(IID, Client),
@@ -2487,18 +2530,18 @@ reopen_payment_chargeback_arbitration(C) ->
         ?payment_ev(PID, ?payment_status_changed(?charged_back()))
     ] = next_event(IID, Client),
     Settlement5 = hg_ct_helper:get_balance(SID),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee,                    maps:get(max_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - ReopenLevyAmount, maps:get(min_available_amount, Settlement2)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement2)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement3)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement3)),
-    ?assertEqual(Cost - Fee - ReopenArbAmount,  maps:get(min_available_amount, Settlement4)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement4)),
-    ?assertEqual(Cost - Fee - ReopenArbAmount,  maps:get(min_available_amount, Settlement5)),
-    ?assertEqual(Cost - Fee - ReopenArbAmount,  maps:get(max_available_amount, Settlement5)).
+    ?assertEqual(Cost - Fee - Cost - LevyAmount,        maps:get(min_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                            maps:get(max_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(min_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee - Cost - ReopenLevyAmount,  maps:get(min_available_amount, Settlement2)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement2)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(min_available_amount, Settlement3)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement3)),
+    ?assertEqual(Cost - Fee - Cost - ReopenArbAmount,   maps:get(min_available_amount, Settlement4)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement4)),
+    ?assertEqual(Cost - Fee - Cost - ReopenArbAmount,   maps:get(min_available_amount, Settlement5)),
+    ?assertEqual(Cost - Fee - Cost - ReopenArbAmount,   maps:get(max_available_amount, Settlement5)).
 
 -spec reopen_payment_chargeback_arbitration_reopen_fails(config()) -> _ | no_return().
 
@@ -2524,6 +2567,12 @@ reopen_payment_chargeback_arbitration_reopen_fails(C) ->
     Settlement0  = hg_ct_helper:get_balance(SID),
     RejectParams = make_chargeback_reject_params(Levy),
     ok = hg_client_invoicing:reject_chargeback(IID, PID, CBID, RejectParams, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_rejected())))
+    ] = next_event(IID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+    ] = next_event(IID, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_rejected())))
     ] = next_event(IID, Client),
@@ -2581,18 +2630,18 @@ reopen_payment_chargeback_arbitration_reopen_fails(C) ->
     ] = next_event(IID, Client),
     Settlement5 = hg_ct_helper:get_balance(SID),
     Error = hg_client_invoicing:reopen_chargeback(IID, PID, CBID, ReopenArbParams, Client),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee,                    maps:get(max_available_amount, Settlement0)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement1)),
-    ?assertEqual(Cost - Fee - ReopenLevyAmount, maps:get(min_available_amount, Settlement2)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement2)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement3)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement3)),
-    ?assertEqual(Cost - Fee - ReopenArbAmount,  maps:get(min_available_amount, Settlement4)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement4)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(min_available_amount, Settlement5)),
-    ?assertEqual(Cost - Fee - LevyAmount,       maps:get(max_available_amount, Settlement5)),
+    ?assertEqual(Cost - Fee - Cost - LevyAmount,        maps:get(min_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                            maps:get(max_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(min_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee - Cost - ReopenLevyAmount,  maps:get(min_available_amount, Settlement2)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement2)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(min_available_amount, Settlement3)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement3)),
+    ?assertEqual(Cost - Fee - Cost - ReopenArbAmount,   maps:get(min_available_amount, Settlement4)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement4)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(min_available_amount, Settlement5)),
+    ?assertEqual(Cost - Fee        - LevyAmount,        maps:get(max_available_amount, Settlement5)),
     ?assertMatch(?chargeback_cannot_reopen_arbitration(), Error).
 
 %% CHARGEBACK HELPERS
