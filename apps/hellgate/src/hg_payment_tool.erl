@@ -282,6 +282,9 @@ marshal({payment_terminal, type}, wechat) ->
 marshal({payment_terminal, type}, alipay) ->
     <<"alipay">>;
 
+marshal({payment_terminal, type}, zotapay) ->
+    <<"zotapay">>;
+
 marshal({digital_wallet, provider}, qiwi) ->
     <<"qiwi">>;
 
@@ -452,6 +455,9 @@ unmarshal({payment_terminal, type}, <<"wechat">>) ->
 
 unmarshal({payment_terminal, type}, <<"alipay">>) ->
     alipay;
+
+unmarshal({payment_terminal, type}, <<"zotapay">>) ->
+    zotapay;
 
 unmarshal({digital_wallet, provider}, <<"qiwi">>) ->
     qiwi;
