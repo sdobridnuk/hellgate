@@ -50,8 +50,8 @@ xref: submodules
 lint:
 	elvis rock
 
-dialyze: submodules
-	$(REBAR) dialyzer
+dialyze: submodules # FIXME: actually depends on plt generated below
+	$(REBAR) dialyzer -u false -s true
 
 plt_update:
 	$(REBAR) dialyzer -u true -s false
