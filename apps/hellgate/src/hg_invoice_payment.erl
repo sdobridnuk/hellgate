@@ -215,20 +215,20 @@
 get_party_revision(#st{activity = {payment, _}} = St) ->
     #domain_InvoicePayment{party_revision = Revision, created_at = Timestamp} = get_payment(St),
     {Revision, Timestamp};
-get_party_revision(#st{activity = {_, ID} = Activity} = St) when
-    Activity =:= {chargeback_new               , ID} orelse
-    Activity =:= {chargeback_updating          , ID} orelse
-    Activity =:= {chargeback_accounter         , ID} orelse
-    Activity =:= {chargeback_accounter_finalise, ID} ->
-        CB = hg_invoice_payment_chargeback:get(get_chargeback_state(ID, St)),
-        #domain_InvoicePaymentChargeback{party_revision = Revision, created_at = Timestamp} = CB,
-        {Revision, Timestamp};
-get_party_revision(#st{activity = {_, ID} = Activity} = St) when
-    Activity =:= {refund_new, ID} orelse
-    Activity =:= {refund_session, ID} orelse
-    Activity =:= {refund_accounter, ID} ->
-        #domain_InvoicePaymentRefund{party_revision = Revision, created_at = Timestamp} = get_refund(ID, St),
-        {Revision, Timestamp};
+get_party_revision(#st{activity = {_, ID} = Activity} = St)
+    when Activity =:= {chargeback_new               , ID} orelse
+         Activity =:= {chargeback_updating          , ID} orelse
+         Activity =:= {chargeback_accounter         , ID} orelse
+         Activity =:= {chargeback_accounter_finalise, ID} ->
+    CB = hg_invoice_payment_chargeback:get(get_chargeback_state(ID, St)),
+    #domain_InvoicePaymentChargeback{party_revision = Revision, created_at = Timestamp} = CB,
+    {Revision, Timestamp};
+get_party_revision(#st{activity = {_, ID} = Activity} = St)
+    when Activity =:= {refund_new      , ID} orelse
+         Activity =:= {refund_session  , ID} orelse
+         Activity =:= {refund_accounter, ID} ->
+    #domain_InvoicePaymentRefund{party_revision = Revision, created_at = Timestamp} = get_refund(ID, St),
+    {Revision, Timestamp};
 get_party_revision(#st{activity = {adjustment_new, ID}} = St) ->
     #domain_InvoicePaymentAdjustment{party_revision = Revision, created_at = Timestamp} = get_adjustment(ID, St),
     {Revision, Timestamp};
