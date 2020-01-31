@@ -1586,14 +1586,13 @@ process_timeout({payment, Step}, Action, St) when
     Step =:= finalizing_accounter
 ->
     process_result(Action, St);
-process_timeout({chargeback_new, ID}, Action, St) ->
-    hg_invoice_payment_chargeback:create_cash_flow(ID, Action, St);
-process_timeout({chargeback_updating, ID}, Action, St) ->
-    hg_invoice_payment_chargeback:update_cash_flow(ID, Action, St);
-process_timeout({chargeback_accounter, ID}, Action, St) ->
-    hg_invoice_payment_chargeback:update_cash_flow(ID, Action, St);
-process_timeout({chargeback_accounter_finalise, ID}, Action, St) ->
-    hg_invoice_payment_chargeback:finalise(ID, Action, St);
+process_timeout({Type, _ID} = Activity, Action, St) when
+    Type =:= chargeback_new orelse
+    Type =:= chargeback_updating orelse
+    Type =:= chargeback_accounter orelse
+    Type =:= chargeback_accounter_finalise
+->
+    hg_invoice_payment_chargeback:process_timeout(Activity, Action, St);
 process_timeout({payment, updating_accounter}, Action, St) ->
     process_accounter_update(Action, St);
 process_timeout({refund_new, ID}, Action, St) ->

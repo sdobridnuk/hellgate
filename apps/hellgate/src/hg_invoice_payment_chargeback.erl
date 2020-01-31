@@ -11,9 +11,7 @@
 -export([reopen/3]).
 
 -export([merge_change/2]).
--export([create_cash_flow/3]).
--export([update_cash_flow/3]).
--export([finalise/3]).
+-export([process_timeout/3]).
 
 -export([get/1]).
 -export([is_pending/1]).
@@ -154,20 +152,10 @@ reopen(ID, PaymentState, ReopenParams) ->
 merge_change(Change, State) ->
     do_merge_change(Change, State).
 
--spec create_cash_flow(id(), action(), payment_state()) ->
-    machine_result() | no_return().
-create_cash_flow(ID, _Action, PaymentState) ->
-    do_create_cash_flow(hg_invoice_payment:get_chargeback_state(ID, PaymentState), PaymentState).
-
--spec update_cash_flow(id(), action(), payment_state()) ->
-    machine_result() | no_return().
-update_cash_flow(ID, _Action, PaymentState) ->
-    do_update_cash_flow(hg_invoice_payment:get_chargeback_state(ID, PaymentState), PaymentState).
-
--spec finalise(id(), action(), payment_state()) ->
-    machine_result() | no_return().
-finalise(ID, Action, PaymentState) ->
-    do_finalise(hg_invoice_payment:get_chargeback_state(ID, PaymentState), Action, PaymentState).
+-spec process_timeout(activity(), action(), payment_state()) ->
+    machine_result().
+process_timeout(Activity, Action, PaymentState) ->
+    do_process_timeout(Activity, Action, PaymentState).
 
 %% Private
 
@@ -232,6 +220,32 @@ do_merge_change(?chargeback_status_changed(Status), State) ->
     set_target_status(undefined, set_status(Status, State));
 do_merge_change(?chargeback_cash_flow_changed(CashFlow), State) ->
     set_cash_flow(CashFlow, State).
+
+-spec do_process_timeout(activity(), action(), payment_state()) ->
+    machine_result().
+do_process_timeout({chargeback_new, ID}, Action, PaymentState) ->
+    create_cash_flow(ID, Action, PaymentState);
+do_process_timeout({chargeback_updating, ID}, Action, PaymentState) ->
+    update_cash_flow(ID, Action, PaymentState);
+do_process_timeout({chargeback_accounter, ID}, Action, PaymentState) ->
+    update_cash_flow(ID, Action, PaymentState);
+do_process_timeout({chargeback_accounter_finalise, ID}, Action, PaymentState) ->
+    finalise(ID, Action, PaymentState).
+
+-spec create_cash_flow(id(), action(), payment_state()) ->
+    machine_result() | no_return().
+create_cash_flow(ID, _Action, PaymentState) ->
+    do_create_cash_flow(hg_invoice_payment:get_chargeback_state(ID, PaymentState), PaymentState).
+
+-spec update_cash_flow(id(), action(), payment_state()) ->
+    machine_result() | no_return().
+update_cash_flow(ID, _Action, PaymentState) ->
+    do_update_cash_flow(hg_invoice_payment:get_chargeback_state(ID, PaymentState), PaymentState).
+
+-spec finalise(id(), action(), payment_state()) ->
+    machine_result() | no_return().
+finalise(ID, Action, PaymentState) ->
+    do_finalise(hg_invoice_payment:get_chargeback_state(ID, PaymentState), Action, PaymentState).
 
 -spec do_create_cash_flow(state(), payment_state()) ->
     machine_result() | no_return().
