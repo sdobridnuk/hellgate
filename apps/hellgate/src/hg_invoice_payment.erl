@@ -85,8 +85,8 @@
 
 -type activity()            :: payment_activity()
                              | refund_activity()
-                             | chargeback_activity()
                              | adjustment_activity()
+                             | hg_invoice_payment_chargeback:activity()
                              | idle.
 
 -type payment_activity()    :: {payment, payment_step()}.
@@ -97,11 +97,6 @@
 
 -type adjustment_activity() :: {adjustment_new    , adjustment_id()}
                              | {adjustment_pending, adjustment_id()}.
-
--type chargeback_activity() :: {chargeback_new               , chargeback_id()}
-                             | {chargeback_updating          , chargeback_id()}
-                             | {chargeback_accounter         , chargeback_id()}
-                             | {chargeback_accounter_finalise, chargeback_id()}.
 
 -type payment_step()        :: new
                              | risk_scoring
@@ -143,7 +138,7 @@
     transaction_info  :: undefined | trx_info()
 }).
 
--type chargeback_state() :: hg_invoice_payment_chargeback:st().
+-type chargeback_state() :: hg_invoice_payment_chargeback:state().
 -type refund_state() :: #refund_st{}.
 -type st() :: #st{}.
 
@@ -1270,20 +1265,21 @@ get_remaining_payment_amount(Cash, St) ->
 get_remaining_payment_balance(St) ->
     PaymentAmount = get_payment_cost(get_payment(St)),
     lists:foldl(
-        fun(#payproc_InvoicePaymentRefund{refund = R}, Acc) ->
-            case get_refund_status(R) of
-                {S, _} when S == succeeded ->
-                    hg_cash:sub(Acc, get_refund_cash(R));
-                _ ->
-                    Acc
-            end;
-           (CB = #domain_InvoicePaymentChargeback{}, Acc) ->
-            case get_chargeback_status(CB) of
-                {S, _} when S == accepted ->
-                    hg_cash:sub(Acc, get_chargeback_body(CB));
-                _ ->
-                    Acc
-            end
+        fun
+            (#payproc_InvoicePaymentRefund{refund = R}, Acc) ->
+                case get_refund_status(R) of
+                    {S, _} when S == succeeded ->
+                        hg_cash:sub(Acc, get_refund_cash(R));
+                    _ ->
+                        Acc
+                end;
+            (CB = #domain_InvoicePaymentChargeback{}, Acc) ->
+                case get_chargeback_status(CB) of
+                    {S, _} when S == accepted ->
+                        hg_cash:sub(Acc, get_chargeback_body(CB));
+                    _ ->
+                        Acc
+                end
         end,
         PaymentAmount,
         get_refunds(St) ++ get_chargebacks(St)
@@ -1399,7 +1395,6 @@ collect_refund_cashflow(
     MerchantCashflow = reduce_selector(merchant_refund_fees     , MerchantCashflowSelector, VS, Revision),
     ProviderCashflow = reduce_selector(provider_refund_cash_flow, ProviderCashflowSelector, VS, Revision),
     MerchantCashflow ++ ProviderCashflow.
-
 
 prepare_refund_cashflow(RefundSt, St) ->
     hg_accounting:hold(construct_refund_plan_id(RefundSt, St), get_refund_cashflow_plan(RefundSt)).
@@ -1597,8 +1592,8 @@ process_timeout({chargeback_updating, ID}, Action, St) ->
     hg_invoice_payment_chargeback:update_cash_flow(ID, Action, St);
 process_timeout({chargeback_accounter, ID}, Action, St) ->
     hg_invoice_payment_chargeback:update_cash_flow(ID, Action, St);
-process_timeout({chargeback_accounter_finalise, _ID}, Action, St) ->
-    process_result(Action, St);
+process_timeout({chargeback_accounter_finalise, ID}, Action, St) ->
+    hg_invoice_payment_chargeback:finalise(ID, Action, St);
 process_timeout({payment, updating_accounter}, Action, St) ->
     process_accounter_update(Action, St);
 process_timeout({refund_new, ID}, Action, St) ->
@@ -1682,6 +1677,8 @@ process_cash_flow_building(Route, VS, Payment, PaymentInstitution, Revision, Opt
     ),
     Events1 = Events0 ++ [?route_changed(Route), ?cash_flow_changed(FinalCashflow)],
     {next, {Events1, hg_machine_action:set_timeout(0, Action)}}.
+
+%%
 
 -spec process_refund_cashflow(refund_id(), action(), st()) -> machine_result().
 process_refund_cashflow(ID, Action, St) ->
@@ -1902,9 +1899,6 @@ process_result({payment, finalizing_accounter}, Action, St) ->
     end,
     NewAction = get_action(Target, Action, St),
     {done, {[?payment_status_changed(Target)], NewAction}};
-
-process_result({chargeback_accounter_finalise, ID}, Action, St) ->
-    hg_invoice_payment_chargeback:finalise(ID, Action, St);
 
 process_result({refund_accounter, ID}, Action, St) ->
     RefundSt = try_get_refund_state(ID, St),

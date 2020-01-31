@@ -627,7 +627,6 @@ handle_call({{'Invoicing', 'CreateManualRefund'}, [_UserInfo, _InvoiceID, Paymen
 
 handle_call({{'Invoicing', 'CreateChargeback'}, [_UserInfo, _InvoiceID, PaymentID, Params]}, St) ->
     _ = assert_invoice_accessible(St),
-    _ = assert_invoice_operable(St),
     PaymentSession  = get_payment_session(PaymentID, St),
     PaymentOpts     = get_payment_opts(St),
     SessionWithOpts = hg_invoice_payment:set_opts(PaymentOpts, PaymentSession),
