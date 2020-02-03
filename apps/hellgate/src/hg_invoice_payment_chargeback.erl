@@ -334,7 +334,7 @@ do_finalise(State = #chargeback_st{target_status = ?chargeback_status_accepted()
 
 -spec build_chargeback(payment_state(), create_params()) ->
     chargeback() | no_return().
-build_chargeback(PaymentState, ?chargeback_params(Levy, ParamsBody, Reason)) ->
+build_chargeback(PaymentState, Params = ?chargeback_params(Levy, ParamsBody, Reason)) ->
     Revision      = hg_domain:head(),
     Payment       = hg_invoice_payment:get_payment(PaymentState),
     PaymentOpts   = hg_invoice_payment:get_opts(PaymentState),
@@ -344,7 +344,7 @@ build_chargeback(PaymentState, ?chargeback_params(Levy, ParamsBody, Reason)) ->
     _             = validate_levy(Levy, Payment),
     _             = validate_body_amount(FinalBody, PaymentState),
     #domain_InvoicePaymentChargeback{
-        id              = construct_id(PaymentState),
+        id              = Params#payproc_InvoicePaymentChargebackParams.id,
         created_at      = hg_datetime:format_now(),
         stage           = ?chargeback_stage_chargeback(),
         status          = ?chargeback_status_pending(),
@@ -501,14 +501,14 @@ build_cash_flow_context(State) ->
     Cost = hg_cash:add(get_levy(State), get_body(State)),
     #{operation_amount => Cost}.
 
-construct_id(PaymentState) ->
-    Chargebacks = hg_invoice_payment:get_chargebacks(PaymentState),
-    MaxID       = lists:foldl(fun find_max_id/2, 0, Chargebacks),
-    genlib:to_binary(MaxID + 1).
+% construct_id(PaymentState) ->
+%     Chargebacks = hg_invoice_payment:get_chargebacks(PaymentState),
+%     MaxID       = lists:foldl(fun find_max_id/2, 0, Chargebacks),
+%     genlib:to_binary(MaxID + 1).
 
-find_max_id(#domain_InvoicePaymentChargeback{id = ID}, Max) ->
-    IntID = genlib:to_int(ID),
-    erlang:max(IntID, Max).
+% find_max_id(#domain_InvoicePaymentChargeback{id = ID}, Max) ->
+%     IntID = genlib:to_int(ID),
+%     erlang:max(IntID, Max).
 
 validate_chargeback(Terms, Payment, VS, Revision) ->
     PaymentTool           = get_payment_tool(Payment),

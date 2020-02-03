@@ -632,9 +632,7 @@ handle_call({{'Invoicing', 'CreateChargeback'}, [_UserInfo, _InvoiceID, PaymentI
     PaymentSession  = get_payment_session(PaymentID, St),
     PaymentOpts     = get_payment_opts(St),
     SessionWithOpts = hg_invoice_payment:set_opts(PaymentOpts, PaymentSession),
-    _ = assert_no_pending_chargebacks(SessionWithOpts),
-    CreateResult    = hg_invoice_payment_chargeback:create(SessionWithOpts, Params),
-    wrap_payment_impact(PaymentID, CreateResult, St);
+    start_chargeback(Params, PaymentID, SessionWithOpts, St);
 
 handle_call({{'Invoicing', 'CancelChargeback'}, [_UserInfo, _InvoiceID, PaymentID, ChargebackID]}, St) ->
     _ = assert_invoice_accessible(St),
@@ -967,6 +965,58 @@ start_new_refund(RefundType, PaymentID, Params, PaymentSession, St) when
         hg_invoice_payment:RefundType(Params, PaymentSession, get_payment_opts(St)),
         St
     ).
+
+%%
+
+start_chargeback(Params, PaymentID, PaymentSession, St) ->
+    ParamsWithID = ensure_chargeback_id_defined(Params, PaymentSession),
+    case get_chargeback(get_chargeback_id(ParamsWithID), PaymentSession) of
+        undefined ->
+            start_new_chargeback(PaymentID, ParamsWithID, PaymentSession, St);
+        Chargeback ->
+            #{
+                response => hg_invoice_payment_chargeback:get(Chargeback),
+                state    => St
+            }
+    end.
+
+start_new_chargeback(PaymentID, Params, PaymentSession, St) ->
+    _ = assert_no_pending_chargebacks(PaymentSession),
+    CreateResult = hg_invoice_payment_chargeback:create(PaymentSession, Params),
+    wrap_payment_impact(PaymentID, CreateResult, St).
+
+ensure_chargeback_id_defined(Params, PaymentSession) ->
+    ID = define_chargeback_id(Params, PaymentSession),
+    Params#payproc_InvoicePaymentChargebackParams{id = ID}.
+
+define_chargeback_id(#payproc_InvoicePaymentChargebackParams{id = undefined}, PaymentSession) ->
+    make_new_chargeback_id(PaymentSession);
+define_chargeback_id(#payproc_InvoicePaymentChargebackParams{id = ID}, _PaymentSession) ->
+    ID.
+
+make_new_chargeback_id(PaymentSession) ->
+    Refunds = hg_invoice_payment:get_chargebacks(PaymentSession),
+    construct_chargeback_id(Refunds).
+
+construct_chargeback_id(Chargebacks) ->
+    % we can't be sure that old ids were constructed in strict increasing order, so we need to find max ID
+    MaxID = lists:foldl(fun find_max_chargeback_id/2, 0, Chargebacks),
+    genlib:to_binary(MaxID + 1).
+
+find_max_chargeback_id(#domain_InvoicePaymentChargeback{id = ID}, Max) ->
+    IntID = genlib:to_int(ID),
+    erlang:max(IntID, Max).
+
+get_chargeback_id(#payproc_InvoicePaymentChargebackParams{id = ID}) ->
+    ID.
+
+get_chargeback(ID, PaymentState) ->
+    try
+        hg_invoice_payment:get_chargeback_state(ID, PaymentState)
+    catch
+        throw:#payproc_InvoicePaymentChargebackNotFound{} ->
+            undefined
+    end.
 
 %%
 

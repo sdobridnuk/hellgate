@@ -81,6 +81,7 @@
 
 -export([create_chargeback_inconsistent/1]).
 -export([create_chargeback_exceeded/1]).
+-export([create_chargeback_idempotency/1]).
 -export([cancel_payment_chargeback/1]).
 -export([cancel_payment_chargeback_refund/1]).
 -export([reject_payment_chargeback_inconsistent/1]).
@@ -264,6 +265,7 @@ groups() ->
         {chargebacks, [parallel], [
             create_chargeback_inconsistent,
             create_chargeback_exceeded,
+            create_chargeback_idempotency,
             cancel_payment_chargeback,
             cancel_payment_chargeback_refund,
             reject_payment_chargeback_inconsistent,
@@ -1851,6 +1853,36 @@ create_chargeback_exceeded(C) ->
     Cost       = 42000,
     ExceededBody = make_chargeback_params(?cash(100, <<"RUB">>), ?cash(100000, <<"RUB">>)),
     ?assertMatch({_, _, _, ?invoice_payment_amount_exceeded(_)}, start_chargeback(C, Cost, ExceededBody)).
+
+-spec create_chargeback_idempotency(config()) -> _ | no_return().
+
+create_chargeback_idempotency(C) ->
+    Client     = cfg(client, C),
+    Cost       = 42000,
+    Fee        = 1890,
+    LevyAmount = 4000,
+    Levy       = ?cash(LevyAmount, <<"RUB">>),
+    CBParams   = make_chargeback_params(Levy),
+    {IID, PID, SID, CB} = start_chargeback(C, Cost, CBParams),
+    CBID = CB#domain_InvoicePaymentChargeback.id,
+    CBParamsWithID = CBParams#payproc_InvoicePaymentChargebackParams{id = CBID},
+    ?assertMatch(CB, hg_client_invoicing:create_chargeback(IID, PID, CBParamsWithID, Client)),
+    [
+        ?payment_ev(PID, ?chargeback_ev(PID, ?chargeback_created(CB)))
+    ] = next_event(IID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+    ] = next_event(IID, Client),
+    Settlement0 = hg_ct_helper:get_balance(SID),
+    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
+    ] = next_event(IID, Client),
+    Settlement1 = hg_ct_helper:get_balance(SID),
+    ?assertEqual(Cost - Fee - Cost - LevyAmount,  maps:get(min_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                      maps:get(max_available_amount, Settlement0)),
+    ?assertEqual(Cost - Fee,                      maps:get(min_available_amount, Settlement1)),
+    ?assertEqual(Cost - Fee,                      maps:get(max_available_amount, Settlement1)).
 
 -spec cancel_payment_chargeback(config()) -> _ | no_return().
 
