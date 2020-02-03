@@ -14,6 +14,8 @@
 -export([process_timeout/3]).
 
 -export([get/1]).
+-export([get_body/1]).
+-export([get_status/1]).
 -export([is_pending/1]).
 
 -export_type([state/0]).
@@ -60,6 +62,20 @@
     chargeback().
 get(#chargeback_st{chargeback = Chargeback}) ->
     Chargeback.
+
+-spec get_body(state() | chargeback()) ->
+    cash().
+get_body(#chargeback_st{chargeback = Chargeback}) ->
+    get_body(Chargeback);
+get_body(#domain_InvoicePaymentChargeback{body = Body}) ->
+    Body.
+
+-spec get_status(state() | chargeback()) ->
+    status().
+get_status(#chargeback_st{chargeback = Chargeback}) ->
+    get_status(Chargeback);
+get_status(#domain_InvoicePaymentChargeback{status = Status}) ->
+    Status.
 
 -spec is_pending(chargeback() | state()) ->
     boolean().
@@ -698,13 +714,6 @@ get_target_status(#chargeback_st{target_status = TargetStatus}) ->
     hg_accounting:batch().
 get_cash_flow_plan(#chargeback_st{cash_flow = CashFlow}) ->
     {1, CashFlow}.
-
--spec get_body(state() | chargeback()) ->
-    cash().
-get_body(#chargeback_st{chargeback = Chargeback}) ->
-    get_body(Chargeback);
-get_body(#domain_InvoicePaymentChargeback{body = Body}) ->
-    Body.
 
 -spec get_revision(state() | chargeback()) ->
     hg_domain:revision().

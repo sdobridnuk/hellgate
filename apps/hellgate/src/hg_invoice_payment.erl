@@ -1130,9 +1130,6 @@ validate_provider_holds_terms(#domain_PaymentsProvisionTerms{holds = Terms}) whe
 validate_provider_holds_terms(#domain_PaymentsProvisionTerms{holds = undefined}) ->
     ok.
 
-get_chargeback_body(#domain_InvoicePaymentChargeback{body = Body}) ->
-    Body.
-
 -spec refund(refund_params(), st(), opts()) ->
     {domain_refund(), result()}.
 
@@ -1256,9 +1253,9 @@ get_remaining_payment_balance(St) ->
                         Acc
                 end;
             (CB = #domain_InvoicePaymentChargeback{}, Acc) ->
-                case get_chargeback_status(CB) of
+                case hg_invoice_payment_chargeback:get_status(CB) of
                     {S, _} when S == accepted ->
-                        hg_cash:sub(Acc, get_chargeback_body(CB));
+                        hg_cash:sub(Acc, hg_invoice_payment_chargeback:get_body(CB));
                     _ ->
                         Acc
                 end
@@ -2805,9 +2802,6 @@ try_get_refund_state(ID, #st{refunds = Rs}) ->
 
 set_chargeback_state(ID, ChargebackSt, St = #st{chargebacks = CBs}) ->
     St#st{chargebacks = CBs#{ID => ChargebackSt}}.
-
-get_chargeback_status(#domain_InvoicePaymentChargeback{status = Status}) ->
-    Status.
 
 try_get_chargeback_state(ID, #st{chargebacks = CBs}) ->
     case CBs of
