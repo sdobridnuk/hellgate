@@ -529,6 +529,7 @@ merge_payments_terms(
         cash_limit = Al1,
         fees = Fee1,
         holds = Hl1,
+        refunds = Rf1,
         chargebacks = CB1
     }
 ) ->
@@ -614,18 +615,18 @@ merge_chargeback_terms(
     #domain_PaymentChargebackServiceTerms{
         payment_methods = Pm0,
         fees = Fee0,
-        eligibility_time = ElTime0,
+        eligibility_time = ElTime0
     },
     #domain_PaymentChargebackServiceTerms{
         payment_methods = Pm1,
         fees = Fee1,
-        eligibility_time = ElTime1,
+        eligibility_time = ElTime1
     }
 ) ->
     #domain_PaymentChargebackServiceTerms{
         payment_methods     = hg_utils:select_defined(Pm1, Pm0),
         fees                = hg_utils:select_defined(Fee1, Fee0),
-        eligibility_time    = hg_utils:select_defined(ElTime1, ElTime0),
+        eligibility_time    = hg_utils:select_defined(ElTime1, ElTime0)
     };
 merge_chargeback_terms(Terms0, Terms1) ->
     hg_utils:select_defined(Terms1, Terms0).
