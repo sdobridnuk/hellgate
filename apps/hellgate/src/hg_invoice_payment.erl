@@ -1430,7 +1430,7 @@ create_adjustment(Timestamp, Params, St, Opts) ->
 
 get_adjustment_revision(Params) ->
     hg_utils:select_defined(
-        Params#payproc_InvoicePaymentAdjustmentParams.domain_revision,
+        Params#payproc_InvoicePaymentAdjustmentParams.legacy_domain_revision,
         hg_domain:head()
     ).
 
@@ -2687,16 +2687,16 @@ merge_change(
         {payment, processing_session} ->
             %% session retrying
             St2#st{activity = {payment, processing_session}};
-        {payment, flow_waiting} ->
+        {payment, PaymentActivity} when
+            PaymentActivity == flow_waiting;
+            PaymentActivity == processing_capture
+        ->
             %% session flow
             St2#st{
                 activity = {payment, finalizing_session},
                 timings  = try_accrue_waiting_timing(Opts, St2)
             };
-        {payment, PaymentActivity} when
-            PaymentActivity =:= processing_capture orelse
-            PaymentActivity =:= updating_accounter
-        ->
+        {payment, updating_accounter} ->
             %% session flow
             St2#st{activity = {payment, finalizing_session}};
         {payment, finalizing_session} ->
