@@ -617,12 +617,14 @@ handle_call({{'Invoicing', 'RefundPayment'}, [_UserInfo, _InvoiceID, PaymentID, 
     _ = assert_invoice_accessible(St),
     _ = assert_invoice_operable(St),
     PaymentSession = get_payment_session(PaymentID, St),
+    _ = assert_no_pending_chargebacks(PaymentSession),
     start_refund(refund, Params, PaymentID, PaymentSession, St);
 
 handle_call({{'Invoicing', 'CreateManualRefund'}, [_UserInfo, _InvoiceID, PaymentID, Params]}, St) ->
     _ = assert_invoice_accessible(St),
     _ = assert_invoice_operable(St),
     PaymentSession = get_payment_session(PaymentID, St),
+    _ = assert_no_pending_chargebacks(PaymentSession),
     start_refund(manual_refund, Params, PaymentID, PaymentSession, St);
 
 handle_call({{'Invoicing', 'CreateChargeback'}, [_UserInfo, _InvoiceID, PaymentID, Params]}, St) ->
@@ -630,6 +632,7 @@ handle_call({{'Invoicing', 'CreateChargeback'}, [_UserInfo, _InvoiceID, PaymentI
     PaymentSession  = get_payment_session(PaymentID, St),
     PaymentOpts     = get_payment_opts(St),
     SessionWithOpts = hg_invoice_payment:set_opts(PaymentOpts, PaymentSession),
+    _ = assert_no_pending_chargebacks(SessionWithOpts),
     CreateResult    = hg_invoice_payment_chargeback:create(SessionWithOpts, Params),
     wrap_payment_impact(PaymentID, CreateResult, St);
 
@@ -732,6 +735,15 @@ assert_no_pending_payment(#st{activity = {payment, PaymentID}}) ->
     throw(?payment_pending(PaymentID));
 assert_no_pending_payment(_) ->
     ok.
+
+assert_no_pending_chargebacks(PaymentState) ->
+    Chargebacks = hg_invoice_payment:get_chargebacks(PaymentState),
+    case lists:any(fun hg_invoice_payment_chargeback:is_pending/1, Chargebacks) of
+        true ->
+            throw(#payproc_InvoicePaymentChargebackPending{});
+        false ->
+            ok
+    end.
 
 set_invoice_timer(#st{invoice = #domain_Invoice{due = Due}}) ->
     hg_machine_action:set_deadline(Due).

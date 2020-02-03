@@ -1130,23 +1130,6 @@ validate_provider_holds_terms(#domain_PaymentsProvisionTerms{holds = Terms}) whe
 validate_provider_holds_terms(#domain_PaymentsProvisionTerms{holds = undefined}) ->
     ok.
 
-
-assert_no_active_chargebacks(St) ->
-    CBs = get_chargebacks(St),
-    ActiveChargebacks = lists:filter(
-        fun
-            (#domain_InvoicePaymentChargeback{status = ?chargeback_status_pending()}) -> true;
-            (#domain_InvoicePaymentChargeback{}) -> false
-        end,
-        CBs
-    ),
-    case ActiveChargebacks of
-        [] ->
-            ok;
-        [_R|_] ->
-            throw(#payproc_InvoicePaymentChargebackPending{})
-    end.
-
 get_chargeback_body(#domain_InvoicePaymentChargeback{body = Body}) ->
     Body.
 
@@ -1182,7 +1165,6 @@ manual_refund(Params, St0, Opts) ->
 make_refund(Params, Payment, Revision, St, Opts) ->
     _ = assert_payment_status(captured, Payment),
     PartyRevision = get_opts_party_revision(Opts),
-    _ = assert_no_active_chargebacks(St),
     _ = assert_previous_refunds_finished(St),
     Cash = define_refund_cash(Params#payproc_InvoicePaymentRefundParams.cash, Payment),
     _ = assert_refund_cash(Cash, St),

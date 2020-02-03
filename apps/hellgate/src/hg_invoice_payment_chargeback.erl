@@ -323,7 +323,6 @@ build_chargeback(PaymentState, ?chargeback_params(Levy, ParamsBody, Reason)) ->
     Payment       = hg_invoice_payment:get_payment(PaymentState),
     PaymentOpts   = hg_invoice_payment:get_opts(PaymentState),
     PartyRevision = get_opts_party_revision(PaymentOpts),
-    _             = validate_no_pending_chargebacks(PaymentState),
     _             = validate_payment_status(captured, Payment),
     FinalBody     = define_body(ParamsBody, Payment),
     _             = validate_levy(Levy, Payment),
@@ -680,13 +679,6 @@ validate_contract_active(#domain_Contract{status = {active, _}}) ->
     ok;
 validate_contract_active(#domain_Contract{status = Status}) ->
     throw(#payproc_InvalidContractStatus{status = Status}).
-
-validate_no_pending_chargebacks(PaymentState) ->
-    Chargebacks = hg_invoice_payment:get_chargebacks(PaymentState),
-    case lists:any(fun is_pending/1, Chargebacks)
-      of true -> throw(#payproc_InvoicePaymentChargebackPending{})
-       ; false -> ok
-    end.
 
 %% Getters
 
