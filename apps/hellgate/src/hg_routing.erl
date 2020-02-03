@@ -630,7 +630,8 @@ acceptable_payment_terms(
         payment_methods = PMsSelector,
         cash_limit      = CashLimitSelector,
         holds           = HoldsTerms,
-        refunds         = RefundsTerms
+        refunds         = RefundsTerms,
+        chargebacks     = ChargebackTerms
     },
     VS,
     Revision
@@ -644,6 +645,7 @@ acceptable_payment_terms(
     _ = try_accept_term(ParentName, cost         , CashLimitSelector  , VS, Revision),
     _ = acceptable_holds_terms(HoldsTerms, getv(flow, VS, undefined), VS, Revision),
     _ = acceptable_refunds_terms(RefundsTerms, getv(refunds, VS, undefined), VS, Revision),
+    _ = acceptable_chargeback_terms(ChargebackTerms, getv(chargebacks, VS, undefined), VS, Revision),
     true;
 acceptable_payment_terms(undefined, _VS, _Revision) ->
     throw(?rejected({'PaymentsProvisionTerms', undefined})).
@@ -695,6 +697,11 @@ acceptable_partial_refunds_terms(
 
 acceptable_partial_refunds_terms(undefined, _RVS, _VS, _Revision) ->
     throw(?rejected({'PartialRefundsProvisionTerms', undefined})).
+
+acceptable_chargeback_terms(_Terms, undefined, _VS, _Revision) ->
+    true;
+acceptable_chargeback_terms(undefined, _RVS, _VS, _Revision) ->
+    throw(?rejected({'PaymentChargebackProvisionTerms', undefined})).
 
 merge_payment_terms(
     #domain_PaymentsProvisionTerms{
