@@ -7,6 +7,8 @@
 -export([get_system_account/4]).
 -export([get_realm/1]).
 -export([is_live/1]).
+-export([choose_provider_account/2]).
+
 %%
 
 -type currency()        :: dmsl_domain_thrift:'CurrencyRef'().
