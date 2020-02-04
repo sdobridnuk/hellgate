@@ -14,6 +14,8 @@
 -type revision()        :: hg_domain:revision().
 -type payment_inst()    :: dmsl_domain_thrift:'PaymentInstitution'().
 -type realm()           :: dmsl_domain_thrift:'PaymentInstitutionRealm'().
+-type accounts()        :: dmsl_domain_thrift:'ProviderAccountSet'().
+-type account()         :: dmsl_domain_thrift:'ProviderAccount'().
 
 %%
 
@@ -39,3 +41,13 @@ get_realm(#domain_PaymentInstitution{realm = Realm}) ->
 
 is_live(#domain_PaymentInstitution{realm = Realm}) ->
     Realm =:= live.
+
+-spec choose_provider_account(currency(), accounts()) -> account() | no_return().
+
+choose_provider_account(Currency, Accounts) ->
+    case maps:find(Currency, Accounts) of
+        {ok, Account} ->
+            Account;
+        error ->
+            error({misconfiguration, {'No provider account for a given currency', Currency}})
+    end.

@@ -475,7 +475,7 @@ collect_account_map(
 ) ->
     PaymentCash     = get_payment_cost(Payment),
     Currency        = get_cash_currency(PaymentCash),
-    ProviderAccount = choose_provider_account(Currency, ProviderAccounts),
+    ProviderAccount = hg_payment_institution:choose_provider_account(Currency, ProviderAccounts),
     SystemAccount   = hg_payment_institution:get_system_account(Currency, VS, Revision, PaymentInstitution),
     M = #{
         {merchant , settlement} => MerchantAccount#domain_ShopAccount.settlement     ,
@@ -501,15 +501,6 @@ build_cash_flow_context(State) ->
     Cost = hg_cash:add(get_levy(State), get_body(State)),
     #{operation_amount => Cost}.
 
-% construct_id(PaymentState) ->
-%     Chargebacks = hg_invoice_payment:get_chargebacks(PaymentState),
-%     MaxID       = lists:foldl(fun find_max_id/2, 0, Chargebacks),
-%     genlib:to_binary(MaxID + 1).
-
-% find_max_id(#domain_InvoicePaymentChargeback{id = ID}, Max) ->
-%     IntID = genlib:to_int(ID),
-%     erlang:max(IntID, Max).
-
 validate_chargeback(Terms, Payment, VS, Revision) ->
     PaymentTool           = get_payment_tool(Payment),
     PaymentMethodSelector = get_chargeback_payment_method_selector(Terms),
@@ -524,14 +515,6 @@ reduce_selector(Name, Selector, VS, Revision) ->
             V;
         Ambiguous ->
             error({misconfiguration, {'Could not reduce selector to a value', {Name, Ambiguous}}})
-    end.
-
-choose_provider_account(Currency, Accounts) ->
-    case maps:find(Currency, Accounts) of
-        {ok, Account} ->
-            Account;
-        error ->
-            error({misconfiguration, {'No provider account for a given currency', Currency}})
     end.
 
 choose_external_account(Currency, VS, Revision) ->

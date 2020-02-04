@@ -908,7 +908,7 @@ collect_account_map(
     Revision
 ) ->
     Currency = get_currency(get_payment_cost(Payment)),
-    ProviderAccount = choose_provider_account(Currency, ProviderAccounts),
+    ProviderAccount = hg_payment_institution:choose_provider_account(Currency, ProviderAccounts),
     SystemAccount = hg_payment_institution:get_system_account(Currency, VS, Revision, PaymentInstitution),
     M = #{
         {merchant , settlement} => MerchantAccount#domain_ShopAccount.settlement     ,
@@ -926,14 +926,6 @@ collect_account_map(
             };
         undefined ->
             M
-    end.
-
-choose_provider_account(Currency, Accounts) ->
-    case maps:find(Currency, Accounts) of
-        {ok, Account} ->
-            Account;
-        error ->
-            error({misconfiguration, {'No provider account for a given currency', Currency}})
     end.
 
 choose_external_account(Currency, VS, Revision) ->
