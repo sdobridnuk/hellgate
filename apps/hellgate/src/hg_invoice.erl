@@ -660,6 +660,7 @@ handle_call({{'Invoicing', 'AcceptChargeback'}, [_UserInfo, _InvoiceID, PaymentI
 
 handle_call({{'Invoicing', 'ReopenChargeback'}, [_UserInfo, _InvoiceID, PaymentID, ChargebackID, Params]}, St) ->
     _ = assert_invoice_accessible(St),
+    PaymentSession  = get_payment_session(PaymentID, St),
     PaymentOpts     = get_payment_opts(St),
     SessionWithOpts = hg_invoice_payment:set_opts(PaymentOpts, PaymentSession),
     ReopenResult    = hg_invoice_payment_chargeback:reopen(ChargebackID, SessionWithOpts, Params),
