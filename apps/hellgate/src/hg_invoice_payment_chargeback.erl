@@ -666,12 +666,11 @@ validate_payment_status(_, #domain_InvoicePayment{status = Status}) ->
 validate_body_amount(Cash, PaymentState) ->
     InterimPaymentAmount = hg_invoice_payment:get_remaining_payment_balance(PaymentState),
     PaymentAmount = hg_cash:sub(InterimPaymentAmount, Cash),
-    validate_remaining_payment_amount(PaymentAmount, PaymentState).
+    validate_remaining_payment_amount(PaymentAmount, InterimPaymentAmount).
 
-validate_remaining_payment_amount(?cash(Amount, _), _PaymentState) when Amount >= 0 ->
+validate_remaining_payment_amount(?cash(Amount, _), _) when Amount >= 0 ->
     ok;
-validate_remaining_payment_amount(?cash(Amount, _), PaymentState) when Amount < 0 ->
-    Maximum = hg_invoice_payment:get_remaining_payment_balance(PaymentState),
+validate_remaining_payment_amount(?cash(Amount, _), Maximum) when Amount < 0 ->
     throw(#payproc_InvoicePaymentAmountExceeded{maximum = Maximum}).
 
 validate_contract_active(#domain_Contract{status = {active, _}}) ->
