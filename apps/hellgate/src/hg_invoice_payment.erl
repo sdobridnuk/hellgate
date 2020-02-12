@@ -1152,6 +1152,7 @@ manual_refund(Params, St0, Opts) ->
     {Refund, {[?refund_ev(ID, C) || C <- Changes], Action}}.
 
 make_refund(Params, Payment, Revision, St, Opts) ->
+    _ = assert_no_pending_chargebacks(St),
     _ = assert_payment_status(captured, Payment),
     PartyRevision = get_opts_party_revision(Opts),
     _ = assert_previous_refunds_finished(St),
@@ -1441,6 +1442,15 @@ assert_payment_status(Status, #domain_InvoicePayment{status = {Status, _}}) ->
     ok;
 assert_payment_status(_, #domain_InvoicePayment{status = Status}) ->
     throw(#payproc_InvalidPaymentStatus{status = Status}).
+
+assert_no_pending_chargebacks(PaymentState) ->
+    Chargebacks = get_chargebacks(PaymentState),
+    case lists:any(fun hg_invoice_payment_chargeback:is_pending/1, Chargebacks) of
+        true ->
+            throw(#payproc_InvoicePaymentChargebackPending{});
+        false ->
+            ok
+    end.
 
 assert_no_adjustment_pending(#st{adjustments = As}) ->
     lists:foreach(fun assert_adjustment_finalized/1, As).

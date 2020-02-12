@@ -266,6 +266,7 @@ finalise(ID, Action, PaymentState) ->
 -spec do_create_cash_flow(state(), payment_state()) ->
     machine_result() | no_return().
 do_create_cash_flow(State, PaymentState) ->
+    _ = assert_no_pending_chargebacks(PaymentState),
     FinalCashFlow = build_chargeback_cash_flow(State, PaymentState),
     CashFlowPlan  = {1, FinalCashFlow},
     _             = prepare_cash_flow(State, CashFlowPlan, PaymentState),
@@ -418,6 +419,7 @@ build_reopen_result(State = #chargeback_st{chargeback =
                         #domain_InvoicePaymentChargeback{id = ID, body = Body, levy = Levy}},
                     PaymentState,
                     ?reopen_params(ParamsLevy, ParamsBody)) ->
+    _ = assert_no_pending_chargebacks(PaymentState),
     FinalBody     = define_params_body(ParamsBody, Body),
     _             = validate_body_amount(FinalBody, PaymentState),
     FinalLevy     = define_params_levy(ParamsLevy, Levy),
@@ -677,6 +679,15 @@ validate_contract_active(#domain_Contract{status = {active, _}}) ->
     ok;
 validate_contract_active(#domain_Contract{status = Status}) ->
     throw(#payproc_InvalidContractStatus{status = Status}).
+
+assert_no_pending_chargebacks(PaymentState) ->
+    Chargebacks = hg_invoice_payment:get_chargebacks(PaymentState),
+    case lists:any(fun is_pending/1, Chargebacks) of
+        true ->
+            throw(#payproc_InvoicePaymentChargebackPending{});
+        false ->
+            ok
+    end.
 
 %% Getters
 
