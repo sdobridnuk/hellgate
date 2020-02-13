@@ -86,7 +86,7 @@
 -type activity()            :: payment_activity()
                              | refund_activity()
                              | adjustment_activity()
-                             | hg_invoice_payment_chargeback:activity()
+                             | chargeback_activity()
                              | idle.
 
 -type payment_activity()    :: {payment, payment_step()}.
@@ -97,6 +97,10 @@
 
 -type adjustment_activity() :: {adjustment_new    , adjustment_id()}
                              | {adjustment_pending, adjustment_id()}.
+
+-type chargeback_activity() :: {chargeback, chargeback_id(), chargeback_activity_type()}.
+
+-type chargeback_activity_type() :: hg_invoice_payment_chargeback:activity().
 
 -type payment_step()        :: new
                              | risk_scoring
@@ -139,6 +143,7 @@
 }).
 
 -type chargeback_state() :: hg_invoice_payment_chargeback:state().
+
 -type refund_state() :: #refund_st{}.
 -type st() :: #st{}.
 
@@ -177,7 +182,7 @@
 -type capture_params()      :: dmsl_payment_processing_thrift:'InvoicePaymentCaptureParams'().
 -type payment_session()     :: dmsl_payment_processing_thrift:'InvoicePaymentSession'().
 
--type session_status()           :: active | suspended | finished.
+-type session_status()      :: active | suspended | finished.
 
 -type session() :: #{
     target            := target(),
@@ -210,11 +215,7 @@
 get_party_revision(#st{activity = {payment, _}} = St) ->
     #domain_InvoicePayment{party_revision = Revision, created_at = Timestamp} = get_payment(St),
     {Revision, Timestamp};
-get_party_revision(#st{activity = {_, ID} = Activity} = St)
-    when Activity =:= {chargeback_new               , ID} orelse
-         Activity =:= {chargeback_updating          , ID} orelse
-         Activity =:= {chargeback_accounter         , ID} orelse
-         Activity =:= {chargeback_accounter_finalise, ID} ->
+get_party_revision(#st{activity = {chargeback, ID, _Type}} = St) ->
     CB = hg_invoice_payment_chargeback:get(get_chargeback_state(ID, St)),
     #domain_InvoicePaymentChargeback{party_revision = Revision, created_at = Timestamp} = CB,
     {Revision, Timestamp};
@@ -1567,12 +1568,7 @@ process_timeout({payment, Step}, Action, St) when
     Step =:= finalizing_accounter
 ->
     process_result(Action, St);
-process_timeout({Type, _ID} = Activity, Action, St) when
-    Type =:= chargeback_new orelse
-    Type =:= chargeback_updating orelse
-    Type =:= chargeback_accounter orelse
-    Type =:= chargeback_accounter_finalise
-->
+process_timeout({chargeback, _ID, _Type} = Activity, Action, St) ->
     hg_invoice_payment_chargeback:process_timeout(Activity, Action, St);
 process_timeout({payment, updating_accounter}, Action, St) ->
     process_accounter_update(Action, St);
@@ -2589,30 +2585,30 @@ merge_change(Change = ?chargeback_ev(ID, Event), St, Opts) ->
     St1 = case Event of
         ?chargeback_created(_) ->
             _ = validate_transition(idle, Change, St, Opts),
-            St#st{activity = {chargeback_new, ID}};
+            St#st{activity = {chargeback, ID, new}};
         ?chargeback_stage_changed(_) ->
             _ = validate_transition(idle, Change, St, Opts),
             St;
         ?chargeback_levy_changed(_) ->
-            _ = validate_transition([idle, {chargeback_updating, ID}], Change, St, Opts),
-            St#st{activity = {chargeback_updating, ID}};
+            _ = validate_transition([idle, {chargeback, ID, updating}], Change, St, Opts),
+            St#st{activity = {chargeback, ID, updating}};
         ?chargeback_body_changed(_) ->
-            _ = validate_transition([idle, {chargeback_updating, ID}], Change, St, Opts),
-            St#st{activity = {chargeback_updating, ID}};
+            _ = validate_transition([idle, {chargeback, ID, updating}], Change, St, Opts),
+            St#st{activity = {chargeback, ID, updating}};
         ?chargeback_cash_flow_changed(_) ->
             case St of
-                #st{activity = {chargeback_new, ID}} ->
-                    _ = validate_transition({chargeback_new, ID}, Change, St, Opts),
+                #st{activity = {chargeback, ID, new}} ->
+                    _ = validate_transition({chargeback, ID, new}, Change, St, Opts),
                     St#st{activity = idle};
-                #st{activity = {chargeback_accounter, ID}} ->
-                    _ = validate_transition({chargeback_accounter, ID}, Change, St, Opts),
-                    St#st{activity = {chargeback_accounter_finalise, ID}}
+                #st{activity = {chargeback, ID, accounter}} ->
+                    _ = validate_transition({chargeback, ID, accounter}, Change, St, Opts),
+                    St#st{activity = {chargeback, ID, accounter_finalise}}
             end;
         ?chargeback_target_status_changed(_) ->
-            _ = validate_transition([idle, {chargeback_updating, ID}], Change, St, Opts),
-            St#st{activity = {chargeback_accounter, ID}};
+            _ = validate_transition([idle, {chargeback, ID, updating}], Change, St, Opts),
+            St#st{activity = {chargeback, ID, accounter}};
         ?chargeback_status_changed(_) ->
-            _ = validate_transition([idle, {chargeback_accounter_finalise, ID}], Change, St, Opts),
+            _ = validate_transition([idle, {chargeback, ID, accounter_finalise}], Change, St, Opts),
             St#st{activity = idle}
     end,
     ChargebackSt = merge_chargeback_change(Event, try_get_chargeback_state(ID, St1)),

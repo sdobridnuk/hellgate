@@ -18,6 +18,7 @@
 -export([get_status/1]).
 -export([is_pending/1]).
 
+-export_type([id/0]).
 -export_type([state/0]).
 -export_type([activity/0]).
 
@@ -27,36 +28,59 @@
     target_status :: undefined | status()
 }).
 
--type state()          :: #chargeback_st{}.
--type payment_state()  :: hg_invoice_payment:st().
+-type state()
+    :: #chargeback_st{}.
+-type payment_state()
+    :: hg_invoice_payment:st().
 
--type chargeback()     :: dmsl_domain_thrift:'InvoicePaymentChargeback'().
+-type chargeback()
+    :: dmsl_domain_thrift:'InvoicePaymentChargeback'().
 
--type id()             :: dmsl_domain_thrift:'InvoicePaymentChargebackID'().
--type status()         :: dmsl_domain_thrift:'InvoicePaymentChargebackStatus'().
--type stage()          :: dmsl_domain_thrift:'InvoicePaymentChargebackStage'().
+-type id()
+    :: dmsl_domain_thrift:'InvoicePaymentChargebackID'().
+-type status()
+    :: dmsl_domain_thrift:'InvoicePaymentChargebackStatus'().
+-type stage()
+    :: dmsl_domain_thrift:'InvoicePaymentChargebackStage'().
 
--type cash()           :: dmsl_domain_thrift:'Cash'().
--type cash_flow()      :: dmsl_domain_thrift:'FinalCashFlow'().
+-type cash()
+    :: dmsl_domain_thrift:'Cash'().
+-type cash_flow()
+    :: dmsl_domain_thrift:'FinalCashFlow'().
 
--type create_params()  :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackParams'().
--type accept_params()  :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackAcceptParams'().
--type reject_params()  :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackRejectParams'().
--type reopen_params()  :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackReopenParams'().
+-type create_params()
+    :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackParams'().
+-type accept_params()
+    :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackAcceptParams'().
+-type reject_params()
+    :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackRejectParams'().
+-type reopen_params()
+    :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackReopenParams'().
 
--type change()         :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackChangePayload'().
+-type change()
+    :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackChangePayload'().
 
--type result()         :: {events(), action()}.
--type events()         :: [event()].
--type event()          :: dmsl_payment_processing_thrift:'InvoicePaymentChangePayload'().
+-type result()
+    :: {events(), action()}.
+-type events()
+    :: [event()].
+-type event()
+    :: dmsl_payment_processing_thrift:'InvoicePaymentChangePayload'().
 
--type action()         :: hg_machine_action:t().
--type machine_result() :: hg_invoice_payment:machine_result().
+-type action()
+    :: hg_machine_action:t().
+-type machine_result()
+    :: hg_invoice_payment:machine_result().
 
--type activity()       :: {chargeback_new               , id()}
-                        | {chargeback_updating          , id()}
-                        | {chargeback_accounter         , id()}
-                        | {chargeback_accounter_finalise, id()}.
+-type payment_activity()
+    :: {chargeback, id(), activity()}.
+
+-type activity()
+    :: new
+     | updating
+     | accounter
+     | accounter_finalise
+     .
 
 -spec get(state()) ->
     chargeback().
@@ -168,16 +192,17 @@ reopen(ID, PaymentState, ReopenParams) ->
 merge_change(Change, State) ->
     do_merge_change(Change, State).
 
--spec process_timeout(activity(), action(), payment_state()) ->
+-spec process_timeout(payment_activity(), action(), payment_state()) ->
     machine_result().
-process_timeout(Activity, Action, PaymentState) ->
-    do_process_timeout(Activity, Action, PaymentState).
+process_timeout(PaymentActivity, Action, PaymentState) ->
+    do_process_timeout(PaymentActivity, Action, PaymentState).
 
 %% Private
 
 -spec do_create(payment_state(), create_params()) ->
     {chargeback(), result()} | no_return().
 do_create(PaymentState, CreateParams) ->
+    _ = assert_no_pending_chargebacks(PaymentState),
     Chargeback = build_chargeback(PaymentState, CreateParams),
     ID         = get_id(Chargeback),
     Action     = hg_machine_action:instant(),
@@ -214,6 +239,7 @@ do_accept(ID, PaymentState, AcceptParams) ->
 -spec do_reopen(id(), payment_state(), reopen_params()) ->
     {ok, result()} | no_return().
 do_reopen(ID, PaymentState, ReopenParams) ->
+    _ = assert_no_pending_chargebacks(PaymentState),
     State  = hg_invoice_payment:get_chargeback_state(ID, PaymentState),
     _      = validate_chargeback_is_rejected(State),
     _      = validate_not_arbitration(State),
@@ -237,15 +263,15 @@ do_merge_change(?chargeback_status_changed(Status), State) ->
 do_merge_change(?chargeback_cash_flow_changed(CashFlow), State) ->
     set_cash_flow(CashFlow, State).
 
--spec do_process_timeout(activity(), action(), payment_state()) ->
+-spec do_process_timeout(payment_activity(), action(), payment_state()) ->
     machine_result().
-do_process_timeout({chargeback_new, ID}, Action, PaymentState) ->
+do_process_timeout({chargeback, ID, new}, Action, PaymentState) ->
     create_cash_flow(ID, Action, PaymentState);
-do_process_timeout({chargeback_updating, ID}, Action, PaymentState) ->
+do_process_timeout({chargeback, ID, updating}, Action, PaymentState) ->
     update_cash_flow(ID, Action, PaymentState);
-do_process_timeout({chargeback_accounter, ID}, Action, PaymentState) ->
+do_process_timeout({chargeback, ID, accounter}, Action, PaymentState) ->
     update_cash_flow(ID, Action, PaymentState);
-do_process_timeout({chargeback_accounter_finalise, ID}, Action, PaymentState) ->
+do_process_timeout({chargeback, ID, accounter_finalise}, Action, PaymentState) ->
     finalise(ID, Action, PaymentState).
 
 -spec create_cash_flow(id(), action(), payment_state()) ->
@@ -266,7 +292,6 @@ finalise(ID, Action, PaymentState) ->
 -spec do_create_cash_flow(state(), payment_state()) ->
     machine_result() | no_return().
 do_create_cash_flow(State, PaymentState) ->
-    _ = assert_no_pending_chargebacks(PaymentState),
     FinalCashFlow = build_chargeback_cash_flow(State, PaymentState),
     CashFlowPlan  = {1, FinalCashFlow},
     _             = prepare_cash_flow(State, CashFlowPlan, PaymentState),
