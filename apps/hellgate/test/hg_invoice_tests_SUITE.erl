@@ -1865,14 +1865,15 @@ create_chargeback_idempotency(C) ->
     CBParams   = make_chargeback_params(Levy),
     {IID, PID, SID, CB} = start_chargeback(C, Cost, CBParams),
     CBID = CB#domain_InvoicePaymentChargeback.id,
-    CBParamsWithID = CBParams#payproc_InvoicePaymentChargebackParams{id = CBID},
-    ?assertMatch(CB, hg_client_invoicing:create_chargeback(IID, PID, CBParamsWithID, Client)),
     [
-        ?payment_ev(PID, ?chargeback_ev(PID, ?chargeback_created(CB)))
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
     ] = next_event(IID, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
     ] = next_event(IID, Client),
+    ?assertMatch(CB, hg_client_invoicing:create_chargeback(IID, PID, CBParams, Client)),
+    NewCBParams   = make_chargeback_params(Levy),
+    ?assertMatch(?chargeback_pending(), hg_client_invoicing:create_chargeback(IID, PID, NewCBParams, Client)),
     Settlement0 = hg_ct_helper:get_balance(SID),
     ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
     [
@@ -1896,7 +1897,7 @@ cancel_payment_chargeback(C) ->
     {IID, PID, SID, CB} = start_chargeback(C, Cost, CBParams),
     CBID = CB#domain_InvoicePaymentChargeback.id,
     [
-        ?payment_ev(PID, ?chargeback_ev(PID, ?chargeback_created(CB)))
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
     ] = next_event(IID, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
@@ -4236,6 +4237,7 @@ make_chargeback_reopen_params(Levy, Body) ->
 
 make_chargeback_params(Levy) ->
     #payproc_InvoicePaymentChargebackParams{
+        id = hg_utils:unique_id(),
         reason = #domain_InvoicePaymentChargebackReason{
             code = <<"CB.C0DE">>,
             category = {fraud, #domain_InvoicePaymentChargebackCategoryFraud{}}
@@ -4244,6 +4246,7 @@ make_chargeback_params(Levy) ->
     }.
 make_chargeback_params(Levy, Body) ->
     #payproc_InvoicePaymentChargebackParams{
+        id = hg_utils:unique_id(),
         reason = #domain_InvoicePaymentChargebackReason{
             code = <<"CB.C0DE">>,
             category = {fraud, #domain_InvoicePaymentChargebackCategoryFraud{}}
