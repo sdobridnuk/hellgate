@@ -700,6 +700,8 @@ acceptable_partial_refunds_terms(undefined, _RVS, _VS, _Revision) ->
 
 acceptable_chargeback_terms(_Terms, undefined, _VS, _Revision) ->
     true;
+acceptable_chargeback_terms(_Terms, #{}, _VS, _Revision) ->
+    true;
 acceptable_chargeback_terms(undefined, _RVS, _VS, _Revision) ->
     throw(?rejected({'PaymentChargebackProvisionTerms', undefined})).
 
