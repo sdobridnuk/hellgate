@@ -794,6 +794,24 @@ validate_refund_time(RefundCreatedAt, PaymentCreatedAt, TimeSpanSelector, VS, Re
             throw(#payproc_OperationNotPermitted{})
     end.
 
+collect_chargeback_varset(
+    #domain_PaymentChargebackServiceTerms{
+        payment_methods  = PaymentMethodSelector
+    },
+    VS,
+    Revision
+) ->
+    CBPMs = reduce_selector(payment_methods, PaymentMethodSelector, VS, Revision),
+    case ordsets:is_element(hg_payment_tool:get_method(maps:get(payment_tool, VS)), CBPMs) of
+        true ->
+            % nothing here yet
+            VS#{chargebacks => #{}};
+        false ->
+            VS
+    end;
+collect_chargeback_varset(undefined, VS, _Revision) ->
+    VS.
+
 collect_refund_varset(
     #domain_PaymentRefundsServiceTerms{
         payment_methods  = PaymentMethodSelector,
@@ -859,9 +877,14 @@ collect_routing_varset(Payment, Opts, VS0) ->
     } = Payment,
     MerchantTerms = get_merchant_payments_terms(Opts, Revision),
     VS2 = reconstruct_payment_flow(DomainFlow, CreatedAt, VS1),
-    collect_refund_varset(
+    VS3 = collect_refund_varset(
         MerchantTerms#domain_PaymentsServiceTerms.refunds,
         VS2,
+        Revision
+    ),
+    collect_chargeback_varset(
+        MerchantTerms#domain_PaymentsServiceTerms.chargebacks,
+        VS3,
         Revision
     ).
 
@@ -2992,9 +3015,6 @@ get_target_type({Type, _}) when
     Type == 'refunded'
 ->
     Type.
-
-% get_opts(#st{opts = Opts}) ->
-%     Opts.
 
 get_recurrent_token(#st{recurrent_token = Token}) ->
     Token.
