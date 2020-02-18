@@ -533,7 +533,7 @@ collect_account_map(
         {system   , subagent  } => SystemAccount#domain_SystemAccount.subagent
     },
     % External account probably can be optional for some payments
-    case choose_external_account(Currency, VS, Revision) of
+    case hg_payment_institution:choose_external_account(Currency, VS, Revision) of
         #domain_ExternalAccount{income = Income, outcome = Outcome} ->
             M#{
                 {external, income} => Income,
@@ -565,20 +565,6 @@ reduce_selector(Name, Selector, VS, Revision) ->
             V;
         Ambiguous ->
             error({misconfiguration, {'Could not reduce selector to a value', {Name, Ambiguous}}})
-    end.
-
-choose_external_account(Currency, VS, Revision) ->
-    Globals = hg_domain:get(Revision, {globals, #domain_GlobalsRef{}}),
-    ExternalAccountSetSelector = Globals#domain_Globals.external_account_set,
-    case hg_selector:reduce(ExternalAccountSetSelector, VS, Revision) of
-        {value, ExternalAccountSetRef} ->
-            ExternalAccountSet = hg_domain:get(Revision, {external_account_set, ExternalAccountSetRef}),
-            genlib_map:get(
-                Currency,
-                ExternalAccountSet#domain_ExternalAccountSet.accounts
-            );
-        _ ->
-            undefined
     end.
 
 get_provider_chargeback_terms(#domain_PaymentsProvisionTerms{chargebacks = undefined}, Payment) ->
