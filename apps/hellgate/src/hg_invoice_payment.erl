@@ -42,11 +42,9 @@
 -export([get_remaining_payment_balance/1]).
 -export([get_activity/1]).
 -export([get_tags/1]).
--export([get_opts/1]).
 
 -export([construct_payment_info/2]).
 -export([set_repair_scenario/2]).
--export([set_opts/2]).
 
 %% Business logic
 
@@ -1592,7 +1590,7 @@ process_timeout({payment, Step}, Action, St) when
 ->
     process_result(Action, St);
 process_timeout({chargeback, _ID, _Type} = Activity, Action, St) ->
-    hg_invoice_payment_chargeback:process_timeout(Activity, Action, St);
+    hg_invoice_payment_chargeback:process_timeout(Activity, Action, St, get_opts(St));
 process_timeout({payment, updating_accounter}, Action, St) ->
     process_accounter_update(Action, St);
 process_timeout({refund_new, ID}, Action, St) ->
@@ -2215,10 +2213,6 @@ get_cashflow_plan(St) ->
 set_repair_scenario(Scenario, St) ->
     St#st{repair_scenario = Scenario}.
 
--spec set_opts(opts(), st()) -> st().
-
-set_opts(Opts, St) ->
-    St#st{opts = Opts}.
 %%
 
 -type payment_info() :: dmsl_proxy_provider_thrift:'PaymentInfo'().
