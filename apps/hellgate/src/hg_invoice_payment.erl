@@ -343,6 +343,11 @@ get_tags(#st{sessions = Sessions, refunds = Refunds}) ->
 get_opts(#st{opts = Opts}) ->
     Opts.
 
+-spec get_chargeback_opts(st()) -> hg_invoice_payment_chargeback:opts().
+
+get_chargeback_opts(#st{opts = Opts, payment = Payment, route = Route}) ->
+    maps:merge(Opts, #{payment => Payment, route => Route}).
+
 %%
 
 -type event()  :: dmsl_payment_processing_thrift:'InvoicePaymentChangePayload'().
@@ -1589,8 +1594,10 @@ process_timeout({payment, Step}, Action, St) when
     Step =:= finalizing_accounter
 ->
     process_result(Action, St);
-process_timeout({chargeback, _ID, _Type} = Activity, Action, St) ->
-    hg_invoice_payment_chargeback:process_timeout(Activity, Action, St, get_opts(St));
+process_timeout({chargeback, ID, Type}, Action, St) ->
+    ChargebackState = get_chargeback_state(ID, St),
+    ChargebackOpts = get_chargeback_opts(St),
+    hg_invoice_payment_chargeback:process_timeout(Type, ChargebackState, Action, ChargebackOpts);
 process_timeout({payment, updating_accounter}, Action, St) ->
     process_accounter_update(Action, St);
 process_timeout({refund_new, ID}, Action, St) ->
