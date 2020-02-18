@@ -58,7 +58,7 @@ choose_provider_account(Currency, Accounts) ->
     end.
 
 -spec choose_external_account(currency(), varset(), revision()) ->
-    external_account() | no_return().
+    external_account() | undefined.
 
 choose_external_account(Currency, VS, Revision) ->
     Globals = hg_domain:get(Revision, {globals, #domain_GlobalsRef{}}),
