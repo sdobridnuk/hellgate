@@ -324,15 +324,12 @@ do_update_cash_flow(State, Opts) ->
     Status = get_target_status(State),
     Stage = get_stage(State),
     case {Stage, Status} of
+      % TODO: perhaps split body and levy into operation_amount and surplus
+      %       respectively and revert operation amount on reject?
+      %       see build_cash_flow_context
         % {?chargeback_stage_chargeback(), ?chargeback_status_rejected()} ->
         %     ct:print("CF\n~p", [CashFlow]),
         %     error(a);
-            % CashFlowPlan = {1, FinalCashFlow},
-            % _            = prepare_cash_flow(State, CashFlowPlan, PaymentState),
-            % CFEvent      = ?chargeback_cash_flow_changed(FinalCashFlow),
-            % CBEvent      = ?chargeback_ev(get_id(State), CFEvent),
-            % Action       = hg_machine_action:instant(),
-            % {done, {[CBEvent], Action}};
         {?chargeback_stage_chargeback(), _} ->
             FinalCashFlow = build_chargeback_cash_flow(State, Opts),
             CashFlowPlan  = {1, FinalCashFlow},
@@ -545,10 +542,10 @@ collect_account_map(
 
 build_cash_flow_context(State = #chargeback_st{target_status = ?chargeback_status_rejected()}) ->
     #{operation_amount => get_levy(State)};
-    % #{surplus => get_levy(State)};
 build_cash_flow_context(State) ->
     Cost = hg_cash:add(get_levy(State), get_body(State)),
     #{operation_amount => Cost}.
+    % TODO: maybe split into operation amount and surplus
     % #{operation_amount => get_body(State), surplus => get_levy(State)}.
 
 validate_chargeback(Terms, Payment, VS, Revision) ->
