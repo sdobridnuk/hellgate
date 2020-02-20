@@ -1,3 +1,5 @@
+% FIXME: rework reopen handling
+
 -module(hg_invoice_payment_chargeback).
 
 -include("domain.hrl").
@@ -32,9 +34,10 @@
     ]).
 
 -record( chargeback_st
-       , { chargeback    :: undefined | chargeback()
-         , cash_flow     :: undefined | cash_flow()
-         , target_status :: undefined | status()
+       , { chargeback     :: undefined | chargeback()
+         , target_status  :: undefined | status()
+         % FIXME: naming
+         , cash_flow = [] :: [batch()]
          }
        ).
 
@@ -71,6 +74,8 @@
     :: dmsl_domain_thrift:'Cash'().
 -type cash_flow()
     :: dmsl_domain_thrift:'FinalCashFlow'().
+-type batch()
+    :: hg_accounting:batch().
 
 -type create_params()
     :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackParams'().
@@ -133,13 +138,13 @@ is_pending(#domain_InvoicePaymentChargeback{status = _NotPending}) ->
 
 %%----------------------------------------------------------------------------
 %% @doc
-%% `create/2` creates a chargeback. A chargeback will not be created if
-%% another one is already pending, and it will block `refunds` from being
+%% create/2 creates a chargeback. A chargeback will not be created if
+%% another one is already pending, and it will block refunds from being
 %% created as well.
 %%
 %% Key parameters:
-%%    `levy`: the amount of cash to be levied from the merchant.
-%%    `body`: The sum of the chargeback.
+%%    levy: the amount of cash to be levied from the merchant.
+%%    body: The sum of the chargeback.
 %%            Will default to full amount if undefined.
 %% @end
 %%----------------------------------------------------------------------------
@@ -150,7 +155,7 @@ create(Opts, CreateParams) ->
 
 %%----------------------------------------------------------------------------
 %% @doc
-%% `cancel/2` will cancel the chargeback with the given ID. All funds
+%% cancel/2 will cancel the given chargeback. All funds
 %% will be trasferred back to the merchant as a result of this operation.
 %% @end
 %%----------------------------------------------------------------------------
@@ -161,11 +166,11 @@ cancel(State, Opts) ->
 
 %%----------------------------------------------------------------------------
 %% @doc
-%% `reject/3` will reject the chargeback with the given ID, implying that no
+%% reject/3 will reject the given chargeback, implying that no
 %% sufficient evidence has been found to support the chargeback claim.
 %%
 %% Key parameters:
-%%    `levy`: the amount of cash to be levied from the merchant.
+%%    levy: the amount of cash to be levied from the merchant.
 %% @end
 %%----------------------------------------------------------------------------
 -spec reject(state(), opts(), reject_params()) ->
@@ -175,15 +180,15 @@ reject(State, Opts, RejectParams) ->
 
 %%----------------------------------------------------------------------------
 %% @doc
-%% `accept/3` will accept the chargeback with the given ID, implying that
+%% accept/3 will accept the given chargeback, implying that
 %% sufficient evidence has been found to support the chargeback claim. The
 %% cost of the chargeback will be deducted from the merchant's account.
 %%
 %% Key parameters:
-%%    `levy`: the amount of cash to be levied from the merchant.
-%%            Will not change if undefined.
-%%    `body`: The sum of the chargeback.
-%%            Will not change if undefined.
+%%    levy: the amount of cash to be levied from the merchant.
+%%          Will not change if undefined.
+%%    body: The sum of the chargeback.
+%%          Will not change if undefined.
 %% @end
 %%----------------------------------------------------------------------------
 -spec accept(state(), opts(), accept_params()) ->
@@ -193,14 +198,14 @@ accept(State, Opts, AcceptParams) ->
 
 %%----------------------------------------------------------------------------
 %% @doc
-%% `reopen/3` will reopen the chargeback with the given ID, implying that
+%% reopen/3 will reopen the given chargeback, implying that
 %% the party that initiated the chargeback was not satisfied with the result
 %% and demands a new investigation. The chargeback progresses to its next
 %% stage as a result of this action.
 %%
 %% Key parameters:
-%%    `levy`: the amount of cash to be levied from the merchant.
-%%    `body`: The sum of the chargeback. Will not change if undefined.
+%%    levy: the amount of cash to be levied from the merchant.
+%%    body: The sum of the chargeback. Will not change if undefined.
 %% @end
 %%----------------------------------------------------------------------------
 -spec reopen(state(), opts(), reopen_params()) ->
@@ -229,8 +234,6 @@ merge_change(?chargeback_cash_flow_changed(CashFlow), State) ->
     machine_result().
 process_timeout(new, State, Action, Opts) ->
     create_cash_flow(State, Action, Opts);
-process_timeout(updating, State, Action, Opts) ->
-    update_cash_flow(State, Action, Opts);
 process_timeout(accounter, State, Action, Opts) ->
     update_cash_flow(State, Action, Opts);
 process_timeout(accounter_finalise, State, Action, Opts) ->
@@ -300,7 +303,7 @@ finalise(State, Action, Opts) ->
     machine_result() | no_return().
 do_create_cash_flow(State, Opts) ->
     FinalCashFlow = build_chargeback_cash_flow(State, Opts),
-    CashFlowPlan  = {1, FinalCashFlow},
+    CashFlowPlan  = add_batch(FinalCashFlow, get_batches(State)),
     _             = prepare_cash_flow(State, CashFlowPlan, Opts),
     CFEvent       = ?chargeback_cash_flow_changed(FinalCashFlow),
     CBEvent       = ?chargeback_ev(get_id(State), CFEvent),
@@ -310,45 +313,16 @@ do_create_cash_flow(State, Opts) ->
 -spec do_update_cash_flow(state(), opts()) ->
     machine_result() | no_return().
 do_update_cash_flow(State, Opts) ->
-    CashFlow = get_cash_flow(State),
-    Status = get_target_status(State),
-    Stage = get_stage(State),
-    case {Stage, Status} of
-      % TODO: perhaps split body and levy into operation_amount and surplus
-      %       respectively and revert operation amount on reject?
-      %       see build_cash_flow_context
-        % {?chargeback_stage_chargeback(), ?chargeback_status_rejected()} ->
-        %     ct:print("CF\n~p", [CashFlow]),
-        %     error(a);
-        {?chargeback_stage_chargeback(), _} ->
-            FinalCashFlow = build_chargeback_cash_flow(State, Opts),
-            CashFlowPlan  = {1, FinalCashFlow},
-            _             = prepare_cash_flow(State, CashFlowPlan, Opts),
-            CFEvent       = ?chargeback_cash_flow_changed(FinalCashFlow),
-            CBEvent       = ?chargeback_ev(get_id(State), CFEvent),
-            Action        = hg_machine_action:instant(),
-            {done, {[CBEvent], Action}};
-        {?chargeback_stage_pre_arbitration(), ?chargeback_status_pending()} ->
-            FinalCashFlow = build_chargeback_cash_flow(State, Opts),
-            RevertedCF    = hg_cashflow:revert([lists:last(CashFlow)]),
-            NewCF         = lists:droplast(CashFlow) ++ RevertedCF ++ FinalCashFlow,
-            CashFlowPlan  = {1, NewCF},
-            _             = prepare_cash_flow(State, CashFlowPlan, Opts),
-            CFEvent       = ?chargeback_cash_flow_changed(NewCF),
-            CBEvent       = ?chargeback_ev(get_id(State), CFEvent),
-            Action        = hg_machine_action:instant(),
-            {done, {[CBEvent], Action}};
-        _ ->
-            FinalCashFlow = build_chargeback_cash_flow(State, Opts),
-            RevertedCF    = hg_cashflow:revert([lists:last(CashFlow)]),
-            NewCF         = CashFlow ++ RevertedCF ++ FinalCashFlow,
-            CashFlowPlan  = {1, NewCF},
-            _             = prepare_cash_flow(State, CashFlowPlan, Opts),
-            CFEvent       = ?chargeback_cash_flow_changed(NewCF),
-            CBEvent       = ?chargeback_ev(get_id(State), CFEvent),
-            Action        = hg_machine_action:instant(),
-            {done, {[CBEvent], Action}}
-    end.
+    FinalCashFlow = build_chargeback_cash_flow(State, Opts),
+    {_, CashFlow} = get_latest_batch(State),
+    RevertedCF    = hg_cashflow:revert(CashFlow),
+    RevertedPlan  = add_batch(RevertedCF, get_batches(State)),
+    CashFlowPlan  = add_batch(FinalCashFlow, RevertedPlan),
+    _             = prepare_cash_flow(State, CashFlowPlan, Opts),
+    CFEvent       = ?chargeback_cash_flow_changed(FinalCashFlow),
+    CBEvent       = ?chargeback_ev(get_id(State), CFEvent),
+    Action        = hg_machine_action:instant(),
+    {done, {[CBEvent], Action}}.
 
 -spec do_finalise(state(), action(), opts()) ->
     machine_result() | no_return().
@@ -405,10 +379,9 @@ build_cancel_result(State, Opts) ->
 
 -spec build_reject_result(state(), opts(), reject_params()) ->
     result() | no_return().
-build_reject_result(State, Opts, ?reject_params(ParamsLevy)) ->
+build_reject_result(State, _Opts, ?reject_params(ParamsLevy)) ->
     Levy         = get_levy(State),
     FinalLevy    = define_params_cash(ParamsLevy, Levy),
-    _            = rollback_cash_flow(State, Opts),
     Action       = hg_machine_action:instant(),
     Status       = ?chargeback_status_rejected(),
     LevyChange   = levy_change(FinalLevy, Levy),
@@ -437,7 +410,6 @@ build_accept_result(State, Opts, ?accept_params(ParamsLevy, ParamsBody)) ->
             FinalBody     = define_params_cash(ParamsBody, Body),
             FinalLevy     = define_params_cash(ParamsLevy, Levy),
             _             = validate_body_amount(FinalBody, Opts),
-            _             = rollback_cash_flow(State, Opts),
             Action        = hg_machine_action:instant(),
             Status        = ?chargeback_status_accepted(),
             BodyChange    = body_change(FinalBody, Body),
@@ -581,32 +553,28 @@ define_params_cash(?cash(_, SymCode), _CurrentBody) ->
 
 prepare_cash_flow(State, CashFlowPlan, Opts) ->
     PlanID = construct_chargeback_plan_id(State, Opts),
-    hg_accounting:plan(PlanID, [CashFlowPlan]).
+    ct:print("PREPAREPLAN\n~p\nBATCHES\n~p\n", [PlanID, CashFlowPlan]),
+    hg_accounting:plan(PlanID, CashFlowPlan).
 
 commit_cash_flow(State, Opts) ->
-    CashFlowPlan = get_cash_flow_plan(State),
+    CashFlowPlan = get_batches(State),
     PlanID       = construct_chargeback_plan_id(State, Opts),
-    hg_accounting:commit(PlanID, [CashFlowPlan]).
+    ct:print("COMMITPLAN\n~p\nBATCHES\n~p\n", [PlanID, CashFlowPlan]),
+    hg_accounting:commit(PlanID, CashFlowPlan).
 
 rollback_cash_flow(State, Opts) ->
-    CashFlowPlan = get_cash_flow_plan(State),
+    CashFlowPlan = get_batches(State),
     PlanID       = construct_chargeback_plan_id(State, Opts),
-    hg_accounting:rollback(PlanID, [CashFlowPlan]).
+    ct:print("ROLLBACKPLAN\n~p\nBATCHES\n~p\n", [PlanID, CashFlowPlan]),
+    hg_accounting:rollback(PlanID, CashFlowPlan).
 
 construct_chargeback_plan_id(State, Opts) ->
-    {Stage, _}   = get_stage(State),
-    TargetStatus = get_target_status(State),
-    Status       = case {TargetStatus, Stage} of
-        {{StatusType, _}, Stage} -> StatusType;
-        {undefined, chargeback}  -> initial;
-        {undefined, Stage}       -> pending
-    end,
+    {Stage, _} = get_stage(State),
     hg_utils:construct_complex_id([
         get_opts_invoice_id(Opts),
         get_opts_payment_id(Opts),
         {chargeback, get_id(State)},
-        genlib:to_binary(Stage),
-        genlib:to_binary(Status)
+        genlib:to_binary(Stage)
     ]).
 
 maybe_set_charged_back_status(State, Opts) ->
@@ -725,20 +693,27 @@ get_id(#chargeback_st{chargeback = Chargeback}) ->
 get_id(#domain_InvoicePaymentChargeback{id = ID}) ->
     ID.
 
--spec get_target_status(state()) ->
-    status() | undefined.
-get_target_status(#chargeback_st{target_status = TargetStatus}) ->
-    TargetStatus.
+% -spec get_target_status(state()) ->
+%     status() | undefined.
+% get_target_status(#chargeback_st{target_status = TargetStatus}) ->
+%     TargetStatus.
 
--spec get_cash_flow_plan(state()) ->
-    hg_accounting:batch().
-get_cash_flow_plan(#chargeback_st{cash_flow = CashFlow}) ->
-    {1, CashFlow}.
+-spec get_latest_batch(state()) ->
+    batch().
+get_latest_batch(#chargeback_st{cash_flow = Batches}) ->
+    lists:last(Batches).
+% get_latest_batch(#chargeback_st{cash_flow = []}) ->
+%     [].
 
--spec get_cash_flow(state()) ->
-    cash_flow().
-get_cash_flow(#chargeback_st{cash_flow = CashFlow}) ->
-    CashFlow.
+% -spec get_latest_cash_flow(state()) ->
+%     cash_flow().
+% get_latest_cash_flow(#chargeback_st{cash_flow = [{_ID, CashFlow}]}) ->
+%     CashFlow.
+
+-spec get_batches(state()) ->
+    [batch()].
+get_batches(#chargeback_st{cash_flow = Batches}) ->
+    Batches.
 
 -spec get_revision(state() | chargeback()) ->
     hg_domain:revision().
@@ -781,8 +756,14 @@ set(Chargeback, State = #chargeback_st{}) ->
 
 -spec set_cash_flow(cash_flow(), state()) ->
     state().
-set_cash_flow(CashFlow, State = #chargeback_st{}) ->
-    State#chargeback_st{cash_flow = CashFlow}.
+set_cash_flow(CashFlow, State = #chargeback_st{cash_flow = []}) ->
+    State#chargeback_st{cash_flow = add_batch(CashFlow, [])};
+set_cash_flow(NewCashFlow, State = #chargeback_st{cash_flow = Batches}) ->
+    {_, CashFlow} = get_latest_batch(State),
+    RevertedCF    = hg_cashflow:revert(CashFlow),
+    RevertedPlan  = add_batch(RevertedCF, Batches),
+    CashFlowPlan  = add_batch(NewCashFlow, RevertedPlan),
+    State#chargeback_st{cash_flow = CashFlowPlan}.
 
 -spec set_target_status(status() | undefined, state()) ->
     state().
@@ -904,3 +885,11 @@ body_change(FinalBody, _Body) -> [?chargeback_body_changed(FinalBody)].
 
 levy_change(Levy, Levy) -> [];
 levy_change(FinalLevy, _Levy) -> [?chargeback_levy_changed(FinalLevy)].
+
+%%
+
+add_batch(FinalCashFlow, []) ->
+    [{1, FinalCashFlow}];
+add_batch(FinalCashFlow, Batches) ->
+    {ID, _CF} = lists:last(Batches),
+    Batches ++ [{ID + 1, FinalCashFlow}].

@@ -279,6 +279,7 @@ groups() ->
             reopen_accepted_payment_chargeback_fails,
             reopen_payment_chargeback_inconsistent,
             reopen_payment_chargeback_exceeded,
+            % FIXME: rework reopen handling
             reopen_payment_chargeback_reject,
             reopen_payment_chargeback_accept,
             reopen_payment_chargeback_accept_new_levy,
