@@ -210,13 +210,31 @@ reopen(State, Opts, ReopenParams) ->
 
 -spec merge_change(change(), state()) ->
     state().
-merge_change(Change, State) ->
-    do_merge_change(Change, State).
+merge_change(?chargeback_created(Chargeback), State) ->
+    set(Chargeback, State);
+merge_change(?chargeback_levy_changed(Levy), State) ->
+    set_levy(Levy, State);
+merge_change(?chargeback_body_changed(Body), State) ->
+    set_body(Body, State);
+merge_change(?chargeback_stage_changed(Stage), State) ->
+    set_stage(Stage, State);
+merge_change(?chargeback_target_status_changed(Status), State) ->
+    set_target_status(Status, State);
+merge_change(?chargeback_status_changed(Status), State) ->
+    set_target_status(undefined, set_status(Status, State));
+merge_change(?chargeback_cash_flow_changed(CashFlow), State) ->
+    set_cash_flow(CashFlow, State).
 
 -spec process_timeout(activity(), state(), action(), opts()) ->
     machine_result().
-process_timeout(Activity, State, Action, Opts) ->
-    do_process_timeout(Activity, State, Action, Opts).
+process_timeout(new, State, Action, Opts) ->
+    create_cash_flow(State, Action, Opts);
+process_timeout(updating, State, Action, Opts) ->
+    update_cash_flow(State, Action, Opts);
+process_timeout(accounter, State, Action, Opts) ->
+    update_cash_flow(State, Action, Opts);
+process_timeout(accounter_finalise, State, Action, Opts) ->
+    finalise(State, Action, Opts).
 
 %% Private
 
@@ -262,34 +280,6 @@ do_reopen(State, Opts, ReopenParams) ->
     _      = validate_not_arbitration(State),
     Result = build_reopen_result(State, Opts, ReopenParams),
     {ok, Result}.
-
--spec do_merge_change(change(), state()) ->
-    state().
-do_merge_change(?chargeback_created(Chargeback), State) ->
-    set(Chargeback, State);
-do_merge_change(?chargeback_levy_changed(Levy), State) ->
-    set_levy(Levy, State);
-do_merge_change(?chargeback_body_changed(Body), State) ->
-    set_body(Body, State);
-do_merge_change(?chargeback_stage_changed(Stage), State) ->
-    set_stage(Stage, State);
-do_merge_change(?chargeback_target_status_changed(Status), State) ->
-    set_target_status(Status, State);
-do_merge_change(?chargeback_status_changed(Status), State) ->
-    set_target_status(undefined, set_status(Status, State));
-do_merge_change(?chargeback_cash_flow_changed(CashFlow), State) ->
-    set_cash_flow(CashFlow, State).
-
--spec do_process_timeout(activity(), state(), action(), opts()) ->
-    machine_result().
-do_process_timeout(new, State, Action, Opts) ->
-    create_cash_flow(State, Action, Opts);
-do_process_timeout(updating, State, Action, Opts) ->
-    update_cash_flow(State, Action, Opts);
-do_process_timeout(accounter, State, Action, Opts) ->
-    update_cash_flow(State, Action, Opts);
-do_process_timeout(accounter_finalise, State, Action, Opts) ->
-    finalise(State, Action, Opts).
 
 -spec create_cash_flow(state(), action(), opts()) ->
     machine_result() | no_return().
