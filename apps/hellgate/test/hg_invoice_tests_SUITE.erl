@@ -83,6 +83,7 @@
 -export([create_chargeback_exceeded/1]).
 -export([create_chargeback_idempotency/1]).
 -export([cancel_payment_chargeback/1]).
+-export([cancel_partial_payment_chargeback/1]).
 -export([cancel_payment_chargeback_refund/1]).
 -export([reject_payment_chargeback_inconsistent/1]).
 -export([reject_payment_chargeback/1]).
@@ -267,6 +268,7 @@ groups() ->
             create_chargeback_exceeded,
             create_chargeback_idempotency,
             cancel_payment_chargeback,
+            cancel_partial_payment_chargeback,
             cancel_payment_chargeback_refund,
             reject_payment_chargeback_inconsistent,
             reject_payment_chargeback,
@@ -1914,6 +1916,35 @@ cancel_payment_chargeback(C) ->
     ?assertEqual(Cost - Fee,                      maps:get(min_available_amount, Settlement1)),
     ?assertEqual(Cost - Fee,                      maps:get(max_available_amount, Settlement1)).
 
+-spec cancel_partial_payment_chargeback(config()) -> _ | no_return().
+
+cancel_partial_payment_chargeback(C) ->
+    Client     = cfg(client, C),
+    Cost       = 42000,
+    Fee        = 450,
+    LevyAmount = 4000,
+    Partial    = 10000,
+    Levy       = ?cash(LevyAmount, <<"RUB">>),
+    CBParams   = make_chargeback_params(Levy),
+    {IID, PID, SID, CB} = start_chargeback(partial, C, Cost, Partial, CBParams),
+    CBID = CB#domain_InvoicePaymentChargeback.id,
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
+    ] = next_event(IID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+    ] = next_event(IID, Client),
+    Settlement0 = hg_ct_helper:get_balance(SID),
+    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
+    ] = next_event(IID, Client),
+    Settlement1 = hg_ct_helper:get_balance(SID),
+    ?assertEqual(Partial - Fee - Partial - LevyAmount,  maps:get(min_available_amount, Settlement0)),
+    ?assertEqual(Partial - Fee,                         maps:get(max_available_amount, Settlement0)),
+    ?assertEqual(Partial - Fee,                         maps:get(min_available_amount, Settlement1)),
+    ?assertEqual(Partial - Fee,                         maps:get(max_available_amount, Settlement1)).
+
 -spec cancel_payment_chargeback_refund(config()) -> _ | no_return().
 
 cancel_payment_chargeback_refund(C) ->
@@ -2696,6 +2727,35 @@ start_chargeback(C, Cost, CBParams) ->
     PaymentID    = await_payment_capture(InvoiceID, PaymentID, Client),
     Settlement1  = hg_ct_helper:get_balance(SettlementID),
     ?assertEqual(Cost - Fee, maps:get(min_available_amount, Settlement1)),
+    Chargeback   = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
+    {InvoiceID, PaymentID, SettlementID, Chargeback}.
+
+start_chargeback(partial, C, Cost, Partial, CBParams) ->
+    Client       = cfg(client, C),
+    Cash         = ?cash(Partial, <<"RUB">>),
+    PartyClient  = cfg(party_client, C),
+    ShopID       = hg_ct_helper:create_battle_ready_shop(?cat(2), <<"RUB">>, ?tmpl(2), ?pinst(2), PartyClient),
+    Party        = hg_client_party:get(PartyClient),
+    Shop         = maps:get(ShopID, Party#domain_Party.shops),
+    Account      = Shop#domain_Shop.account,
+    SettlementID = Account#domain_ShopAccount.settlement,
+    Settlement0  = hg_ct_helper:get_balance(SettlementID),
+    Fee          = 450, % 0.045
+    ?assertEqual(0, maps:get(min_available_amount, Settlement0)),
+    InvoiceID    = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), Cost, C),
+    PaymentID    = process_payment(InvoiceID, make_payment_params({hold, cancel}), Client),
+    Reason = <<"ok">>,
+    ok = hg_client_invoicing:capture_payment(InvoiceID, PaymentID, Reason, Cash, Client),
+    [
+       ?payment_ev(PaymentID, ?payment_capture_started(Reason, Cash, _)),
+       ?payment_ev(PaymentID, ?cash_flow_changed(_))
+    ] = next_event(InvoiceID, Client),
+    [
+        ?payment_ev(PaymentID, ?session_ev(?captured(Reason, Cash), ?session_started()))
+    ] = next_event(InvoiceID, Client),
+    PaymentID = await_payment_capture_finish(InvoiceID, PaymentID, Reason, Client, 0, Cash),
+    Settlement1  = hg_ct_helper:get_balance(SettlementID),
+    ?assertEqual(Partial - Fee, maps:get(min_available_amount, Settlement1)),
     Chargeback   = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     {InvoiceID, PaymentID, SettlementID, Chargeback}.
 
