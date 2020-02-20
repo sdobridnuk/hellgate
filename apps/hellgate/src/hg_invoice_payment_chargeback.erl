@@ -453,7 +453,13 @@ build_chargeback_cash_flow(State, Opts) ->
     Shop            = hg_party:get_shop(ShopID, Party),
     ContractID      = get_shop_contract_id(Shop),
     Contract        = hg_party:get_contract(ContractID, Party),
+<<<<<<< HEAD
     VS              = collect_validation_varset(Party, Shop, Payment, State),
+=======
+    TermSet         = hg_party:get_terms(Contract, CreatedAt, Revision),
+    ServiceTerms    = get_merchant_chargeback_terms(TermSet),
+    VS0             = collect_validation_varset(Party, Shop, Payment, State),
+>>>>>>> da690ebe0cbc0de56f53874a7101c04a8c0ea8cc
     PaymentsTerms   = hg_routing:get_payments_terms(Route, Revision),
     ProviderTerms   = get_provider_chargeback_terms(PaymentsTerms, Payment),
     CashFlow        = collect_chargeback_cash_flow(ProviderTerms, VS, Revision),
