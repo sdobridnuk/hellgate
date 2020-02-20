@@ -407,7 +407,7 @@ build_cancel_result(State, Opts) ->
     result() | no_return().
 build_reject_result(State, Opts, ?reject_params(ParamsLevy)) ->
     Levy         = get_levy(State),
-    FinalLevy    = define_params_levy(ParamsLevy, Levy),
+    FinalLevy    = define_params_cash(ParamsLevy, Levy),
     _            = rollback_cash_flow(State, Opts),
     Action       = hg_machine_action:instant(),
     Status       = ?chargeback_status_rejected(),
@@ -434,8 +434,8 @@ build_accept_result(State, Opts, ?accept_params(ParamsLevy, ParamsBody)) ->
             Events    = [?chargeback_ev(ID, Change)] ++ maybe_set_charged_back_status(State, Opts),
             {Events, Action};
         {ParamsBody, ParamsLevy} ->
-            FinalBody     = define_params_body(ParamsBody, Body),
-            FinalLevy     = define_params_levy(ParamsLevy, Levy),
+            FinalBody     = define_params_cash(ParamsBody, Body),
+            FinalLevy     = define_params_cash(ParamsLevy, Levy),
             _             = validate_body_amount(FinalBody, Opts),
             _             = rollback_cash_flow(State, Opts),
             Action        = hg_machine_action:instant(),
@@ -454,9 +454,9 @@ build_reopen_result(State, Opts, ?reopen_params(ParamsLevy, ParamsBody)) ->
     _            = assert_no_pending_chargebacks(Opts),
     Body         = get_body(State),
     Levy         = get_levy(State),
-    FinalBody    = define_params_body(ParamsBody, Body),
+    FinalBody    = define_params_cash(ParamsBody, Body),
     _            = validate_body_amount(FinalBody, Opts),
-    FinalLevy    = define_params_levy(ParamsLevy, Levy),
+    FinalLevy    = define_params_cash(ParamsLevy, Levy),
     ID           = get_id(State),
     Stage        = get_next_stage(State),
     Action       = hg_machine_action:instant(),
@@ -573,18 +573,11 @@ define_body(?cash(_, SymCode) = Cash, #domain_InvoicePayment{cost = ?cash(_, Sym
 define_body(?cash(_, SymCode), _Payment) ->
     throw(#payproc_InconsistentChargebackCurrency{currency = SymCode}).
 
-define_params_body(undefined, CurrentBody) ->
+define_params_cash(undefined, CurrentBody) ->
     CurrentBody;
-define_params_body(?cash(_, SymCode) = Body, ?cash(_, SymCode) = _CurrentBody) ->
+define_params_cash(?cash(_, SymCode) = Body, ?cash(_, SymCode) = _CurrentBody) ->
     Body;
-define_params_body(?cash(_, SymCode), _CurrentBody) ->
-    throw(#payproc_InconsistentChargebackCurrency{currency = SymCode}).
-
-define_params_levy(undefined, CurrentLevy) ->
-    CurrentLevy;
-define_params_levy(?cash(_, SymCode) = Levy, ?cash(_, SymCode) = _CurrentLevy) ->
-    Levy;
-define_params_levy(?cash(_, SymCode), _CurrentLevy) ->
+define_params_cash(?cash(_, SymCode), _CurrentBody) ->
     throw(#payproc_InconsistentChargebackCurrency{currency = SymCode}).
 
 prepare_cash_flow(State, CashFlowPlan, Opts) ->
