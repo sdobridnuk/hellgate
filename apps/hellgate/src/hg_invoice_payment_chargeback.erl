@@ -450,20 +450,16 @@ build_chargeback_cash_flow(State, Opts) ->
     Route           = get_opts_route(Opts),
     Party           = get_opts_party(Opts),
     ShopID          = get_invoice_shop_id(Invoice),
-    CreatedAt       = get_invoice_created_at(Invoice),
     Shop            = hg_party:get_shop(ShopID, Party),
     ContractID      = get_shop_contract_id(Shop),
     Contract        = hg_party:get_contract(ContractID, Party),
-    TermSet         = hg_party:get_terms(Contract, CreatedAt, Revision),
-    ServiceTerms    = get_merchant_chargeback_terms(TermSet),
-    VS0             = collect_validation_varset(Party, Shop, Payment, State),
+    VS              = collect_validation_varset(Party, Shop, Payment, State),
     PaymentsTerms   = hg_routing:get_payments_terms(Route, Revision),
     ProviderTerms   = get_provider_chargeback_terms(PaymentsTerms, Payment),
-    VS1             = validate_chargeback(ServiceTerms, Payment, VS0, Revision),
-    CashFlow        = collect_chargeback_cash_flow(ProviderTerms, VS1, Revision),
+    CashFlow        = collect_chargeback_cash_flow(ProviderTerms, VS, Revision),
     PmntInstitution = get_payment_institution(Contract, Revision),
     Provider        = get_route_provider(Route, Revision),
-    AccountMap      = collect_account_map(Payment, Shop, PmntInstitution, Provider, VS1, Revision),
+    AccountMap      = collect_account_map(Payment, Shop, PmntInstitution, Provider, VS, Revision),
     Context         = build_cash_flow_context(State),
     hg_cashflow:finalize(CashFlow, Context, AccountMap).
 
@@ -509,14 +505,6 @@ build_cash_flow_context(State) ->
     % TODO: maybe split into operation amount and surplus
     % #{operation_amount => get_body(State), surplus => get_levy(State)}.
 
-validate_chargeback(Terms, Payment, VS, Revision) ->
-    PaymentTool           = get_payment_tool(Payment),
-    PaymentMethodSelector = get_chargeback_payment_method_selector(Terms),
-    PMs                   = reduce_selector(payment_methods, PaymentMethodSelector, VS, Revision),
-    _                     = ordsets:is_element(hg_payment_tool:get_method(PaymentTool), PMs) orelse
-                            throw(#'InvalidRequest'{errors = [<<"Invalid payment method">>]}),
-    VS#{payment_tool => PaymentTool}.
-
 reduce_selector(Name, Selector, VS, Revision) ->
     case hg_selector:reduce(Selector, VS, Revision) of
         {value, V} ->
@@ -529,13 +517,6 @@ get_provider_chargeback_terms(#domain_PaymentsProvisionTerms{chargebacks = undef
     error({misconfiguration, {'No chargeback terms for a payment', Payment}});
 get_provider_chargeback_terms(#domain_PaymentsProvisionTerms{chargebacks = Terms}, _Payment) ->
     Terms.
-
-get_merchant_chargeback_terms(#domain_TermSet{payments = PaymentsTerms}) ->
-    get_merchant_chargeback_terms(PaymentsTerms);
-get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{chargebacks = Terms}) when Terms /= undefined ->
-    Terms;
-get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{chargebacks = undefined}) ->
-    throw(#payproc_OperationNotPermitted{}).
 
 define_body(undefined, #domain_InvoicePayment{cost = Cost}) ->
     Cost;
@@ -553,19 +534,16 @@ define_params_cash(?cash(_, SymCode), _CurrentBody) ->
 
 prepare_cash_flow(State, CashFlowPlan, Opts) ->
     PlanID = construct_chargeback_plan_id(State, Opts),
-    ct:print("PREPAREPLAN\n~p\nBATCHES\n~p\n", [PlanID, CashFlowPlan]),
     hg_accounting:plan(PlanID, CashFlowPlan).
 
 commit_cash_flow(State, Opts) ->
     CashFlowPlan = get_batches(State),
     PlanID       = construct_chargeback_plan_id(State, Opts),
-    ct:print("COMMITPLAN\n~p\nBATCHES\n~p\n", [PlanID, CashFlowPlan]),
     hg_accounting:commit(PlanID, CashFlowPlan).
 
 rollback_cash_flow(State, Opts) ->
     CashFlowPlan = get_batches(State),
     PlanID       = construct_chargeback_plan_id(State, Opts),
-    ct:print("ROLLBACKPLAN\n~p\nBATCHES\n~p\n", [PlanID, CashFlowPlan]),
     hg_accounting:rollback(PlanID, CashFlowPlan).
 
 construct_chargeback_plan_id(State, Opts) ->
@@ -846,11 +824,6 @@ get_opts_payment_id(Opts) ->
 
 %%
 
-get_chargeback_payment_method_selector(#domain_PaymentChargebackServiceTerms{payment_methods = Selector}) ->
-    Selector.
-
-%%
-
 get_payment_cost(#domain_InvoicePayment{cost = Cost}) ->
     Cost.
 
@@ -871,9 +844,6 @@ get_resource_payment_tool(#domain_DisposablePaymentResource{payment_tool = Payme
 
 get_invoice_shop_id(#domain_Invoice{shop_id = ShopID}) ->
     ShopID.
-
-get_invoice_created_at(#domain_Invoice{created_at = Dt}) ->
-    Dt.
 
 %%
 
