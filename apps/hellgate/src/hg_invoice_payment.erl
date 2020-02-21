@@ -1580,12 +1580,10 @@ process_timeout({payment, Step}, Action, St) when
     Step =:= finalizing_accounter
 ->
     process_result(Action, St);
-process_timeout({chargeback, ID, Type}, Action, St) ->
-    ChargebackState = get_chargeback_state(ID, St),
-    ChargebackOpts = get_chargeback_opts(St),
-    hg_invoice_payment_chargeback:process_timeout(Type, ChargebackState, Action, ChargebackOpts);
 process_timeout({payment, updating_accounter}, Action, St) ->
     process_accounter_update(Action, St);
+process_timeout({chargeback, ID, Type}, Action, St) ->
+    process_chargeback(Type, ID, Action, St);
 process_timeout({refund_new, ID}, Action, St) ->
     process_refund_cashflow(ID, Action, St);
 process_timeout({refund_session, _ID}, Action, St) ->
@@ -1667,6 +1665,15 @@ process_cash_flow_building(Route, VS, Payment, PaymentInstitution, Revision, Opt
     ),
     Events1 = Events0 ++ [?route_changed(Route), ?cash_flow_changed(FinalCashflow)],
     {next, {Events1, hg_machine_action:set_timeout(0, Action)}}.
+
+%%
+
+-spec process_chargeback(chargeback_activity_type(), chargeback_id(), action(), st()) -> machine_result().
+process_chargeback(Type, ID, Action0, St) ->
+    ChargebackState = get_chargeback_state(ID, St),
+    ChargebackOpts = get_chargeback_opts(St),
+    {Events, Action1} = hg_invoice_payment_chargeback:process_timeout(Type, ChargebackState, Action0, ChargebackOpts),
+    {done, {hg_invoice_payment_chargeback:wrap_chargeback_events(ID, Events), Action1}}.
 
 %%
 
