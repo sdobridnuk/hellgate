@@ -84,6 +84,7 @@
 -export([create_chargeback_idempotency/1]).
 -export([cancel_payment_chargeback/1]).
 -export([cancel_partial_payment_chargeback/1]).
+-export([cancel_partial_payment_chargeback_exceeded/1]).
 -export([cancel_payment_chargeback_refund/1]).
 -export([reject_payment_chargeback_inconsistent/1]).
 -export([reject_payment_chargeback/1]).
@@ -269,6 +270,7 @@ groups() ->
             create_chargeback_idempotency,
             cancel_payment_chargeback,
             cancel_partial_payment_chargeback,
+            cancel_partial_payment_chargeback_exceeded,
             cancel_payment_chargeback_refund,
             reject_payment_chargeback_inconsistent,
             reject_payment_chargeback,
@@ -281,7 +283,6 @@ groups() ->
             reopen_accepted_payment_chargeback_fails,
             reopen_payment_chargeback_inconsistent,
             reopen_payment_chargeback_exceeded,
-            % FIXME: rework reopen handling
             reopen_payment_chargeback_reject,
             reopen_payment_chargeback_accept,
             reopen_payment_chargeback_accept_new_levy,
@@ -1926,7 +1927,7 @@ cancel_partial_payment_chargeback(C) ->
     Partial    = 10000,
     Levy       = ?cash(LevyAmount, <<"RUB">>),
     CBParams   = make_chargeback_params(Levy),
-    {IID, PID, SID, CB} = start_chargeback(partial, C, Cost, Partial, CBParams),
+    {IID, PID, SID, CB} = start_chargeback_partial_capture(C, Cost, Partial, CBParams),
     CBID = CB#domain_InvoicePaymentChargeback.id,
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_created(CB)))
@@ -1944,6 +1945,18 @@ cancel_partial_payment_chargeback(C) ->
     ?assertEqual(Partial - Fee,                         maps:get(max_available_amount, Settlement0)),
     ?assertEqual(Partial - Fee,                         maps:get(min_available_amount, Settlement1)),
     ?assertEqual(Partial - Fee,                         maps:get(max_available_amount, Settlement1)).
+
+-spec cancel_partial_payment_chargeback_exceeded(config()) -> _ | no_return().
+
+cancel_partial_payment_chargeback_exceeded(C) ->
+    Cost       = 42000,
+    LevyAmount = 4000,
+    Partial    = 10000,
+    Levy       = ?cash(LevyAmount, <<"RUB">>),
+    Body       = ?cash(Cost, <<"RUB">>),
+    CBParams   = make_chargeback_params(Levy, Body),
+    {_IID, _PID, _SID, CB} = start_chargeback_partial_capture(C, Cost, Partial, CBParams),
+    ?assertMatch(?invoice_payment_amount_exceeded(?cash(10000, <<"RUB">>)), CB).
 
 -spec cancel_payment_chargeback_refund(config()) -> _ | no_return().
 
@@ -2348,7 +2361,7 @@ reopen_payment_chargeback_reject(C) ->
     ReopenParams = make_chargeback_reopen_params(ReopenLevy),
     ok = hg_client_invoicing:reopen_chargeback(IID, PID, CBID, ReopenParams, Client),
     [
-        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_stage_changed(_))),
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_stage_changed(?chargeback_stage_pre_arbitration()))),
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_levy_changed(ReopenLevy))),
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_pending())))
     ] = next_event(IID, Client),
@@ -2361,7 +2374,7 @@ reopen_payment_chargeback_reject(C) ->
     Settlement2  = hg_ct_helper:get_balance(SID),
     ok = hg_client_invoicing:reject_chargeback(IID, PID, CBID, RejectParams, Client),
     [
-        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_levy_changed(_))),
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_levy_changed(Levy))),
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_rejected())))
     ] = next_event(IID, Client),
     [
@@ -2730,7 +2743,7 @@ start_chargeback(C, Cost, CBParams) ->
     Chargeback   = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     {InvoiceID, PaymentID, SettlementID, Chargeback}.
 
-start_chargeback(partial, C, Cost, Partial, CBParams) ->
+start_chargeback_partial_capture(C, Cost, Partial, CBParams) ->
     Client       = cfg(client, C),
     Cash         = ?cash(Partial, <<"RUB">>),
     PartyClient  = cfg(party_client, C),
