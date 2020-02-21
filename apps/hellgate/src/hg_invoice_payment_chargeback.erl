@@ -1,5 +1,3 @@
-% FIXME: rework reopen handling
-
 -module(hg_invoice_payment_chargeback).
 
 -include("domain.hrl").
@@ -34,10 +32,13 @@
     ]).
 
 -record( chargeback_st
-       , { chargeback     :: undefined | chargeback()
-         , target_status  :: undefined | status()
-         % FIXME: naming
-         , cash_flow = [] :: [batch()]
+       , { chargeback    :: undefined | chargeback()
+         , target_status :: undefined | status()
+         , cash_flow_plans =
+               #{ ?chargeback_stage_chargeback()      => []
+                , ?chargeback_stage_pre_arbitration() => []
+                , ?chargeback_stage_arbitration()     => []
+                } :: cash_flow_plans()
          }
        ).
 
@@ -49,6 +50,12 @@
         , invoice := invoice()
         , payment := payment()
         , route   => route()
+        }.
+
+-type cash_flow_plans()
+    :: #{ ?chargeback_stage_chargeback()      := [batch()]
+        , ?chargeback_stage_pre_arbitration() := [batch()]
+        , ?chargeback_stage_arbitration()     := [batch()]
         }.
 
 -type party()
@@ -287,57 +294,39 @@ do_reopen(State, Opts, ReopenParams) ->
 -spec create_cash_flow(state(), action(), opts()) ->
     machine_result() | no_return().
 create_cash_flow(State, _Action, Opts) ->
-    do_create_cash_flow(State, Opts).
-
--spec update_cash_flow(state(), action(), opts()) ->
-    machine_result() | no_return().
-update_cash_flow(State, _Action, Opts) ->
-    do_update_cash_flow(State, Opts).
-
--spec finalise(state(), action(), opts()) ->
-    machine_result() | no_return().
-finalise(State, Action, Opts) ->
-    do_finalise(State, Action, Opts).
-
--spec do_create_cash_flow(state(), opts()) ->
-    machine_result() | no_return().
-do_create_cash_flow(State, Opts) ->
     FinalCashFlow = build_chargeback_cash_flow(State, Opts),
-    CashFlowPlan  = add_batch(FinalCashFlow, get_batches(State)),
+    CashFlowPlan  = add_batch(FinalCashFlow, []),
     _             = prepare_cash_flow(State, CashFlowPlan, Opts),
     CFEvent       = ?chargeback_cash_flow_changed(FinalCashFlow),
     CBEvent       = ?chargeback_ev(get_id(State), CFEvent),
     Action0       = hg_machine_action:new(),
     {done, {[CBEvent], Action0}}.
 
--spec do_update_cash_flow(state(), opts()) ->
+-spec update_cash_flow(state(), action(), opts()) ->
     machine_result() | no_return().
-do_update_cash_flow(State, Opts) ->
+update_cash_flow(State, _Action, Opts) ->
     FinalCashFlow = build_chargeback_cash_flow(State, Opts),
-    {_, CashFlow} = get_latest_batch(State),
-    RevertedCF    = hg_cashflow:revert(CashFlow),
-    RevertedPlan  = add_batch(RevertedCF, get_batches(State)),
-    CashFlowPlan  = add_batch(FinalCashFlow, RevertedPlan),
-    _             = prepare_cash_flow(State, CashFlowPlan, Opts),
+    UpdatedPlan   = build_updated_plan(FinalCashFlow, State),
+    _             = prepare_cash_flow(State, UpdatedPlan, Opts),
     CFEvent       = ?chargeback_cash_flow_changed(FinalCashFlow),
     CBEvent       = ?chargeback_ev(get_id(State), CFEvent),
     Action        = hg_machine_action:instant(),
     {done, {[CBEvent], Action}}.
 
--spec do_finalise(state(), action(), opts()) ->
+-spec finalise(state(), action(), opts()) ->
     machine_result() | no_return().
-do_finalise(State = #chargeback_st{target_status = Status}, Action, _Opts)
+finalise(State = #chargeback_st{target_status = Status}, Action, _Opts)
 when Status =:= ?chargeback_status_pending() ->
     StatusEvent = ?chargeback_status_changed(Status),
     CBEvent     = ?chargeback_ev(get_id(State), StatusEvent),
     {done, {[CBEvent], Action}};
-do_finalise(State = #chargeback_st{target_status = Status}, Action, Opts)
+finalise(State = #chargeback_st{target_status = Status}, Action, Opts)
 when Status =:= ?chargeback_status_rejected() ->
     _           = commit_cash_flow(State, Opts),
     StatusEvent = ?chargeback_status_changed(Status),
     CBEvent     = ?chargeback_ev(get_id(State), StatusEvent),
     {done, {[CBEvent], Action}};
-do_finalise(State = #chargeback_st{target_status = Status}, Action, Opts)
+finalise(State = #chargeback_st{target_status = Status}, Action, Opts)
 when Status =:= ?chargeback_status_accepted() ->
     _                = commit_cash_flow(State, Opts),
     StatusEvent      = ?chargeback_status_changed(Status),
@@ -537,12 +526,12 @@ prepare_cash_flow(State, CashFlowPlan, Opts) ->
     hg_accounting:plan(PlanID, CashFlowPlan).
 
 commit_cash_flow(State, Opts) ->
-    CashFlowPlan = get_batches(State),
+    CashFlowPlan = get_current_plan(State),
     PlanID       = construct_chargeback_plan_id(State, Opts),
     hg_accounting:commit(PlanID, CashFlowPlan).
 
 rollback_cash_flow(State, Opts) ->
-    CashFlowPlan = get_batches(State),
+    CashFlowPlan = get_current_plan(State),
     PlanID       = construct_chargeback_plan_id(State, Opts),
     hg_accounting:rollback(PlanID, CashFlowPlan).
 
@@ -671,27 +660,25 @@ get_id(#chargeback_st{chargeback = Chargeback}) ->
 get_id(#domain_InvoicePaymentChargeback{id = ID}) ->
     ID.
 
-% -spec get_target_status(state()) ->
-%     status() | undefined.
-% get_target_status(#chargeback_st{target_status = TargetStatus}) ->
-%     TargetStatus.
-
--spec get_latest_batch(state()) ->
+-spec get_current_plan(state()) ->
     batch().
-get_latest_batch(#chargeback_st{cash_flow = Batches}) ->
-    lists:last(Batches).
-% get_latest_batch(#chargeback_st{cash_flow = []}) ->
-%     [].
+get_current_plan(#chargeback_st{cash_flow_plans = Plans} = State) ->
+    Stage = get_stage(State),
+    #{Stage := Plan} = Plans,
+    Plan.
 
-% -spec get_latest_cash_flow(state()) ->
-%     cash_flow().
-% get_latest_cash_flow(#chargeback_st{cash_flow = [{_ID, CashFlow}]}) ->
-%     CashFlow.
-
--spec get_batches(state()) ->
+-spec get_reverted_previous_stage(stage(), state()) ->
     [batch()].
-get_batches(#chargeback_st{cash_flow = Batches}) ->
-    Batches.
+get_reverted_previous_stage(?chargeback_stage_chargeback(), _State) ->
+    [];
+get_reverted_previous_stage(?chargeback_stage_arbitration(), State) ->
+    #chargeback_st{cash_flow_plans = #{?chargeback_stage_pre_arbitration() := Plan}} = State,
+    {_ID, CashFlow} = lists:last(Plan),
+    [{1, hg_cashflow:revert(CashFlow)}];
+get_reverted_previous_stage(?chargeback_stage_pre_arbitration(), State) ->
+    #chargeback_st{cash_flow_plans = #{?chargeback_stage_chargeback() := Plan}} = State,
+    {_ID, CashFlow} = lists:last(Plan),
+    [{1, hg_cashflow:revert(CashFlow)}].
 
 -spec get_revision(state() | chargeback()) ->
     hg_domain:revision().
@@ -729,19 +716,15 @@ get_next_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_pre_ar
     state().
 set(Chargeback, undefined) ->
     #chargeback_st{chargeback = Chargeback};
-set(Chargeback, State = #chargeback_st{}) ->
+set(Chargeback, #chargeback_st{} = State) ->
     State#chargeback_st{chargeback = Chargeback}.
 
 -spec set_cash_flow(cash_flow(), state()) ->
     state().
-set_cash_flow(CashFlow, State = #chargeback_st{cash_flow = []}) ->
-    State#chargeback_st{cash_flow = add_batch(CashFlow, [])};
-set_cash_flow(NewCashFlow, State = #chargeback_st{cash_flow = Batches}) ->
-    {_, CashFlow} = get_latest_batch(State),
-    RevertedCF    = hg_cashflow:revert(CashFlow),
-    RevertedPlan  = add_batch(RevertedCF, Batches),
-    CashFlowPlan  = add_batch(NewCashFlow, RevertedPlan),
-    State#chargeback_st{cash_flow = CashFlowPlan}.
+set_cash_flow(CashFlow, #chargeback_st{cash_flow_plans = Plans} = State) ->
+    Stage = get_stage(State),
+    Plan = build_updated_plan(CashFlow, State),
+    State#chargeback_st{cash_flow_plans = Plans#{Stage := Plan}}.
 
 -spec set_target_status(status() | undefined, state()) ->
     state().
@@ -863,3 +846,16 @@ add_batch(FinalCashFlow, []) ->
 add_batch(FinalCashFlow, Batches) ->
     {ID, _CF} = lists:last(Batches),
     Batches ++ [{ID + 1, FinalCashFlow}].
+
+build_updated_plan(CashFlow, #chargeback_st{cash_flow_plans = Plans} = State) ->
+    Stage = get_stage(State),
+    case Plans of
+        #{Stage := []} ->
+            Reverted = get_reverted_previous_stage(Stage, State),
+            add_batch(CashFlow, Reverted);
+        #{Stage := Plan} ->
+            {_, PreviousCashFlow} = lists:last(Plan),
+            RevertedPrevious = hg_cashflow:revert(PreviousCashFlow),
+            RevertedPlan     = add_batch(RevertedPrevious, Plan),
+            add_batch(CashFlow, RevertedPlan)
+    end.
