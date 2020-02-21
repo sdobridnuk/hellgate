@@ -94,20 +94,17 @@
 -type reopen_params()
     :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackReopenParams'().
 
--type change()
-    :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackChangePayload'().
-
 -type result()
-    :: {events(), action()}.
--type events()
-    :: [event()].
--type event()
+    :: {[change()], action()}.
+-type change()
+    :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackChangePayload'()
+     | {invoice_payment_status_changed, #payproc_InvoicePaymentStatusChanged{status :: ?charged_back()}}.
+
+-type payment_event()
     :: dmsl_payment_processing_thrift:'InvoicePaymentChangePayload'().
 
 -type action()
     :: hg_machine_action:t().
--type machine_result()
-    :: hg_invoice_payment:machine_result().
 
 -type activity()
     :: new
@@ -239,7 +236,7 @@ merge_change(?chargeback_cash_flow_changed(CashFlow), State) ->
     set_cash_flow(CashFlow, State).
 
 -spec process_timeout(activity(), state(), action(), opts()) ->
-    machine_result().
+    result().
 process_timeout(new, State, Action, Opts) ->
     create_cash_flow(State, Action, Opts);
 process_timeout(accounter, State, Action, Opts) ->
@@ -247,8 +244,8 @@ process_timeout(accounter, State, Action, Opts) ->
 process_timeout(accounter_finalise, State, Action, Opts) ->
     finalise(State, Action, Opts).
 
--spec wrap_chargeback_events(id(), [event()]) ->
-    [event()].
+-spec wrap_chargeback_events(id(), [change()]) ->
+    [payment_event()].
 wrap_chargeback_events(ID, Events) when is_list(Events) ->
     lists:map(fun(Event) -> maybe_wrap_chargeback_event(ID, Event) end, Events).
 
@@ -295,7 +292,7 @@ do_reopen(State, Opts, ReopenParams) ->
     {ok, Result}.
 
 -spec create_cash_flow(state(), action(), opts()) ->
-    machine_result() | no_return().
+    result() | no_return().
 create_cash_flow(State, _Action, Opts) ->
     FinalCashFlow = build_chargeback_cash_flow(State, Opts),
     CashFlowPlan  = add_batch(FinalCashFlow, []),
@@ -304,7 +301,7 @@ create_cash_flow(State, _Action, Opts) ->
     {[?chargeback_cash_flow_changed(FinalCashFlow)], Action}.
 
 -spec update_cash_flow(state(), action(), opts()) ->
-    machine_result() | no_return().
+    result() | no_return().
 update_cash_flow(State, _Action, Opts) ->
     FinalCashFlow = build_chargeback_cash_flow(State, Opts),
     UpdatedPlan   = build_updated_plan(FinalCashFlow, State),
@@ -313,7 +310,7 @@ update_cash_flow(State, _Action, Opts) ->
     {[?chargeback_cash_flow_changed(FinalCashFlow)], Action}.
 
 -spec finalise(state(), action(), opts()) ->
-    machine_result() | no_return().
+    result() | no_return().
 finalise(#chargeback_st{target_status = Status}, Action, _Opts)
 when Status =:= ?chargeback_status_pending() ->
     {[?chargeback_status_changed(Status)], Action};
@@ -646,7 +643,7 @@ get_id(#domain_InvoicePaymentChargeback{id = ID}) ->
     ID.
 
 -spec get_current_plan(state()) ->
-    batch().
+    [batch()].
 get_current_plan(#chargeback_st{cash_flow_plans = Plans} = State) ->
     Stage = get_stage(State),
     #{Stage := Plan} = Plans,
