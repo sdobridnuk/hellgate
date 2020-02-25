@@ -250,7 +250,6 @@ process_timeout(accounter_finalise, State, Action, Opts) ->
 -spec do_create(opts(), create_params()) ->
     {chargeback(), result()} | no_return().
 do_create(Opts, CreateParams) ->
-    _ = assert_no_pending_chargebacks(Opts),
     Chargeback = build_chargeback(Opts, CreateParams),
     Action     = hg_machine_action:instant(),
     Result     = {[?chargeback_created(Chargeback)], Action},
@@ -283,7 +282,6 @@ do_accept(State, Opts, AcceptParams) ->
 -spec do_reopen(state(), opts(), reopen_params()) ->
     {ok, result()} | no_return().
 do_reopen(State, Opts, ReopenParams) ->
-    _      = assert_no_pending_chargebacks(Opts),
     _      = validate_chargeback_is_rejected(State),
     _      = validate_not_arbitration(State),
     Result = build_reopen_result(State, Opts, ReopenParams),
@@ -365,7 +363,6 @@ build_accept_result(State, Opts, ?accept_params(ParamsLevy, ParamsBody)) ->
 -spec build_reopen_result(state(), opts(), reopen_params()) ->
     result() | no_return().
 build_reopen_result(State, Opts, ?reopen_params(ParamsLevy, ParamsBody)) ->
-    _            = assert_no_pending_chargebacks(Opts),
     Body         = get_body(State),
     Levy         = get_levy(State),
     FinalBody    = define_params_cash(ParamsBody, Body),
@@ -578,16 +575,6 @@ validate_remaining_payment_amount(?cash(Amount, _), _) when Amount >= 0 ->
     ok;
 validate_remaining_payment_amount(?cash(Amount, _), Maximum) when Amount < 0 ->
     throw(#payproc_InvoicePaymentAmountExceeded{maximum = Maximum}).
-
-assert_no_pending_chargebacks(Opts) ->
-    PaymentState = get_payment_state(get_opts_invoice_id(Opts), get_opts_payment_id(Opts)),
-    Chargebacks = hg_invoice_payment:get_chargebacks(PaymentState),
-    case lists:any(fun is_pending/1, Chargebacks) of
-        true ->
-            throw(#payproc_InvoicePaymentChargebackPending{});
-        false ->
-            ok
-    end.
 
 %% Getters
 

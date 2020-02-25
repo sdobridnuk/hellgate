@@ -1144,6 +1144,7 @@ validate_provider_holds_terms(#domain_PaymentsProvisionTerms{holds = undefined})
 -spec create_chargeback(st(), opts(), hg_invoice_payment_chargeback:create_params()) ->
     {chargeback(), result()}.
 create_chargeback(St, Opts, Params) ->
+    _ = assert_no_pending_chargebacks(St),
     ChargebackID = get_chargeback_id(Params),
     CBOpts = Opts#{payment => get_payment(St)},
     {Chargeback, {Changes, Action}} = hg_invoice_payment_chargeback:create(CBOpts, Params),
@@ -1176,6 +1177,7 @@ accept_chargeback(ChargebackID, St, Opts, Params) ->
 -spec reopen_chargeback(chargeback_id(), st(), opts(), hg_invoice_payment_chargeback:reopen_params()) ->
     {ok, result()}.
 reopen_chargeback(ChargebackID, St, Opts, Params) ->
+    _ = assert_no_pending_chargebacks(St),
     ChargebackState = get_chargeback_state(ChargebackID, St),
     CBOpts = Opts#{payment => get_payment(St)},
     {ok, {Changes, Action}} = hg_invoice_payment_chargeback:reopen(ChargebackState, CBOpts, Params),
