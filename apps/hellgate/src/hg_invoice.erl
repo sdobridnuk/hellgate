@@ -96,16 +96,6 @@ get_payment(PaymentID, St) ->
 get_payment_tags(PaymentSession) ->
     hg_invoice_payment:get_tags(PaymentSession).
 
--spec get_chargeback_opts(payment_id(), st()) ->
-    hg_invoice_payment_chargeback:opts().
-
-get_chargeback_opts(PaymentID, St = #st{invoice = Invoice}) ->
-    #{
-        party   => hg_party:get_party(get_party_id(St)),
-        invoice => Invoice,
-        payment => hg_invoice_payment:get_payment(get_payment_session(PaymentID, St))
-    }.
-
 -spec get_payment_opts(st()) ->
     hg_invoice_payment:opts().
 
@@ -637,41 +627,37 @@ handle_call({{'Invoicing', 'CreateManualRefund'}, [_UserInfo, _InvoiceID, Paymen
 
 handle_call({{'Invoicing', 'CreateChargeback'}, [_UserInfo, _InvoiceID, PaymentID, Params]}, St) ->
     _ = assert_invoice_accessible(St),
-    ChargebackOpts = get_chargeback_opts(PaymentID, St),
     PaymentSession = get_payment_session(PaymentID, St),
-    start_chargeback(Params, PaymentID, PaymentSession, ChargebackOpts, St);
+    PaymentOpts    = get_payment_opts(St),
+    start_chargeback(Params, PaymentID, PaymentSession, PaymentOpts, St);
 
 handle_call({{'Invoicing', 'CancelChargeback'}, [_UserInfo, _InvoiceID, PaymentID, ChargebackID]}, St) ->
     _ = assert_invoice_accessible(St),
-    ChargebackOpts  = get_chargeback_opts(PaymentID, St),
-    PaymentSession  = get_payment_session(PaymentID, St),
-    ChargebackState = hg_invoice_payment:get_chargeback_state(ChargebackID, PaymentSession),
-    CancelResult    = hg_invoice_payment_chargeback:cancel(ChargebackState, ChargebackOpts),
-    wrap_chargeback_impact(PaymentID, ChargebackID, CancelResult, St);
+    PaymentSession = get_payment_session(PaymentID, St),
+    PaymentOpts    = get_payment_opts(St),
+    CancelResult   = hg_invoice_payment:cancel_chargeback(ChargebackID, PaymentSession, PaymentOpts),
+    wrap_payment_impact(PaymentID, CancelResult, St);
 
 handle_call({{'Invoicing', 'RejectChargeback'}, [_UserInfo, _InvoiceID, PaymentID, ChargebackID, Params]}, St) ->
     _ = assert_invoice_accessible(St),
-    ChargebackOpts  = get_chargeback_opts(PaymentID, St),
-    PaymentSession  = get_payment_session(PaymentID, St),
-    ChargebackState = hg_invoice_payment:get_chargeback_state(ChargebackID, PaymentSession),
-    RejectResult    = hg_invoice_payment_chargeback:reject(ChargebackState, ChargebackOpts, Params),
-    wrap_chargeback_impact(PaymentID, ChargebackID, RejectResult, St);
+    PaymentSession = get_payment_session(PaymentID, St),
+    PaymentOpts    = get_payment_opts(St),
+    RejectResult   = hg_invoice_payment:reject_chargeback(ChargebackID, PaymentSession, PaymentOpts, Params),
+    wrap_payment_impact(PaymentID, RejectResult, St);
 
 handle_call({{'Invoicing', 'AcceptChargeback'}, [_UserInfo, _InvoiceID, PaymentID, ChargebackID, Params]}, St) ->
     _ = assert_invoice_accessible(St),
-    ChargebackOpts  = get_chargeback_opts(PaymentID, St),
-    PaymentSession  = get_payment_session(PaymentID, St),
-    ChargebackState = hg_invoice_payment:get_chargeback_state(ChargebackID, PaymentSession),
-    AcceptResult    = hg_invoice_payment_chargeback:accept(ChargebackState, ChargebackOpts, Params),
-    wrap_chargeback_impact(PaymentID, ChargebackID, AcceptResult, St);
+    PaymentSession = get_payment_session(PaymentID, St),
+    PaymentOpts    = get_payment_opts(St),
+    AcceptResult   = hg_invoice_payment:accept_chargeback(ChargebackID, PaymentSession, PaymentOpts, Params),
+    wrap_payment_impact(PaymentID, AcceptResult, St);
 
 handle_call({{'Invoicing', 'ReopenChargeback'}, [_UserInfo, _InvoiceID, PaymentID, ChargebackID, Params]}, St) ->
     _ = assert_invoice_accessible(St),
-    ChargebackOpts  = get_chargeback_opts(PaymentID, St),
-    PaymentSession  = get_payment_session(PaymentID, St),
-    ChargebackState = hg_invoice_payment:get_chargeback_state(ChargebackID, PaymentSession),
-    ReopenResult    = hg_invoice_payment_chargeback:reopen(ChargebackState, ChargebackOpts, Params),
-    wrap_chargeback_impact(PaymentID, ChargebackID, ReopenResult, St);
+    PaymentSession = get_payment_session(PaymentID, St),
+    PaymentOpts    = get_payment_opts(St),
+    ReopenResult   = hg_invoice_payment:reopen_chargeback(ChargebackID, PaymentSession, PaymentOpts, Params),
+    wrap_payment_impact(PaymentID, ReopenResult, St);
 
 handle_call({{'Invoicing', 'CreatePaymentAdjustment'}, [_UserInfo, _InvoiceID, PaymentID, Params]}, St) ->
     _ = assert_invoice_accessible(St),
@@ -855,15 +841,6 @@ wrap_payment_impact(PaymentID, {Response, {Changes, Action}}, St) ->
         state    => St
     }.
 
-wrap_chargeback_impact(PaymentID, ChargebackID, {Response, {Changes, Action}}, St) ->
-    CBChanges = hg_invoice_payment_chargeback:wrap_chargeback_events(ChargebackID, Changes),
-    #{
-        response => Response,
-        changes  => wrap_payment_changes(PaymentID, CBChanges),
-        action   => Action,
-        state    => St
-    }.
-
 handle_result(#{} = Result) ->
     St = validate_changes(Result),
     _ = log_changes(maps:get(changes, Result, []), St),
@@ -971,11 +948,10 @@ start_new_refund(RefundType, PaymentID, Params, PaymentSession, St) when
 
 %%
 
-start_chargeback(Params, PaymentID, PaymentSession, Opts, St) ->
-    ChargebackID = get_chargeback_id(Params),
-    case get_chargeback_state(ChargebackID, PaymentSession) of
+start_chargeback(Params, PaymentID, PaymentSession, PaymentOpts, St) ->
+    case get_chargeback_state(get_chargeback_id(Params), PaymentSession) of
         undefined ->
-            start_new_chargeback(PaymentID, ChargebackID, Params, Opts, St);
+            start_new_chargeback(PaymentID, Params, PaymentSession, PaymentOpts, St);
         ChargebackState ->
             #{
                 response => hg_invoice_payment_chargeback:get(ChargebackState),
@@ -983,9 +959,9 @@ start_chargeback(Params, PaymentID, PaymentSession, Opts, St) ->
             }
     end.
 
-start_new_chargeback(PaymentID, ChargebackID, Params, Opts, St) ->
-    CreateResult = hg_invoice_payment_chargeback:create(Opts, Params),
-    wrap_chargeback_impact(PaymentID, ChargebackID, CreateResult, St).
+start_new_chargeback(PaymentID, Params, PaymentSession, PaymentOpts, St) ->
+    CreateResult = hg_invoice_payment:create_chargeback(PaymentSession, PaymentOpts, Params),
+    wrap_payment_impact(PaymentID, CreateResult, St).
 
 get_chargeback_id(#payproc_InvoicePaymentChargebackParams{id = ID}) ->
     ID.

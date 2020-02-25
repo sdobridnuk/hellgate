@@ -58,6 +58,12 @@
 -export([capture_adjustment/3]).
 -export([cancel_adjustment/3]).
 
+-export([create_chargeback/3]).
+-export([cancel_chargeback/3]).
+-export([reject_chargeback/4]).
+-export([accept_chargeback/4]).
+-export([reopen_chargeback/4]).
+
 %% Machine like
 
 -export([init/3]).
@@ -1134,6 +1140,49 @@ validate_provider_holds_terms(#domain_PaymentsProvisionTerms{holds = Terms}) whe
 %% Чтобы упростить интеграцию, по умолчанию разрешили частичные подтверждения
 validate_provider_holds_terms(#domain_PaymentsProvisionTerms{holds = undefined}) ->
     ok.
+
+-spec create_chargeback(st(), opts(), hg_invoice_payment_chargeback:create_params()) ->
+    {chargeback(), result()}.
+create_chargeback(St, Opts, Params) ->
+    ChargebackID = get_chargeback_id(Params),
+    CBOpts = Opts#{payment => get_payment(St)},
+    {Chargeback, {Changes, Action}} = hg_invoice_payment_chargeback:create(CBOpts, Params),
+    {Chargeback, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
+
+-spec cancel_chargeback(chargeback_id(), st(), opts()) ->
+    {ok, result()}.
+cancel_chargeback(ChargebackID, St, Opts) ->
+    ChargebackState = get_chargeback_state(ChargebackID, St),
+    CBOpts = Opts#{payment => get_payment(St)},
+    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:cancel(ChargebackState, CBOpts),
+    {ok, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
+
+-spec reject_chargeback(chargeback_id(), st(), opts(), hg_invoice_payment_chargeback:reject_params()) ->
+    {ok, result()}.
+reject_chargeback(ChargebackID, St, Opts, Params) ->
+    ChargebackState = get_chargeback_state(ChargebackID, St),
+    CBOpts = Opts#{payment => get_payment(St)},
+    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:reject(ChargebackState, CBOpts, Params),
+    {ok, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
+
+-spec accept_chargeback(chargeback_id(), st(), opts(), hg_invoice_payment_chargeback:accept_params()) ->
+    {ok, result()}.
+accept_chargeback(ChargebackID, St, Opts, Params) ->
+    ChargebackState = get_chargeback_state(ChargebackID, St),
+    CBOpts = Opts#{payment => get_payment(St)},
+    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:accept(ChargebackState, CBOpts, Params),
+    {ok, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
+
+-spec reopen_chargeback(chargeback_id(), st(), opts(), hg_invoice_payment_chargeback:reopen_params()) ->
+    {ok, result()}.
+reopen_chargeback(ChargebackID, St, Opts, Params) ->
+    ChargebackState = get_chargeback_state(ChargebackID, St),
+    CBOpts = Opts#{payment => get_payment(St)},
+    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:reopen(ChargebackState, CBOpts, Params),
+    {ok, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
+
+get_chargeback_id(#payproc_InvoicePaymentChargebackParams{id = ID}) ->
+    ID.
 
 -spec refund(refund_params(), st(), opts()) ->
     {domain_refund(), result()}.
