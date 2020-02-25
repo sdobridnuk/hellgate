@@ -1669,11 +1669,32 @@ process_cash_flow_building(Route, VS, Payment, PaymentInstitution, Revision, Opt
 %%
 
 -spec process_chargeback(chargeback_activity_type(), chargeback_id(), action(), st()) -> machine_result().
+process_chargeback(Type = accounter_finalise, ID, Action0, St) ->
+    ChargebackState    = get_chargeback_state(ID, St),
+    ChargebackOpts     = get_chargeback_opts(St),
+    ChargebackBody     = hg_invoice_payment_chargeback:get_body(ChargebackState),
+    ChargebackTarget   = hg_invoice_payment_chargeback:get_target_status(ChargebackState),
+    MaybeChargedback   = maybe_set_charged_back_status(ChargebackTarget, ChargebackBody, St),
+    {Changes, Action1} = hg_invoice_payment_chargeback:process_timeout(Type, ChargebackState, Action0, ChargebackOpts),
+    Events             = hg_invoice_payment_chargeback:wrap_chargeback_events(ID, Changes),
+    {done, {Events ++ MaybeChargedback, Action1}};
 process_chargeback(Type, ID, Action0, St) ->
-    ChargebackState = get_chargeback_state(ID, St),
-    ChargebackOpts = get_chargeback_opts(St),
-    {Events, Action1} = hg_invoice_payment_chargeback:process_timeout(Type, ChargebackState, Action0, ChargebackOpts),
-    {done, {hg_invoice_payment_chargeback:wrap_chargeback_events(ID, Events), Action1}}.
+    ChargebackState    = get_chargeback_state(ID, St),
+    ChargebackOpts     = get_chargeback_opts(St),
+    {Changes, Action1} = hg_invoice_payment_chargeback:process_timeout(Type, ChargebackState, Action0, ChargebackOpts),
+    Events             = hg_invoice_payment_chargeback:wrap_chargeback_events(ID, Changes),
+    {done, {Events, Action1}}.
+
+maybe_set_charged_back_status(?chargeback_status_accepted(), ChargebackBody, St) ->
+    InterimPaymentAmount = get_remaining_payment_balance(St),
+    case hg_cash:sub(InterimPaymentAmount, ChargebackBody) of
+        ?cash(Amount, _) when Amount =:= 0 ->
+            [?payment_status_changed(?charged_back())];
+        ?cash(Amount, _) when Amount > 0 ->
+            []
+    end;
+maybe_set_charged_back_status(_ChargebackStatus, _ChargebackBody, _St) ->
+    [].
 
 %%
 
@@ -2620,6 +2641,18 @@ merge_change(Change = ?chargeback_ev(ID, Event), St, Opts) ->
                 #st{activity = {chargeback, ID, accounter}} ->
                     _ = validate_transition({chargeback, ID, accounter}, Change, St, Opts),
                     St#st{activity = {chargeback, ID, accounter_finalise}}
+            end;
+        ?chargeback_target_status_changed(?chargeback_status_cancelled()) ->
+            _ = validate_transition(idle, Change, St, Opts),
+            St#st{activity = {chargeback, ID, accounter_finalise}};
+        ?chargeback_target_status_changed(?chargeback_status_accepted()) ->
+            case St of
+                #st{activity = idle} ->
+                    _ = validate_transition([idle, {chargeback, ID, updating}], Change, St, Opts),
+                    St#st{activity = {chargeback, ID, accounter_finalise}};
+                #st{activity = {chargeback, ID, updating}} ->
+                    _ = validate_transition([idle, {chargeback, ID, updating}], Change, St, Opts),
+                    St#st{activity = {chargeback, ID, accounter}}
             end;
         ?chargeback_target_status_changed(_) ->
             _ = validate_transition([idle, {chargeback, ID, updating}], Change, St, Opts),

@@ -22,6 +22,7 @@
     [ get/1
     , get_body/1
     , get_status/1
+    , get_target_status/1
     , is_pending/1
     ]).
 
@@ -97,10 +98,9 @@
 -type result()
     :: {[change()], action()}.
 -type change()
-    :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackChangePayload'()
-     | {invoice_payment_status_changed, #payproc_InvoicePaymentStatusChanged{status :: ?charged_back()}}.
+    :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackChangePayload'().
 
--type payment_event()
+-type wrapped_event()
     :: dmsl_payment_processing_thrift:'InvoicePaymentChangePayload'().
 
 -type action()
@@ -131,6 +131,11 @@ get_status(#chargeback_st{chargeback = Chargeback}) ->
     get_status(Chargeback);
 get_status(#domain_InvoicePaymentChargeback{status = Status}) ->
     Status.
+
+-spec get_target_status(state()) ->
+    status() | undefined.
+get_target_status(#chargeback_st{target_status = TargetStatus}) ->
+    TargetStatus.
 
 -spec is_pending(chargeback() | state()) ->
     boolean().
@@ -237,17 +242,17 @@ merge_change(?chargeback_cash_flow_changed(CashFlow), State) ->
 
 -spec process_timeout(activity(), state(), action(), opts()) ->
     result().
-process_timeout(new, State, Action, Opts) ->
-    create_cash_flow(State, Action, Opts);
-process_timeout(accounter, State, Action, Opts) ->
-    update_cash_flow(State, Action, Opts);
+process_timeout(new, State, _Action, Opts) ->
+    update_cash_flow(State, hg_machine_action:new(), Opts);
+process_timeout(accounter, State, _Action, Opts) ->
+    update_cash_flow(State, hg_machine_action:instant(), Opts);
 process_timeout(accounter_finalise, State, Action, Opts) ->
     finalise(State, Action, Opts).
 
 -spec wrap_chargeback_events(id(), [change()]) ->
-    [payment_event()].
-wrap_chargeback_events(ID, Events) when is_list(Events) ->
-    lists:map(fun(Event) -> maybe_wrap_chargeback_event(ID, Event) end, Events).
+    [wrapped_event()].
+wrap_chargeback_events(ID, Changes) when is_list(Changes) ->
+    [?chargeback_ev(ID, C) || C <- Changes].
 
 %% Private
 
@@ -262,10 +267,12 @@ do_create(Opts, CreateParams) ->
 
 -spec do_cancel(state(), opts()) ->
     {ok, result()} | no_return().
-do_cancel(State, Opts) ->
+do_cancel(State, _Opts) ->
     _      = validate_chargeback_is_pending(State),
     _      = validate_stage_is_chargeback(State),
-    Result = build_cancel_result(State, Opts),
+    Action = hg_machine_action:instant(),
+    Status = ?chargeback_status_cancelled(),
+    Result = {[?chargeback_target_status_changed(Status)], Action},
     {ok, Result}.
 
 -spec do_reject(state(), opts(), reject_params()) ->
@@ -291,22 +298,12 @@ do_reopen(State, Opts, ReopenParams) ->
     Result = build_reopen_result(State, Opts, ReopenParams),
     {ok, Result}.
 
--spec create_cash_flow(state(), action(), opts()) ->
-    result() | no_return().
-create_cash_flow(State, _Action, Opts) ->
-    FinalCashFlow = build_chargeback_cash_flow(State, Opts),
-    CashFlowPlan  = add_batch(FinalCashFlow, []),
-    _             = prepare_cash_flow(State, CashFlowPlan, Opts),
-    Action        = hg_machine_action:new(),
-    {[?chargeback_cash_flow_changed(FinalCashFlow)], Action}.
-
 -spec update_cash_flow(state(), action(), opts()) ->
     result() | no_return().
-update_cash_flow(State, _Action, Opts) ->
+update_cash_flow(State, Action, Opts) ->
     FinalCashFlow = build_chargeback_cash_flow(State, Opts),
     UpdatedPlan   = build_updated_plan(FinalCashFlow, State),
     _             = prepare_cash_flow(State, UpdatedPlan, Opts),
-    Action        = hg_machine_action:instant(),
     {[?chargeback_cash_flow_changed(FinalCashFlow)], Action}.
 
 -spec finalise(state(), action(), opts()) ->
@@ -315,14 +312,14 @@ finalise(#chargeback_st{target_status = Status}, Action, _Opts)
 when Status =:= ?chargeback_status_pending() ->
     {[?chargeback_status_changed(Status)], Action};
 finalise(State = #chargeback_st{target_status = Status}, Action, Opts)
-when Status =:= ?chargeback_status_rejected() ->
-    _ = commit_cash_flow(State, Opts),
+when Status =:= ?chargeback_status_cancelled() ->
+    _ = rollback_cash_flow(State, Opts),
     {[?chargeback_status_changed(Status)], Action};
 finalise(State = #chargeback_st{target_status = Status}, Action, Opts)
-when Status =:= ?chargeback_status_accepted() ->
+when Status =:= ?chargeback_status_rejected();
+     Status =:= ?chargeback_status_accepted() ->
     _ = commit_cash_flow(State, Opts),
-    Changes = [?chargeback_status_changed(Status)] ++ maybe_set_charged_back_status(State, Opts),
-    {Changes, Action}.
+    {[?chargeback_status_changed(Status)], Action}.
 
 -spec build_chargeback(opts(), create_params()) ->
     chargeback() | no_return().
@@ -346,22 +343,14 @@ build_chargeback(Opts, Params = ?chargeback_params(Levy, ParamsBody, Reason)) ->
         body            = FinalBody
     }.
 
--spec build_cancel_result(state(), opts()) ->
-    result() | no_return().
-build_cancel_result(State, Opts) ->
-    _      = rollback_cash_flow(State, Opts),
-    Action = hg_machine_action:new(),
-    Status = ?chargeback_status_cancelled(),
-    {[?chargeback_status_changed(Status)], Action}.
-
 -spec build_reject_result(state(), opts(), reject_params()) ->
     result() | no_return().
 build_reject_result(State, _Opts, ?reject_params(ParamsLevy)) ->
     Levy         = get_levy(State),
     FinalLevy    = define_params_cash(ParamsLevy, Levy),
     Action       = hg_machine_action:instant(),
-    Status       = ?chargeback_status_rejected(),
     LevyChange   = levy_change(FinalLevy, Levy),
+    Status       = ?chargeback_status_rejected(),
     StatusChange = [?chargeback_target_status_changed(Status)],
     Changes      = lists:append([LevyChange, StatusChange]),
     {Changes, Action}.
@@ -369,29 +358,18 @@ build_reject_result(State, _Opts, ?reject_params(ParamsLevy)) ->
 -spec build_accept_result(state(), opts(), accept_params()) ->
     result() | no_return().
 build_accept_result(State, Opts, ?accept_params(ParamsLevy, ParamsBody)) ->
-    Body = get_body(State),
-    Levy = get_levy(State),
-    case {ParamsBody, ParamsLevy} of
-        {ParamsBody, ParamsLevy}
-         when (ParamsLevy =:= undefined orelse ParamsLevy =:= Levy) andalso
-              (ParamsBody =:= undefined orelse ParamsBody =:= Body) ->
-            _         = commit_cash_flow(State, Opts),
-            Action    = hg_machine_action:new(),
-            Status    = ?chargeback_status_accepted(),
-            Changes   = [?chargeback_status_changed(Status)] ++ maybe_set_charged_back_status(State, Opts),
-            {Changes, Action};
-        {ParamsBody, ParamsLevy} ->
-            FinalBody     = define_params_cash(ParamsBody, Body),
-            FinalLevy     = define_params_cash(ParamsLevy, Levy),
-            _             = validate_body_amount(FinalBody, Opts),
-            Action        = hg_machine_action:instant(),
-            Status        = ?chargeback_status_accepted(),
-            BodyChange    = body_change(FinalBody, Body),
-            LevyChange    = levy_change(FinalLevy, Levy),
-            StatusChange  = [?chargeback_target_status_changed(Status)],
-            Changes       = lists:append([BodyChange, LevyChange, StatusChange]),
-            {Changes, Action}
-    end.
+    Body         = get_body(State),
+    Levy         = get_levy(State),
+    Action       = hg_machine_action:instant(),
+    FinalBody    = define_params_cash(ParamsBody, Body),
+    FinalLevy    = define_params_cash(ParamsLevy, Levy),
+    _            = validate_body_amount(FinalBody, Opts),
+    BodyChange   = body_change(FinalBody, Body),
+    LevyChange   = levy_change(FinalLevy, Levy),
+    Status       = ?chargeback_status_accepted(),
+    StatusChange = [?chargeback_target_status_changed(Status)],
+    Changes      = lists:append([BodyChange, LevyChange, StatusChange]),
+    {Changes, Action}.
 
 -spec build_reopen_result(state(), opts(), reopen_params()) ->
     result() | no_return().
@@ -404,10 +382,10 @@ build_reopen_result(State, Opts, ?reopen_params(ParamsLevy, ParamsBody)) ->
     FinalLevy    = define_params_cash(ParamsLevy, Levy),
     Stage        = get_next_stage(State),
     Action       = hg_machine_action:instant(),
-    Status       = ?chargeback_status_pending(),
-    StageChange  = [?chargeback_stage_changed(Stage)],
     BodyChange   = body_change(FinalBody, Body),
     LevyChange   = levy_change(FinalLevy, Levy),
+    StageChange  = [?chargeback_stage_changed(Stage)],
+    Status       = ?chargeback_status_pending(),
     StatusChange = [?chargeback_target_status_changed(Status)],
     Changes      = lists:append([StageChange, BodyChange, LevyChange, StatusChange]),
     {Changes, Action}.
@@ -525,19 +503,6 @@ construct_chargeback_plan_id(State, Opts) ->
         {chargeback, get_id(State)},
         genlib:to_binary(Stage)
     ]).
-
-maybe_set_charged_back_status(State, Opts) ->
-    Body = get_body(State),
-    PaymentID = get_opts_payment_id(Opts),
-    InvoiceID = get_opts_invoice_id(Opts),
-    PaymentState = get_payment_state(InvoiceID, PaymentID),
-    InterimPaymentAmount = hg_invoice_payment:get_remaining_payment_balance(PaymentState),
-    case hg_cash:sub(InterimPaymentAmount, Body) of
-        ?cash(Amount, _) when Amount =:= 0 ->
-            [?payment_status_changed(?charged_back())];
-        ?cash(Amount, _) when Amount > 0 ->
-            []
-    end.
 
 get_invoice_state(InvoiceID) ->
     case hg_invoice:get(InvoiceID) of
@@ -838,22 +803,3 @@ build_updated_plan(CashFlow, #chargeback_st{cash_flow_plans = Plans} = State) ->
             RevertedPlan     = add_batch(RevertedPrevious, Plan),
             add_batch(CashFlow, RevertedPlan)
     end.
-
-%%
-
-maybe_wrap_chargeback_event( ID, Event = ?chargeback_created(_)) ->
-    ?chargeback_ev(ID, Event);
-maybe_wrap_chargeback_event( ID, Event = ?chargeback_levy_changed(_)) ->
-    ?chargeback_ev(ID, Event);
-maybe_wrap_chargeback_event( ID, Event = ?chargeback_body_changed(_)) ->
-    ?chargeback_ev(ID, Event);
-maybe_wrap_chargeback_event( ID, Event = ?chargeback_stage_changed(_)) ->
-    ?chargeback_ev(ID, Event);
-maybe_wrap_chargeback_event( ID, Event = ?chargeback_target_status_changed(_)) ->
-    ?chargeback_ev(ID, Event);
-maybe_wrap_chargeback_event( ID, Event = ?chargeback_status_changed(_)) ->
-    ?chargeback_ev(ID, Event);
-maybe_wrap_chargeback_event( ID, Event = ?chargeback_cash_flow_changed(_)) ->
-    ?chargeback_ev(ID, Event);
-maybe_wrap_chargeback_event(_ID, Event) ->
-    Event.

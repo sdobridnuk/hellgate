@@ -1881,6 +1881,9 @@ create_chargeback_idempotency(C) ->
     Settlement0 = hg_ct_helper:get_balance(SID),
     ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
     [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
+    ] = next_event(IID, Client),
+    [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
     Settlement1 = hg_ct_helper:get_balance(SID),
@@ -1908,6 +1911,9 @@ cancel_payment_chargeback(C) ->
     ] = next_event(IID, Client),
     Settlement0 = hg_ct_helper:get_balance(SID),
     ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
+    ] = next_event(IID, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
@@ -1937,6 +1943,9 @@ cancel_partial_payment_chargeback(C) ->
     ] = next_event(IID, Client),
     Settlement0 = hg_ct_helper:get_balance(SID),
     ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
+    ] = next_event(IID, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
@@ -1978,6 +1987,9 @@ cancel_payment_chargeback_refund(C) ->
     RefundError = hg_client_invoicing:refund_payment(IID, PID, RefundParams, Client),
     ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
     [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
+    ] = next_event(IID, Client),
+    [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
     RefundOk = hg_client_invoicing:refund_payment(IID, PID, RefundParams, Client),
@@ -2003,6 +2015,9 @@ reject_payment_chargeback_inconsistent(C) ->
     InconsistentParams = make_chargeback_reject_params(?cash(10, <<"USD">>)),
     Inconsistent = hg_client_invoicing:reject_chargeback(IID, PID, CBID, InconsistentParams, Client),
     ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
+    ] = next_event(IID, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
@@ -2104,6 +2119,9 @@ accept_payment_chargeback_inconsistent(C) ->
     InconsistentBody = hg_client_invoicing:accept_chargeback(IID, PID, CBID, InconsistentBodyParams, Client),
     ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
     [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
+    ] = next_event(IID, Client),
+    [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
     ?assertMatch(?inconsistent_chargeback_currency(_), InconsistentLevy),
@@ -2130,6 +2148,9 @@ accept_payment_chargeback_exceeded(C) ->
     Exceeded = hg_client_invoicing:accept_chargeback(IID, PID, CBID, ExceedParams, Client),
     ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
     [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
+    ] = next_event(IID, Client),
+    [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
     ?assertMatch(?invoice_payment_amount_exceeded(_), Exceeded).
@@ -2154,6 +2175,9 @@ accept_payment_chargeback_empty_params(C) ->
     Settlement0  = hg_ct_helper:get_balance(SID),
     AcceptParams = make_chargeback_accept_params(),
     ok           = hg_client_invoicing:accept_chargeback(IID, PID, CBID, AcceptParams, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_accepted())))
+    ] = next_event(IID, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted()))),
         ?payment_ev(PID, ?payment_status_changed(?charged_back()))
@@ -2257,6 +2281,13 @@ reopen_accepted_payment_chargeback_fails(C) ->
     ] = next_event(IID, Client),
     AcceptParams = make_chargeback_accept_params(),
     ok = hg_client_invoicing:accept_chargeback(IID, PID, CBID, AcceptParams, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_accepted())))
+    ] = next_event(IID, Client),
+    [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted()))),
+        ?payment_ev(PID, ?payment_status_changed(?charged_back()))
+    ] = next_event(IID, Client),
     ReopenParams = make_chargeback_reopen_params(Levy),
     Error = hg_client_invoicing:reopen_chargeback(IID, PID, CBID, ReopenParams, Client),
     ?assertMatch(?invalid_chargeback_status(_), Error).
@@ -2442,6 +2473,9 @@ reopen_payment_chargeback_accept(C) ->
     AcceptParams = make_chargeback_accept_params(),
     ok = hg_client_invoicing:accept_chargeback(IID, PID, CBID, AcceptParams, Client),
     [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_accepted())))
+    ] = next_event(IID, Client),
+    [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted()))),
         ?payment_ev(PID, ?payment_status_changed(?charged_back()))
     ] = next_event(IID, Client),
@@ -2604,6 +2638,9 @@ reopen_payment_chargeback_arbitration(C) ->
     AcceptParams = make_chargeback_accept_params(),
     ok = hg_client_invoicing:accept_chargeback(IID, PID, CBID, AcceptParams, Client),
     [
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_accepted())))
+    ] = next_event(IID, Client),
+    [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_accepted()))),
         ?payment_ev(PID, ?payment_status_changed(?charged_back()))
     ] = next_event(IID, Client),
@@ -2757,8 +2794,7 @@ start_chargeback_partial_capture(C, Cost, Partial, CBParams) ->
     ?assertEqual(0, maps:get(min_available_amount, Settlement0)),
     InvoiceID    = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), Cost, C),
     PaymentID    = process_payment(InvoiceID, make_payment_params({hold, cancel}), Client),
-    Reason = <<"ok">>,
-    ok = hg_client_invoicing:capture_payment(InvoiceID, PaymentID, Reason, Cash, Client),
+    ok = hg_client_invoicing:capture_payment(InvoiceID, PaymentID, <<"ok">>, Cash, Client),
     [
        ?payment_ev(PaymentID, ?payment_capture_started(Reason, Cash, _)),
        ?payment_ev(PaymentID, ?cash_flow_changed(_))
