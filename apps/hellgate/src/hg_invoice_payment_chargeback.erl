@@ -15,7 +15,6 @@
 -export(
     [ merge_change/2
     , process_timeout/4
-    , wrap_chargeback_events/2
     ]).
 
 -export(
@@ -99,9 +98,6 @@
     :: {[change()], action()}.
 -type change()
     :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackChangePayload'().
-
--type wrapped_event()
-    :: dmsl_payment_processing_thrift:'InvoicePaymentChangePayload'().
 
 -type action()
     :: hg_machine_action:t().
@@ -248,11 +244,6 @@ process_timeout(accounter, State, _Action, Opts) ->
     update_cash_flow(State, hg_machine_action:instant(), Opts);
 process_timeout(accounter_finalise, State, Action, Opts) ->
     finalise(State, Action, Opts).
-
--spec wrap_chargeback_events(id(), [change()]) ->
-    [wrapped_event()].
-wrap_chargeback_events(ID, Changes) when is_list(Changes) ->
-    [?chargeback_ev(ID, C) || C <- Changes].
 
 %% Private
 

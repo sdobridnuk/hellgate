@@ -1725,14 +1725,12 @@ process_chargeback(Type = accounter_finalise, ID, Action0, St) ->
     ChargebackTarget   = hg_invoice_payment_chargeback:get_target_status(ChargebackState),
     MaybeChargedback   = maybe_set_charged_back_status(ChargebackTarget, ChargebackBody, St),
     {Changes, Action1} = hg_invoice_payment_chargeback:process_timeout(Type, ChargebackState, Action0, ChargebackOpts),
-    Events             = hg_invoice_payment_chargeback:wrap_chargeback_events(ID, Changes),
-    {done, {Events ++ MaybeChargedback, Action1}};
+    {done, {[?chargeback_ev(ID, C) || C <- Changes] ++ MaybeChargedback, Action1}};
 process_chargeback(Type, ID, Action0, St) ->
     ChargebackState    = get_chargeback_state(ID, St),
     ChargebackOpts     = get_chargeback_opts(St),
     {Changes, Action1} = hg_invoice_payment_chargeback:process_timeout(Type, ChargebackState, Action0, ChargebackOpts),
-    Events             = hg_invoice_payment_chargeback:wrap_chargeback_events(ID, Changes),
-    {done, {Events, Action1}}.
+    {done, {[?chargeback_ev(ID, C) || C <- Changes], Action1}}.
 
 maybe_set_charged_back_status(?chargeback_status_accepted(), ChargebackBody, St) ->
     InterimPaymentAmount = get_remaining_payment_balance(St),
