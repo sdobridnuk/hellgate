@@ -6,10 +6,10 @@
 
 -export(
     [ create/2
-    , cancel/2
-    , reject/3
-    , accept/3
-    , reopen/3
+    , cancel/1
+    , reject/2
+    , accept/2
+    , reopen/2
     ]).
 
 -export(
@@ -161,32 +161,32 @@ create(Opts, CreateParams) ->
 
 %%----------------------------------------------------------------------------
 %% @doc
-%% cancel/2 will cancel the given chargeback. All funds
+%% cancel/1 will cancel the given chargeback. All funds
 %% will be trasferred back to the merchant as a result of this operation.
 %% @end
 %%----------------------------------------------------------------------------
--spec cancel(state(), opts()) ->
+-spec cancel(state()) ->
     {ok, result()} | no_return().
-cancel(State, Opts) ->
-    do_cancel(State, Opts).
+cancel(State) ->
+    do_cancel(State).
 
 %%----------------------------------------------------------------------------
 %% @doc
-%% reject/3 will reject the given chargeback, implying that no
+%% reject/2 will reject the given chargeback, implying that no
 %% sufficient evidence has been found to support the chargeback claim.
 %%
 %% Key parameters:
 %%    levy: the amount of cash to be levied from the merchant.
 %% @end
 %%----------------------------------------------------------------------------
--spec reject(state(), opts(), reject_params()) ->
+-spec reject(state(), reject_params()) ->
     {ok, result()} | no_return().
-reject(State, Opts, RejectParams) ->
-    do_reject(State, Opts, RejectParams).
+reject(State, RejectParams) ->
+    do_reject(State, RejectParams).
 
 %%----------------------------------------------------------------------------
 %% @doc
-%% accept/3 will accept the given chargeback, implying that
+%% accept/2 will accept the given chargeback, implying that
 %% sufficient evidence has been found to support the chargeback claim. The
 %% cost of the chargeback will be deducted from the merchant's account.
 %%
@@ -197,14 +197,14 @@ reject(State, Opts, RejectParams) ->
 %%          Will not change if undefined.
 %% @end
 %%----------------------------------------------------------------------------
--spec accept(state(), opts(), accept_params()) ->
+-spec accept(state(), accept_params()) ->
     {ok, result()} | no_return().
-accept(State, Opts, AcceptParams) ->
-    do_accept(State, Opts, AcceptParams).
+accept(State, AcceptParams) ->
+    do_accept(State, AcceptParams).
 
 %%----------------------------------------------------------------------------
 %% @doc
-%% reopen/3 will reopen the given chargeback, implying that
+%% reopen/2 will reopen the given chargeback, implying that
 %% the party that initiated the chargeback was not satisfied with the result
 %% and demands a new investigation. The chargeback progresses to its next
 %% stage as a result of this action.
@@ -214,10 +214,12 @@ accept(State, Opts, AcceptParams) ->
 %%    body: The sum of the chargeback. Will not change if undefined.
 %% @end
 %%----------------------------------------------------------------------------
--spec reopen(state(), opts(), reopen_params()) ->
+-spec reopen(state(), reopen_params()) ->
     {ok, result()} | no_return().
-reopen(State, Opts, ReopenParams) ->
-    do_reopen(State, Opts, ReopenParams).
+reopen(State, ReopenParams) ->
+    do_reopen(State, ReopenParams).
+
+%
 
 -spec merge_change(change(), state()) ->
     state().
@@ -255,9 +257,9 @@ do_create(Opts, CreateParams) ->
     Result     = {[?chargeback_created(Chargeback)], Action},
     {Chargeback, Result}.
 
--spec do_cancel(state(), opts()) ->
+-spec do_cancel(state()) ->
     {ok, result()} | no_return().
-do_cancel(State, _Opts) ->
+do_cancel(State) ->
     _      = validate_chargeback_is_pending(State),
     _      = validate_stage_is_chargeback(State),
     Action = hg_machine_action:instant(),
@@ -265,26 +267,26 @@ do_cancel(State, _Opts) ->
     Result = {[?chargeback_target_status_changed(Status)], Action},
     {ok, Result}.
 
--spec do_reject(state(), opts(), reject_params()) ->
+-spec do_reject(state(), reject_params()) ->
     {ok, result()} | no_return().
-do_reject(State, Opts, RejectParams) ->
+do_reject(State, RejectParams) ->
     _      = validate_chargeback_is_pending(State),
-    Result = build_reject_result(State, Opts, RejectParams),
+    Result = build_reject_result(State, RejectParams),
     {ok, Result}.
 
--spec do_accept(state(), opts(), accept_params()) ->
+-spec do_accept(state(), accept_params()) ->
     {ok, result()} | no_return().
-do_accept(State, Opts, AcceptParams) ->
+do_accept(State, AcceptParams) ->
     _      = validate_chargeback_is_pending(State),
-    Result = build_accept_result(State, Opts, AcceptParams),
+    Result = build_accept_result(State, AcceptParams),
     {ok, Result}.
 
--spec do_reopen(state(), opts(), reopen_params()) ->
+-spec do_reopen(state(), reopen_params()) ->
     {ok, result()} | no_return().
-do_reopen(State, Opts, ReopenParams) ->
+do_reopen(State, ReopenParams) ->
     _      = validate_chargeback_is_rejected(State),
     _      = validate_not_arbitration(State),
-    Result = build_reopen_result(State, Opts, ReopenParams),
+    Result = build_reopen_result(State, ReopenParams),
     {ok, Result}.
 
 -spec update_cash_flow(state(), action(), opts()) ->
@@ -318,8 +320,6 @@ build_chargeback(Opts, Params = ?chargeback_params(Levy, ParamsBody, Reason)) ->
     PartyRevision = get_opts_party_revision(Opts),
     _             = validate_payment_status(captured, Payment),
     FinalBody     = define_body(ParamsBody, Payment),
-    _             = validate_levy(Levy, Payment),
-    _             = validate_body_amount(FinalBody, Opts),
     #domain_InvoicePaymentChargeback{
         id              = Params#payproc_InvoicePaymentChargebackParams.id,
         created_at      = hg_datetime:format_now(),
@@ -332,9 +332,9 @@ build_chargeback(Opts, Params = ?chargeback_params(Levy, ParamsBody, Reason)) ->
         body            = FinalBody
     }.
 
--spec build_reject_result(state(), opts(), reject_params()) ->
+-spec build_reject_result(state(), reject_params()) ->
     result() | no_return().
-build_reject_result(State, _Opts, ?reject_params(ParamsLevy)) ->
+build_reject_result(State, ?reject_params(ParamsLevy)) ->
     Levy         = get_levy(State),
     FinalLevy    = define_params_cash(ParamsLevy, Levy),
     Action       = hg_machine_action:instant(),
@@ -344,15 +344,14 @@ build_reject_result(State, _Opts, ?reject_params(ParamsLevy)) ->
     Changes      = lists:append([LevyChange, StatusChange]),
     {Changes, Action}.
 
--spec build_accept_result(state(), opts(), accept_params()) ->
+-spec build_accept_result(state(), accept_params()) ->
     result() | no_return().
-build_accept_result(State, Opts, ?accept_params(ParamsLevy, ParamsBody)) ->
+build_accept_result(State, ?accept_params(ParamsLevy, ParamsBody)) ->
     Body         = get_body(State),
     Levy         = get_levy(State),
     Action       = hg_machine_action:instant(),
     FinalBody    = define_params_cash(ParamsBody, Body),
     FinalLevy    = define_params_cash(ParamsLevy, Levy),
-    _            = validate_body_amount(FinalBody, Opts),
     BodyChange   = body_change(FinalBody, Body),
     LevyChange   = levy_change(FinalLevy, Levy),
     Status       = ?chargeback_status_accepted(),
@@ -360,13 +359,12 @@ build_accept_result(State, Opts, ?accept_params(ParamsLevy, ParamsBody)) ->
     Changes      = lists:append([BodyChange, LevyChange, StatusChange]),
     {Changes, Action}.
 
--spec build_reopen_result(state(), opts(), reopen_params()) ->
+-spec build_reopen_result(state(), reopen_params()) ->
     result() | no_return().
-build_reopen_result(State, Opts, ?reopen_params(ParamsLevy, ParamsBody)) ->
+build_reopen_result(State, ?reopen_params(ParamsLevy, ParamsBody)) ->
     Body         = get_body(State),
     Levy         = get_levy(State),
     FinalBody    = define_params_cash(ParamsBody, Body),
-    _            = validate_body_amount(FinalBody, Opts),
     FinalLevy    = define_params_cash(ParamsLevy, Levy),
     Stage        = get_next_stage(State),
     Action       = hg_machine_action:instant(),
@@ -492,23 +490,6 @@ construct_chargeback_plan_id(State, Opts) ->
         genlib:to_binary(Stage)
     ]).
 
-get_invoice_state(InvoiceID) ->
-    case hg_invoice:get(InvoiceID) of
-        {ok, Invoice} ->
-            Invoice;
-        {error, notfound} ->
-            throw(#payproc_InvoiceNotFound{})
-    end.
-
-get_payment_state(InvoiceID, PaymentID) ->
-    Invoice = get_invoice_state(InvoiceID),
-    case hg_invoice:get_payment(PaymentID, Invoice) of
-        {ok, Payment} ->
-            Payment;
-        {error, notfound} ->
-            throw(#payproc_InvoicePaymentNotFound{})
-    end.
-
 collect_validation_varset(Party, Shop, Payment, State) ->
     #domain_Party{id = PartyID} = Party,
     #domain_Shop{
@@ -526,11 +507,6 @@ collect_validation_varset(Party, Shop, Payment, State) ->
     }.
 
 %% Validations
-
-validate_levy(?cash(_, SymCode), #domain_InvoicePayment{cost = ?cash(_, SymCode)}) ->
-    ok;
-validate_levy(?cash(_, SymCode), _Payment) ->
-    throw(#payproc_InconsistentChargebackCurrency{currency = SymCode}).
 
 validate_stage_is_chargeback(#chargeback_st{chargeback = Chargeback}) ->
     validate_stage_is_chargeback(Chargeback);
@@ -564,17 +540,6 @@ validate_payment_status(Status, #domain_InvoicePayment{status = {Status, _}}) ->
     ok;
 validate_payment_status(_, #domain_InvoicePayment{status = Status}) ->
     throw(#payproc_InvalidPaymentStatus{status = Status}).
-
-validate_body_amount(Cash, Opts) ->
-    PaymentState = get_payment_state(get_opts_invoice_id(Opts), get_opts_payment_id(Opts)),
-    InterimPaymentAmount = hg_invoice_payment:get_remaining_payment_balance(PaymentState),
-    PaymentAmount = hg_cash:sub(InterimPaymentAmount, Cash),
-    validate_remaining_payment_amount(PaymentAmount, InterimPaymentAmount).
-
-validate_remaining_payment_amount(?cash(Amount, _), _) when Amount >= 0 ->
-    ok;
-validate_remaining_payment_amount(?cash(Amount, _), Maximum) when Amount < 0 ->
-    throw(#payproc_InvoicePaymentAmountExceeded{maximum = Maximum}).
 
 %% Getters
 

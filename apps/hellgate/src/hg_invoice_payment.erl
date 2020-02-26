@@ -59,10 +59,10 @@
 -export([cancel_adjustment/3]).
 
 -export([create_chargeback/3]).
--export([cancel_chargeback/3]).
--export([reject_chargeback/4]).
--export([accept_chargeback/4]).
--export([reopen_chargeback/4]).
+-export([cancel_chargeback/2]).
+-export([reject_chargeback/3]).
+-export([accept_chargeback/3]).
+-export([reopen_chargeback/3]).
 
 %% Machine like
 
@@ -1143,48 +1143,73 @@ validate_provider_holds_terms(#domain_PaymentsProvisionTerms{holds = undefined})
 
 -spec create_chargeback(st(), opts(), hg_invoice_payment_chargeback:create_params()) ->
     {chargeback(), result()}.
-create_chargeback(St, Opts, Params) ->
+create_chargeback(St, Opts, Params = ?chargeback_params(Levy, Body, _Reason)) ->
     _ = assert_no_pending_chargebacks(St),
+    _ = validate_cash(Body, get_payment(St)),
+    _ = validate_cash(Levy, get_payment(St)),
+    _ = validate_chargeback_body_amount(Body, St),
     ChargebackID = get_chargeback_id(Params),
     CBOpts = Opts#{payment => get_payment(St)},
     {Chargeback, {Changes, Action}} = hg_invoice_payment_chargeback:create(CBOpts, Params),
     {Chargeback, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
 
--spec cancel_chargeback(chargeback_id(), st(), opts()) ->
+-spec cancel_chargeback(chargeback_id(), st()) ->
     {ok, result()}.
-cancel_chargeback(ChargebackID, St, Opts) ->
+cancel_chargeback(ChargebackID, St) ->
     ChargebackState = get_chargeback_state(ChargebackID, St),
-    CBOpts = Opts#{payment => get_payment(St)},
-    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:cancel(ChargebackState, CBOpts),
+    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:cancel(ChargebackState),
     {ok, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
 
--spec reject_chargeback(chargeback_id(), st(), opts(), hg_invoice_payment_chargeback:reject_params()) ->
+-spec reject_chargeback(chargeback_id(), st(), hg_invoice_payment_chargeback:reject_params()) ->
     {ok, result()}.
-reject_chargeback(ChargebackID, St, Opts, Params) ->
+reject_chargeback(ChargebackID, St, Params = ?reject_params(Levy)) ->
+    _ = validate_cash(Levy, get_payment(St)),
     ChargebackState = get_chargeback_state(ChargebackID, St),
-    CBOpts = Opts#{payment => get_payment(St)},
-    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:reject(ChargebackState, CBOpts, Params),
+    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:reject(ChargebackState, Params),
     {ok, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
 
--spec accept_chargeback(chargeback_id(), st(), opts(), hg_invoice_payment_chargeback:accept_params()) ->
+-spec accept_chargeback(chargeback_id(), st(), hg_invoice_payment_chargeback:accept_params()) ->
     {ok, result()}.
-accept_chargeback(ChargebackID, St, Opts, Params) ->
+accept_chargeback(ChargebackID, St, Params = ?accept_params(Levy, Body)) ->
+    _ = validate_cash(Body, get_payment(St)),
+    _ = validate_cash(Levy, get_payment(St)),
+    _ = validate_chargeback_body_amount(Body, St),
     ChargebackState = get_chargeback_state(ChargebackID, St),
-    CBOpts = Opts#{payment => get_payment(St)},
-    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:accept(ChargebackState, CBOpts, Params),
+    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:accept(ChargebackState, Params),
     {ok, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
 
--spec reopen_chargeback(chargeback_id(), st(), opts(), hg_invoice_payment_chargeback:reopen_params()) ->
+-spec reopen_chargeback(chargeback_id(), st(), hg_invoice_payment_chargeback:reopen_params()) ->
     {ok, result()}.
-reopen_chargeback(ChargebackID, St, Opts, Params) ->
+reopen_chargeback(ChargebackID, St, Params = ?reopen_params(Levy, Body)) ->
     _ = assert_no_pending_chargebacks(St),
+    _ = validate_cash(Body, get_payment(St)),
+    _ = validate_cash(Levy, get_payment(St)),
+    _ = validate_chargeback_body_amount(Body, St),
     ChargebackState = get_chargeback_state(ChargebackID, St),
-    CBOpts = Opts#{payment => get_payment(St)},
-    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:reopen(ChargebackState, CBOpts, Params),
+    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:reopen(ChargebackState, Params),
     {ok, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
 
 get_chargeback_id(#payproc_InvoicePaymentChargebackParams{id = ID}) ->
     ID.
+
+validate_chargeback_body_amount(undefined, _St) ->
+    ok;
+validate_chargeback_body_amount(?cash(_, _) = Cash, St) ->
+    InterimPaymentAmount = get_remaining_payment_balance(St),
+    PaymentAmount = hg_cash:sub(InterimPaymentAmount, Cash),
+    validate_remaining_payment_amount(PaymentAmount, InterimPaymentAmount).
+
+validate_remaining_payment_amount(?cash(Amount, _), _) when Amount >= 0 ->
+    ok;
+validate_remaining_payment_amount(?cash(Amount, _), Maximum) when Amount < 0 ->
+    throw(#payproc_InvoicePaymentAmountExceeded{maximum = Maximum}).
+
+validate_cash(?cash(_, SymCode), #domain_InvoicePayment{cost = ?cash(_, SymCode)}) ->
+    ok;
+validate_cash(undefined, _Payment) ->
+    ok;
+validate_cash(?cash(_, SymCode), _Payment) ->
+    throw(#payproc_InconsistentChargebackCurrency{currency = SymCode}).
 
 -spec refund(refund_params(), st(), opts()) ->
     {domain_refund(), result()}.
