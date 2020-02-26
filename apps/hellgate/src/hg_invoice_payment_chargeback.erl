@@ -318,7 +318,6 @@ build_chargeback(Opts, Params = ?chargeback_params(Levy, ParamsBody, Reason)) ->
     Revision      = hg_domain:head(),
     Payment       = get_opts_payment(Opts),
     PartyRevision = get_opts_party_revision(Opts),
-    _             = validate_payment_status(captured, Payment),
     FinalBody     = define_body(ParamsBody, Payment),
     #domain_InvoicePaymentChargeback{
         id              = Params#payproc_InvoicePaymentChargebackParams.id,
@@ -336,9 +335,8 @@ build_chargeback(Opts, Params = ?chargeback_params(Levy, ParamsBody, Reason)) ->
     result() | no_return().
 build_reject_result(State, ?reject_params(ParamsLevy)) ->
     Levy         = get_levy(State),
-    FinalLevy    = define_params_cash(ParamsLevy, Levy),
     Action       = hg_machine_action:instant(),
-    LevyChange   = levy_change(FinalLevy, Levy),
+    LevyChange   = levy_change(ParamsLevy, Levy),
     Status       = ?chargeback_status_rejected(),
     StatusChange = [?chargeback_target_status_changed(Status)],
     Changes      = lists:append([LevyChange, StatusChange]),
@@ -350,10 +348,8 @@ build_accept_result(State, ?accept_params(ParamsLevy, ParamsBody)) ->
     Body         = get_body(State),
     Levy         = get_levy(State),
     Action       = hg_machine_action:instant(),
-    FinalBody    = define_params_cash(ParamsBody, Body),
-    FinalLevy    = define_params_cash(ParamsLevy, Levy),
-    BodyChange   = body_change(FinalBody, Body),
-    LevyChange   = levy_change(FinalLevy, Levy),
+    BodyChange   = body_change(ParamsBody, Body),
+    LevyChange   = levy_change(ParamsLevy, Levy),
     Status       = ?chargeback_status_accepted(),
     StatusChange = [?chargeback_target_status_changed(Status)],
     Changes      = lists:append([BodyChange, LevyChange, StatusChange]),
@@ -364,12 +360,10 @@ build_accept_result(State, ?accept_params(ParamsLevy, ParamsBody)) ->
 build_reopen_result(State, ?reopen_params(ParamsLevy, ParamsBody)) ->
     Body         = get_body(State),
     Levy         = get_levy(State),
-    FinalBody    = define_params_cash(ParamsBody, Body),
-    FinalLevy    = define_params_cash(ParamsLevy, Levy),
     Stage        = get_next_stage(State),
     Action       = hg_machine_action:instant(),
-    BodyChange   = body_change(FinalBody, Body),
-    LevyChange   = levy_change(FinalLevy, Levy),
+    BodyChange   = body_change(ParamsBody, Body),
+    LevyChange   = levy_change(ParamsLevy, Levy),
     StageChange  = [?chargeback_stage_changed(Stage)],
     Status       = ?chargeback_status_pending(),
     StatusChange = [?chargeback_target_status_changed(Status)],
@@ -460,13 +454,6 @@ define_body(?cash(_, SymCode) = Cash, #domain_InvoicePayment{cost = ?cash(_, Sym
 define_body(?cash(_, SymCode), _Payment) ->
     throw(#payproc_InconsistentChargebackCurrency{currency = SymCode}).
 
-define_params_cash(undefined, CurrentBody) ->
-    CurrentBody;
-define_params_cash(?cash(_, SymCode) = Body, ?cash(_, SymCode) = _CurrentBody) ->
-    Body;
-define_params_cash(?cash(_, SymCode), _CurrentBody) ->
-    throw(#payproc_InconsistentChargebackCurrency{currency = SymCode}).
-
 prepare_cash_flow(State, CashFlowPlan, Opts) ->
     PlanID = construct_chargeback_plan_id(State, Opts),
     hg_accounting:plan(PlanID, CashFlowPlan).
@@ -535,11 +522,6 @@ validate_chargeback_is_pending(#domain_InvoicePaymentChargeback{status = ?charge
     ok;
 validate_chargeback_is_pending(#domain_InvoicePaymentChargeback{status = Status}) ->
     throw(#payproc_InvoicePaymentChargebackInvalidStatus{status = Status}).
-
-validate_payment_status(Status, #domain_InvoicePayment{status = {Status, _}}) ->
-    ok;
-validate_payment_status(_, #domain_InvoicePayment{status = Status}) ->
-    throw(#payproc_InvalidPaymentStatus{status = Status}).
 
 %% Getters
 
@@ -720,11 +702,13 @@ get_invoice_shop_id(#domain_Invoice{shop_id = ShopID}) ->
 
 %%
 
-body_change(Body, Body) -> [];
-body_change(FinalBody, _Body) -> [?chargeback_body_changed(FinalBody)].
+body_change(Body,        Body) -> [];
+body_change(undefined,  _Body) -> [];
+body_change(ParamsBody, _Body) -> [?chargeback_body_changed(ParamsBody)].
 
-levy_change(Levy, Levy) -> [];
-levy_change(FinalLevy, _Levy) -> [?chargeback_levy_changed(FinalLevy)].
+levy_change(Levy,        Levy) -> [];
+levy_change(undefined,  _Levy) -> [];
+levy_change(ParamsLevy, _Levy) -> [?chargeback_levy_changed(ParamsLevy)].
 
 %%
 

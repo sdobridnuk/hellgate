@@ -1148,6 +1148,7 @@ create_chargeback(St, Opts, Params = ?chargeback_params(Levy, Body, _Reason)) ->
     _ = validate_cash(Body, get_payment(St)),
     _ = validate_cash(Levy, get_payment(St)),
     _ = validate_chargeback_body_amount(Body, St),
+    _ = validate_payment_status(captured, get_payment(St)),
     ChargebackID = get_chargeback_id(Params),
     CBOpts = Opts#{payment => get_payment(St)},
     {Chargeback, {Changes, Action}} = hg_invoice_payment_chargeback:create(CBOpts, Params),
@@ -1191,6 +1192,11 @@ reopen_chargeback(ChargebackID, St, Params = ?reopen_params(Levy, Body)) ->
 
 get_chargeback_id(#payproc_InvoicePaymentChargebackParams{id = ID}) ->
     ID.
+
+validate_payment_status(Status, #domain_InvoicePayment{status = {Status, _}}) ->
+    ok;
+validate_payment_status(_, #domain_InvoicePayment{status = Status}) ->
+    throw(#payproc_InvalidPaymentStatus{status = Status}).
 
 validate_chargeback_body_amount(undefined, _St) ->
     ok;
