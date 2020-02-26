@@ -32,6 +32,13 @@
     , activity/0
     ]).
 
+-export_type(
+    [ create_params/0
+    , accept_params/0
+    , reject_params/0
+    , reopen_params/0
+    ]).
+
 -record( chargeback_st
        , { chargeback    :: undefined | chargeback()
          , target_status :: undefined | status()
@@ -378,23 +385,35 @@ build_chargeback_cash_flow(State, Opts) ->
     Invoice         = get_opts_invoice(Opts),
     Route           = get_opts_route(Opts),
     Party           = get_opts_party(Opts),
+    CreatedAt       = get_invoice_created_at(Invoice),
     ShopID          = get_invoice_shop_id(Invoice),
     Shop            = hg_party:get_shop(ShopID, Party),
     ContractID      = get_shop_contract_id(Shop),
     Contract        = hg_party:get_contract(ContractID, Party),
     VS              = collect_validation_varset(Party, Shop, Payment, State),
+    TermSet         = hg_party:get_terms(Contract, CreatedAt, Revision),
+    ServiceTerms    = get_merchant_chargeback_terms(TermSet),
     PaymentsTerms   = hg_routing:get_payments_terms(Route, Revision),
     ProviderTerms   = get_provider_chargeback_terms(PaymentsTerms, Payment),
-    CashFlow        = collect_chargeback_cash_flow(ProviderTerms, VS, Revision),
+    CashFlow        = collect_chargeback_cash_flow(State, ServiceTerms, ProviderTerms, VS, Revision),
     PmntInstitution = get_payment_institution(Contract, Revision),
     Provider        = get_route_provider(Route, Revision),
     AccountMap      = collect_account_map(Payment, Shop, PmntInstitution, Provider, VS, Revision),
     Context         = build_cash_flow_context(State),
     hg_cashflow:finalize(CashFlow, Context, AccountMap).
 
-collect_chargeback_cash_flow(ProviderTerms, VS, Revision) ->
+collect_chargeback_cash_flow(State, MerchantTerms, ProviderTerms, VS, Revision) ->
+    #domain_PaymentChargebackServiceTerms{fees = MerchantCashflowSelector} = MerchantTerms,
     #domain_PaymentChargebackProvisionTerms{cash_flow = ProviderCashflowSelector} = ProviderTerms,
-    reduce_selector(provider_chargeback_cash_flow, ProviderCashflowSelector, VS, Revision).
+    MerchantCF = reduce_selector(merchant_chargeback_fees, MerchantCashflowSelector, VS, Revision),
+    ProviderCF =
+        case get_target_status(State) of
+            ?chargeback_status_rejected() ->
+                [];
+            _NotRejected ->
+                reduce_selector(provider_chargeback_cash_flow, ProviderCashflowSelector, VS, Revision)
+        end,
+    MerchantCF ++ ProviderCF.
 
 collect_account_map(
     Payment,
@@ -426,13 +445,8 @@ collect_account_map(
             M
     end.
 
-build_cash_flow_context(State = #chargeback_st{target_status = ?chargeback_status_rejected()}) ->
-    #{operation_amount => get_levy(State)};
 build_cash_flow_context(State) ->
-    Cost = hg_cash:add(get_levy(State), get_body(State)),
-    #{operation_amount => Cost}.
-    % TODO: maybe split into operation amount and surplus
-    % #{operation_amount => get_body(State), surplus => get_levy(State)}.
+    #{operation_amount => get_body(State), surplus => get_levy(State)}.
 
 reduce_selector(Name, Selector, VS, Revision) ->
     case hg_selector:reduce(Selector, VS, Revision) of
@@ -441,6 +455,13 @@ reduce_selector(Name, Selector, VS, Revision) ->
         Ambiguous ->
             error({misconfiguration, {'Could not reduce selector to a value', {Name, Ambiguous}}})
     end.
+
+get_merchant_chargeback_terms(#domain_TermSet{payments = PaymentsTerms}) ->
+    get_merchant_chargeback_terms(PaymentsTerms);
+get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{chargebacks = Terms}) when Terms /= undefined ->
+    Terms;
+get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{chargebacks = undefined}) ->
+    throw(#payproc_OperationNotPermitted{}).
 
 get_provider_chargeback_terms(#domain_PaymentsProvisionTerms{chargebacks = undefined}, Payment) ->
     error({misconfiguration, {'No chargeback terms for a payment', Payment}});
@@ -582,6 +603,17 @@ get_next_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_charge
 get_next_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_pre_arbitration()}) ->
     ?chargeback_stage_arbitration().
 
+% -spec get_previous_stage(state() | chargeback()) ->
+%     undefined | ?chargeback_stage_pre_arbitration() | ?chargeback_stage_chargeback().
+% get_next_stage(#chargeback_st{chargeback = Chargeback}) ->
+%     get_next_stage(Chargeback);
+% get_next_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_chargeback()}) ->
+%     undefined;
+% get_next_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_pre_arbitration()}) ->
+%     ?chargeback_stage_chargeback();
+% get_next_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_arbitration()}) ->
+%     ?chargeback_stage_pre_arbitration().
+
 %% Setters
 
 -spec set(chargeback(), state() | undefined) ->
@@ -700,6 +732,9 @@ get_resource_payment_tool(#domain_DisposablePaymentResource{payment_tool = Payme
 get_invoice_shop_id(#domain_Invoice{shop_id = ShopID}) ->
     ShopID.
 
+get_invoice_created_at(#domain_Invoice{created_at = Dt}) ->
+    Dt.
+
 %%
 
 body_change(Body,        Body) -> [];
@@ -712,6 +747,8 @@ levy_change(ParamsLevy, _Levy) -> [?chargeback_levy_changed(ParamsLevy)].
 
 %%
 
+add_batch([], CashFlow) ->
+    CashFlow;
 add_batch(FinalCashFlow, []) ->
     [{1, FinalCashFlow}];
 add_batch(FinalCashFlow, Batches) ->

@@ -4857,7 +4857,14 @@ construct_domain_fixture() ->
                 payment_methods = {value, ?ordset([
                     ?pmt(bank_card, visa),
                     ?pmt(bank_card, mastercard)
-                ])}
+                ])},
+                fees = {value, [
+                    ?cfpost(
+                        {merchant, settlement},
+                        {system, settlement},
+                        ?share(1, 1, surplus)
+                    )
+                ]}
             },
             refunds = #domain_PaymentRefundsServiceTerms{
                 payment_methods = {value, ?ordset([
@@ -4977,7 +4984,14 @@ construct_domain_fixture() ->
                 payment_methods = {value, ?ordset([
                     ?pmt(bank_card, visa),
                     ?pmt(bank_card, mastercard)
-                ])}
+                ])},
+                fees = {value, [
+                    ?cfpost(
+                        {merchant, settlement},
+                        {system, settlement},
+                        ?share(1, 1, surplus)
+                    )
+                ]}
             },
             refunds = #domain_PaymentRefundsServiceTerms{
                 payment_methods = {value, ?ordset([
