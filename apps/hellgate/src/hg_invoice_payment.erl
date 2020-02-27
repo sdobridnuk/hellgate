@@ -1150,7 +1150,7 @@ create_chargeback(St, Opts, Params = ?chargeback_params(Levy, Body, _Reason)) ->
     _ = validate_chargeback_body_amount(Body, St),
     _ = validate_payment_status(captured, get_payment(St)),
     ChargebackID = get_chargeback_id(Params),
-    CBOpts = Opts#{payment => get_payment(St)},
+    CBOpts = Opts#{payment => get_payment(St), route => get_route(St)},
     {Chargeback, {Changes, Action}} = hg_invoice_payment_chargeback:create(CBOpts, Params),
     {Chargeback, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
 

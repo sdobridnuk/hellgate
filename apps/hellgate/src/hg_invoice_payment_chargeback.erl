@@ -57,7 +57,7 @@
     :: #{ party   := party()
         , invoice := invoice()
         , payment := payment()
-        , route   => route()
+        , route   := route()
         }.
 
 -type cash_flow_plans()
