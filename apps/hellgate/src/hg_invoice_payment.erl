@@ -1335,14 +1335,14 @@ get_remaining_payment_balance(St) ->
         fun
             (#payproc_InvoicePaymentRefund{refund = R}, Acc) ->
                 case get_refund_status(R) of
-                    {S, _} when S == succeeded ->
+                    #domain_InvoicePaymentRefundSucceeded{} ->
                         hg_cash:sub(Acc, get_refund_cash(R));
                     _ ->
                         Acc
                 end;
             (CB = #domain_InvoicePaymentChargeback{}, Acc) ->
                 case hg_invoice_payment_chargeback:get_status(CB) of
-                    {S, _} when S == accepted ->
+                    #domain_InvoicePaymentChargebackAccepted{} ->
                         hg_cash:sub(Acc, hg_invoice_payment_chargeback:get_body(CB));
                     _ ->
                         Acc
