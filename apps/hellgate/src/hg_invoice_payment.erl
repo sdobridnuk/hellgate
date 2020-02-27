@@ -1145,8 +1145,8 @@ validate_provider_holds_terms(#domain_PaymentsProvisionTerms{holds = undefined})
     {chargeback(), result()}.
 create_chargeback(St, Opts, Params = ?chargeback_params(Levy, Body, _Reason)) ->
     _ = assert_no_pending_chargebacks(St),
-    _ = validate_cash(Body, get_payment(St)),
-    _ = validate_cash(Levy, get_payment(St)),
+    _ = validate_currency(Body, get_payment(St)),
+    _ = validate_currency(Levy, get_payment(St)),
     _ = validate_chargeback_body_amount(Body, St),
     _ = validate_payment_status(captured, get_payment(St)),
     ChargebackID = get_chargeback_id(Params),
@@ -1164,7 +1164,7 @@ cancel_chargeback(ChargebackID, St) ->
 -spec reject_chargeback(chargeback_id(), st(), hg_invoice_payment_chargeback:reject_params()) ->
     {ok, result()}.
 reject_chargeback(ChargebackID, St, Params = ?reject_params(Levy)) ->
-    _ = validate_cash(Levy, get_payment(St)),
+    _ = validate_currency(Levy, get_payment(St)),
     ChargebackState = get_chargeback_state(ChargebackID, St),
     {ok, {Changes, Action}} = hg_invoice_payment_chargeback:reject(ChargebackState, Params),
     {ok, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
@@ -1172,8 +1172,8 @@ reject_chargeback(ChargebackID, St, Params = ?reject_params(Levy)) ->
 -spec accept_chargeback(chargeback_id(), st(), hg_invoice_payment_chargeback:accept_params()) ->
     {ok, result()}.
 accept_chargeback(ChargebackID, St, Params = ?accept_params(Levy, Body)) ->
-    _ = validate_cash(Body, get_payment(St)),
-    _ = validate_cash(Levy, get_payment(St)),
+    _ = validate_currency(Body, get_payment(St)),
+    _ = validate_currency(Levy, get_payment(St)),
     _ = validate_chargeback_body_amount(Body, St),
     ChargebackState = get_chargeback_state(ChargebackID, St),
     {ok, {Changes, Action}} = hg_invoice_payment_chargeback:accept(ChargebackState, Params),
@@ -1183,8 +1183,8 @@ accept_chargeback(ChargebackID, St, Params = ?accept_params(Levy, Body)) ->
     {ok, result()}.
 reopen_chargeback(ChargebackID, St, Params = ?reopen_params(Levy, Body)) ->
     _ = assert_no_pending_chargebacks(St),
-    _ = validate_cash(Body, get_payment(St)),
-    _ = validate_cash(Levy, get_payment(St)),
+    _ = validate_currency(Body, get_payment(St)),
+    _ = validate_currency(Levy, get_payment(St)),
     _ = validate_chargeback_body_amount(Body, St),
     ChargebackState = get_chargeback_state(ChargebackID, St),
     {ok, {Changes, Action}} = hg_invoice_payment_chargeback:reopen(ChargebackState, Params),
@@ -1210,11 +1210,11 @@ validate_remaining_payment_amount(?cash(Amount, _), _) when Amount >= 0 ->
 validate_remaining_payment_amount(?cash(Amount, _), Maximum) when Amount < 0 ->
     throw(#payproc_InvoicePaymentAmountExceeded{maximum = Maximum}).
 
-validate_cash(?cash(_, SymCode), #domain_InvoicePayment{cost = ?cash(_, SymCode)}) ->
+validate_currency(?cash(_, SymCode), #domain_InvoicePayment{cost = ?cash(_, SymCode)}) ->
     ok;
-validate_cash(undefined, _Payment) ->
+validate_currency(undefined, _Payment) ->
     ok;
-validate_cash(?cash(_, SymCode), _Payment) ->
+validate_currency(?cash(_, SymCode), _Payment) ->
     throw(#payproc_InconsistentChargebackCurrency{currency = SymCode}).
 
 -spec refund(refund_params(), st(), opts()) ->
