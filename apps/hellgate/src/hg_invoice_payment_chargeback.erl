@@ -111,10 +111,10 @@
     :: hg_machine_action:t().
 
 -type activity()
-    :: new
-     | updating
-     | accounter
-     | accounter_finalise
+    :: preparing_initial_cash_flow
+     | updating_chargeback
+     | updating_cash_flow
+     | finalising_accounter
      .
 
 -spec get(state()) ->
@@ -248,11 +248,11 @@ merge_change(?chargeback_cash_flow_changed(CashFlow), State) ->
 
 -spec process_timeout(activity(), state(), action(), opts()) ->
     result().
-process_timeout(new, State, _Action, Opts) ->
+process_timeout(preparing_initial_cash_flow, State, _Action, Opts) ->
     update_cash_flow(State, hg_machine_action:new(), Opts);
-process_timeout(accounter, State, _Action, Opts) ->
+process_timeout(updating_cash_flow, State, _Action, Opts) ->
     update_cash_flow(State, hg_machine_action:instant(), Opts);
-process_timeout(accounter_finalise, State, Action, Opts) ->
+process_timeout(finalising_accounter, State, Action, Opts) ->
     finalise(State, Action, Opts).
 
 %% Private

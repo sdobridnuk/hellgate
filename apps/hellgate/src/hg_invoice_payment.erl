@@ -1751,7 +1751,7 @@ process_cash_flow_building(Route, VS, Payment, PaymentInstitution, Revision, Opt
 %%
 
 -spec process_chargeback(chargeback_activity_type(), chargeback_id(), action(), st()) -> machine_result().
-process_chargeback(Type = accounter_finalise, ID, Action0, St) ->
+process_chargeback(Type = finalising_accounter, ID, Action0, St) ->
     ChargebackState    = get_chargeback_state(ID, St),
     ChargebackOpts     = get_chargeback_opts(St),
     ChargebackBody     = hg_invoice_payment_chargeback:get_body(ChargebackState),
@@ -2703,42 +2703,42 @@ merge_change(Change = ?chargeback_ev(ID, Event), St, Opts) ->
     St1 = case Event of
         ?chargeback_created(_) ->
             _ = validate_transition(idle, Change, St, Opts),
-            St#st{activity = {chargeback, ID, new}};
+            St#st{activity = {chargeback, ID, preparing_initial_cash_flow}};
         ?chargeback_stage_changed(_) ->
             _ = validate_transition(idle, Change, St, Opts),
             St;
         ?chargeback_levy_changed(_) ->
-            _ = validate_transition([idle, {chargeback, ID, updating}], Change, St, Opts),
-            St#st{activity = {chargeback, ID, updating}};
+            _ = validate_transition([idle, {chargeback, ID, updating_chargeback}], Change, St, Opts),
+            St#st{activity = {chargeback, ID, updating_chargeback}};
         ?chargeback_body_changed(_) ->
-            _ = validate_transition([idle, {chargeback, ID, updating}], Change, St, Opts),
-            St#st{activity = {chargeback, ID, updating}};
+            _ = validate_transition([idle, {chargeback, ID, updating_chargeback}], Change, St, Opts),
+            St#st{activity = {chargeback, ID, updating_chargeback}};
         ?chargeback_cash_flow_changed(_) ->
             case St of
-                #st{activity = {chargeback, ID, new}} ->
-                    _ = validate_transition({chargeback, ID, new}, Change, St, Opts),
+                #st{activity = {chargeback, ID, preparing_initial_cash_flow}} ->
+                    _ = validate_transition({chargeback, ID, preparing_initial_cash_flow}, Change, St, Opts),
                     St#st{activity = idle};
-                #st{activity = {chargeback, ID, accounter}} ->
-                    _ = validate_transition({chargeback, ID, accounter}, Change, St, Opts),
-                    St#st{activity = {chargeback, ID, accounter_finalise}}
+                #st{activity = {chargeback, ID, updating_cash_flow}} ->
+                    _ = validate_transition({chargeback, ID, updating_cash_flow}, Change, St, Opts),
+                    St#st{activity = {chargeback, ID, finalising_accounter}}
             end;
         ?chargeback_target_status_changed(?chargeback_status_cancelled()) ->
             _ = validate_transition(idle, Change, St, Opts),
-            St#st{activity = {chargeback, ID, accounter_finalise}};
+            St#st{activity = {chargeback, ID, finalising_accounter}};
         ?chargeback_target_status_changed(?chargeback_status_accepted()) ->
             case St of
                 #st{activity = idle} ->
-                    _ = validate_transition([idle, {chargeback, ID, updating}], Change, St, Opts),
-                    St#st{activity = {chargeback, ID, accounter_finalise}};
-                #st{activity = {chargeback, ID, updating}} ->
-                    _ = validate_transition([idle, {chargeback, ID, updating}], Change, St, Opts),
-                    St#st{activity = {chargeback, ID, accounter}}
+                    _ = validate_transition([idle, {chargeback, ID, updating_chargeback}], Change, St, Opts),
+                    St#st{activity = {chargeback, ID, finalising_accounter}};
+                #st{activity = {chargeback, ID, updating_chargeback}} ->
+                    _ = validate_transition([idle, {chargeback, ID, updating_chargeback}], Change, St, Opts),
+                    St#st{activity = {chargeback, ID, updating_cash_flow}}
             end;
         ?chargeback_target_status_changed(_) ->
-            _ = validate_transition([idle, {chargeback, ID, updating}], Change, St, Opts),
-            St#st{activity = {chargeback, ID, accounter}};
+            _ = validate_transition([idle, {chargeback, ID, updating_chargeback}], Change, St, Opts),
+            St#st{activity = {chargeback, ID, updating_cash_flow}};
         ?chargeback_status_changed(_) ->
-            _ = validate_transition([idle, {chargeback, ID, accounter_finalise}], Change, St, Opts),
+            _ = validate_transition([idle, {chargeback, ID, finalising_accounter}], Change, St, Opts),
             St#st{activity = idle}
     end,
     ChargebackSt = merge_chargeback_change(Event, try_get_chargeback_state(ID, St1)),
