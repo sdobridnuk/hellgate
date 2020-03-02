@@ -1703,6 +1703,11 @@ get_adjustment_fixture(Revision) ->
                                 {merchant, settlement},
                                 {system, settlement},
                                 ?share(1, 1, operation_amount)
+                            ),
+                            ?cfpost(
+                                {merchant, settlement},
+                                {system, settlement},
+                                ?share(1, 1, surplus)
                             )
                         ]}
                     }
@@ -3678,6 +3683,11 @@ get_cashflow_rounding_fixture(Revision) ->
                                 {merchant, settlement},
                                 {system, settlement},
                                 ?share(1, 1, operation_amount)
+                            ),
+                            ?cfpost(
+                                {merchant, settlement},
+                                {system, settlement},
+                                ?share(1, 1, surplus)
                             )
                         ]}
                     }
@@ -4860,8 +4870,13 @@ construct_domain_fixture() ->
                 ])},
                 fees = {value, [
                     ?cfpost(
-                        {merchant, settlement},
                         {system, settlement},
+                        {provider, settlement},
+                        ?share(1, 1, operation_amount)
+                    ),
+                    ?cfpost(
+                        {system, settlement},
+                        {provider, settlement},
                         ?share(1, 1, surplus)
                     )
                 ]}
@@ -4987,8 +5002,13 @@ construct_domain_fixture() ->
                 ])},
                 fees = {value, [
                     ?cfpost(
-                        {merchant, settlement},
                         {system, settlement},
+                        {provider, settlement},
+                        ?share(1, 1, operation_amount)
+                    ),
+                    ?cfpost(
+                        {system, settlement},
+                        {provider, settlement},
                         ?share(1, 1, surplus)
                     )
                 ]}
@@ -5375,6 +5395,11 @@ construct_domain_fixture() ->
                                 {merchant, settlement},
                                 {system, settlement},
                                 ?share(1, 1, operation_amount)
+                            ),
+                            ?cfpost(
+                                {merchant, settlement},
+                                {system, settlement},
+                                ?share(1, 1, surplus)
                             )
                         ]}
                     }
@@ -5473,6 +5498,11 @@ construct_domain_fixture() ->
                                 {merchant, settlement},
                                 {system, settlement},
                                 ?share(1, 1, operation_amount)
+                            ),
+                            ?cfpost(
+                                {merchant, settlement},
+                                {system, settlement},
+                                ?share(1, 1, surplus)
                             )
                         ]}
                     }
@@ -5814,6 +5844,11 @@ payments_w_bank_card_issuer_conditions_fixture(Revision) ->
                                 {merchant, settlement},
                                 {system, settlement},
                                 ?share(1, 1, operation_amount)
+                            ),
+                            ?cfpost(
+                                {merchant, settlement},
+                                {system, settlement},
+                                ?share(1, 1, surplus)
                             )
                         ]}
                     }
@@ -6049,6 +6084,11 @@ construct_term_set_for_partial_capture_provider_permit(Revision) ->
                                 {merchant, settlement},
                                 {system, settlement},
                                 ?share(1, 1, operation_amount)
+                            ),
+                            ?cfpost(
+                                {merchant, settlement},
+                                {system, settlement},
+                                ?share(1, 1, surplus)
                             )
                         ]}
                     },
