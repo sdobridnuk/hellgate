@@ -159,7 +159,7 @@ is_pending(#domain_InvoicePaymentChargeback{status = _NotPending}) ->
 %% Key parameters:
 %%    levy: the amount of cash to be levied from the merchant.
 %%    body: The sum of the chargeback.
-%%            Will default to full amount if undefined.
+%%            Will default to full remaining amount if undefined.
 %% @end
 %%----------------------------------------------------------------------------
 -spec create(opts(), create_params()) ->

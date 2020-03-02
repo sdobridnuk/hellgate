@@ -1143,15 +1143,17 @@ validate_provider_holds_terms(#domain_PaymentsProvisionTerms{holds = undefined})
 
 -spec create_chargeback(st(), opts(), hg_invoice_payment_chargeback:create_params()) ->
     {chargeback(), result()}.
-create_chargeback(St, Opts, Params = ?chargeback_params(Levy, Body, _Reason)) ->
+create_chargeback(St, Opts, Params = ?chargeback_params(Levy, ParamsBody, _Reason)) ->
     _ = assert_no_pending_chargebacks(St),
-    _ = validate_currency(Body, get_payment(St)),
+    _ = validate_currency(ParamsBody, get_payment(St)),
     _ = validate_currency(Levy, get_payment(St)),
-    _ = validate_chargeback_body_amount(Body, St),
+    _ = validate_chargeback_body_amount(ParamsBody, St),
     _ = validate_payment_status(captured, get_payment(St)),
+    Body         = define_chargeback_body(ParamsBody, St),
     ChargebackID = get_chargeback_id(Params),
-    CBOpts = Opts#{payment => get_payment(St), route => get_route(St)},
-    {Chargeback, {Changes, Action}} = hg_invoice_payment_chargeback:create(CBOpts, Params),
+    CBOpts       = Opts#{payment => get_payment(St), route => get_route(St)},
+    NewParams    = Params#payproc_InvoicePaymentChargebackParams{body = Body},
+    {Chargeback, {Changes, Action}} = hg_invoice_payment_chargeback:create(CBOpts, NewParams),
     {Chargeback, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
 
 -spec cancel_chargeback(chargeback_id(), st()) ->
@@ -1192,6 +1194,11 @@ reopen_chargeback(ChargebackID, St, Params = ?reopen_params(Levy, Body)) ->
 
 get_chargeback_id(#payproc_InvoicePaymentChargebackParams{id = ID}) ->
     ID.
+
+define_chargeback_body(undefined, St) ->
+    get_remaining_payment_balance(St);
+define_chargeback_body(Cash, _St) ->
+    Cash.
 
 validate_payment_status(Status, #domain_InvoicePayment{status = {Status, _}}) ->
     ok;
