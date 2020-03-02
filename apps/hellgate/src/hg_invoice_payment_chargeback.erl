@@ -397,24 +397,18 @@ build_chargeback_cash_flow(State, Opts) ->
     ServiceTerms    = get_merchant_chargeback_terms(TermSet),
     PaymentsTerms   = hg_routing:get_payments_terms(Route, Revision),
     ProviderTerms   = get_provider_chargeback_terms(PaymentsTerms, Payment),
-    CashFlow        = collect_chargeback_cash_flow(State, ServiceTerms, ProviderTerms, VS, Revision),
+    CashFlow        = collect_chargeback_cash_flow(ServiceTerms, ProviderTerms, VS, Revision),
     PmntInstitution = get_payment_institution(Contract, Revision),
     Provider        = get_route_provider(Route, Revision),
     AccountMap      = collect_account_map(Payment, Shop, PmntInstitution, Provider, VS, Revision),
     Context         = build_cash_flow_context(State),
     hg_cashflow:finalize(CashFlow, Context, AccountMap).
 
-collect_chargeback_cash_flow(State, MerchantTerms, ProviderTerms, VS, Revision) ->
+collect_chargeback_cash_flow(MerchantTerms, ProviderTerms, VS, Revision) ->
     #domain_PaymentChargebackServiceTerms{fees = MerchantCashflowSelector} = MerchantTerms,
     #domain_PaymentChargebackProvisionTerms{cash_flow = ProviderCashflowSelector} = ProviderTerms,
     MerchantCF = reduce_selector(merchant_chargeback_fees, MerchantCashflowSelector, VS, Revision),
-    ProviderCF =
-        case get_target_status(State) of
-            ?chargeback_status_rejected() ->
-                [];
-            _NotRejected ->
-                reduce_selector(provider_chargeback_cash_flow, ProviderCashflowSelector, VS, Revision)
-        end,
+    ProviderCF = reduce_selector(provider_chargeback_cash_flow, ProviderCashflowSelector, VS, Revision),
     MerchantCF ++ ProviderCF.
 
 collect_account_map(
@@ -447,6 +441,9 @@ collect_account_map(
             M
     end.
 
+build_cash_flow_context(State = #chargeback_st{target_status = ?chargeback_status_rejected()}) ->
+    ?cash(_Amount, SymCode) = get_body(State),
+    #{operation_amount => ?cash(0, SymCode), surplus => get_levy(State)};
 build_cash_flow_context(State) ->
     #{operation_amount => get_body(State), surplus => get_levy(State)}.
 
