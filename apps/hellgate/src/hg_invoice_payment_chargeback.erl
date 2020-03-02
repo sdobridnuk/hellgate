@@ -42,6 +42,7 @@
 -record( chargeback_st
        , { chargeback    :: undefined | chargeback()
          , target_status :: undefined | status()
+         , state = init  :: init | active
          , cash_flow_plans =
                #{ ?chargeback_stage_chargeback()      => []
                 , ?chargeback_stage_pre_arbitration() => []
@@ -267,6 +268,7 @@ do_create(Opts, CreateParams) ->
 -spec do_cancel(state()) ->
     {ok, result()} | no_return().
 do_cancel(State) ->
+    _      = validate_not_initialising(State),
     _      = validate_chargeback_is_pending(State),
     _      = validate_stage_is_chargeback(State),
     Action = hg_machine_action:instant(),
@@ -516,6 +518,11 @@ collect_validation_varset(Party, Shop, Payment, State) ->
 
 %% Validations
 
+validate_not_initialising(#chargeback_st{state = active}) ->
+    ok;
+validate_not_initialising(#chargeback_st{state = init}) ->
+    throw(#payproc_InvoicePaymentChargebackNotFound{}).
+
 validate_stage_is_chargeback(#chargeback_st{chargeback = Chargeback}) ->
     validate_stage_is_chargeback(Chargeback);
 validate_stage_is_chargeback(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_chargeback()}) ->
@@ -628,7 +635,7 @@ set(Chargeback, #chargeback_st{} = State) ->
 set_cash_flow(CashFlow, #chargeback_st{cash_flow_plans = Plans} = State) ->
     Stage = get_stage(State),
     Plan = build_updated_plan(CashFlow, State),
-    State#chargeback_st{cash_flow_plans = Plans#{Stage := Plan}}.
+    State#chargeback_st{cash_flow_plans = Plans#{Stage := Plan}, state = active}.
 
 -spec set_target_status(status() | undefined, state()) ->
     state().
