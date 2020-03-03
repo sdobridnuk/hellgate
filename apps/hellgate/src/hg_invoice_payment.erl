@@ -1165,31 +1165,24 @@ cancel_chargeback(ChargebackID, St) ->
 
 -spec reject_chargeback(chargeback_id(), st(), hg_invoice_payment_chargeback:reject_params()) ->
     {ok, result()}.
-reject_chargeback(ChargebackID, St, Params = ?reject_params(Levy)) ->
-    _ = validate_currency(Levy, get_payment(St)),
+reject_chargeback(ChargebackID, St, Params) ->
     ChargebackState = get_chargeback_state(ChargebackID, St),
-    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:reject(ChargebackState, Params),
+    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:reject(ChargebackState, St, Params),
     {ok, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
 
 -spec accept_chargeback(chargeback_id(), st(), hg_invoice_payment_chargeback:accept_params()) ->
     {ok, result()}.
-accept_chargeback(ChargebackID, St, Params = ?accept_params(Levy, Body)) ->
-    _ = validate_currency(Body, get_payment(St)),
-    _ = validate_currency(Levy, get_payment(St)),
-    _ = validate_chargeback_body_amount(Body, St),
+accept_chargeback(ChargebackID, St, Params) ->
     ChargebackState = get_chargeback_state(ChargebackID, St),
-    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:accept(ChargebackState, Params),
+    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:accept(ChargebackState, St, Params),
     {ok, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
 
 -spec reopen_chargeback(chargeback_id(), st(), hg_invoice_payment_chargeback:reopen_params()) ->
     {ok, result()}.
-reopen_chargeback(ChargebackID, St, Params = ?reopen_params(Levy, Body)) ->
+reopen_chargeback(ChargebackID, St, Params) ->
     _ = assert_no_pending_chargebacks(St),
-    _ = validate_currency(Body, get_payment(St)),
-    _ = validate_currency(Levy, get_payment(St)),
-    _ = validate_chargeback_body_amount(Body, St),
     ChargebackState = get_chargeback_state(ChargebackID, St),
-    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:reopen(ChargebackState, Params),
+    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:reopen(ChargebackState, St, Params),
     {ok, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
 
 get_chargeback_id(#payproc_InvoicePaymentChargebackParams{id = ID}) ->
