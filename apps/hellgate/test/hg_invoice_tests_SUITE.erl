@@ -2855,10 +2855,12 @@ start_chargeback_partial_capture(C, Cost, Partial, CBParams) ->
     Account      = Shop#domain_Shop.account,
     SettlementID = Account#domain_ShopAccount.settlement,
     Settlement0  = hg_ct_helper:get_balance(SettlementID),
-    Fee          = 450, % 0.045
+    % Fee          = 450, % 0.045
     ?assertEqual(0, maps:get(min_available_amount, Settlement0)),
     InvoiceID    = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), Cost, C),
-    PaymentID    = process_payment(InvoiceID, make_payment_params({hold, cancel}), Client),
+    {PaymentTool, Session} = hg_dummy_provider:make_payment_tool(no_preauth_mc),
+    PaymentParams = make_payment_params(PaymentTool, Session, {hold, cancel}),
+    PaymentID    = process_payment(InvoiceID, PaymentParams, Client),
     ok = hg_client_invoicing:capture_payment(InvoiceID, PaymentID, <<"ok">>, Cash, Client),
     [
        ?payment_ev(PaymentID, ?payment_capture_started(Reason, Cash, _)),
@@ -2868,8 +2870,8 @@ start_chargeback_partial_capture(C, Cost, Partial, CBParams) ->
         ?payment_ev(PaymentID, ?session_ev(?captured(Reason, Cash), ?session_started()))
     ] = next_event(InvoiceID, Client),
     PaymentID = await_payment_capture_finish(InvoiceID, PaymentID, Reason, Client, 0, Cash),
-    Settlement1  = hg_ct_helper:get_balance(SettlementID),
-    ?assertEqual(Partial - Fee, maps:get(min_available_amount, Settlement1)),
+    % Settlement1  = hg_ct_helper:get_balance(SettlementID),
+    % ?assertEqual(Partial - Fee, maps:get(min_available_amount, Settlement1)),
     Chargeback   = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
     {InvoiceID, PaymentID, SettlementID, Chargeback}.
 
@@ -5534,6 +5536,12 @@ construct_domain_fixture() ->
                                     definition = {payment_system_is, visa}
                                 }}}},
                                 then_ = {value, ?hold_lifetime(5)}
+                            },
+                            #domain_HoldLifetimeDecision{
+                                if_   = {condition, {payment_tool, {bank_card, #domain_BankCardCondition{
+                                    definition = {payment_system_is, mastercard}
+                                }}}},
+                                then_ = {value, ?hold_lifetime(20)}
                             }
                         ]}
                     },
