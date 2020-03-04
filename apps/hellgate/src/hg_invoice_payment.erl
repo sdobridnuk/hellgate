@@ -351,8 +351,8 @@ get_opts(#st{opts = Opts}) ->
 
 -spec get_chargeback_opts(st()) -> hg_invoice_payment_chargeback:opts().
 
-get_chargeback_opts(#st{opts = Opts, payment = Payment, route = Route}) ->
-    maps:merge(Opts, #{payment => Payment, route => Route}).
+get_chargeback_opts(#st{opts = Opts} = St) ->
+    maps:merge(Opts, #{payment_state => St}).
 
 %%
 
@@ -1143,17 +1143,12 @@ validate_provider_holds_terms(#domain_PaymentsProvisionTerms{holds = undefined})
 
 -spec create_chargeback(st(), opts(), hg_invoice_payment_chargeback:create_params()) ->
     {chargeback(), result()}.
-create_chargeback(St, Opts, Params = ?chargeback_params(Levy, ParamsBody, _Reason)) ->
+create_chargeback(St, Opts, Params) ->
     _ = assert_no_pending_chargebacks(St),
-    _ = validate_currency(ParamsBody, get_payment(St)),
-    _ = validate_currency(Levy, get_payment(St)),
-    _ = validate_chargeback_body_amount(ParamsBody, St),
     _ = validate_payment_status(captured, get_payment(St)),
-    Body         = define_chargeback_body(ParamsBody, St),
     ChargebackID = get_chargeback_id(Params),
-    CBOpts       = Opts#{payment => get_payment(St), route => get_route(St)},
-    NewParams    = Params#payproc_InvoicePaymentChargebackParams{body = Body},
-    {Chargeback, {Changes, Action}} = hg_invoice_payment_chargeback:create(CBOpts, NewParams),
+    CBOpts       = Opts#{payment_state => St},
+    {Chargeback, {Changes, Action}} = hg_invoice_payment_chargeback:create(CBOpts, Params),
     {Chargeback, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
 
 -spec cancel_chargeback(chargeback_id(), st()) ->
@@ -1188,34 +1183,10 @@ reopen_chargeback(ChargebackID, St, Params) ->
 get_chargeback_id(#payproc_InvoicePaymentChargebackParams{id = ID}) ->
     ID.
 
-define_chargeback_body(undefined, St) ->
-    get_remaining_payment_balance(St);
-define_chargeback_body(Cash, _St) ->
-    Cash.
-
 validate_payment_status(Status, #domain_InvoicePayment{status = {Status, _}}) ->
     ok;
 validate_payment_status(_, #domain_InvoicePayment{status = Status}) ->
     throw(#payproc_InvalidPaymentStatus{status = Status}).
-
-validate_chargeback_body_amount(undefined, _St) ->
-    ok;
-validate_chargeback_body_amount(?cash(_, _) = Cash, St) ->
-    InterimPaymentAmount = get_remaining_payment_balance(St),
-    PaymentAmount = hg_cash:sub(InterimPaymentAmount, Cash),
-    validate_remaining_payment_amount(PaymentAmount, InterimPaymentAmount).
-
-validate_remaining_payment_amount(?cash(Amount, _), _) when Amount >= 0 ->
-    ok;
-validate_remaining_payment_amount(?cash(Amount, _), Maximum) when Amount < 0 ->
-    throw(#payproc_InvoicePaymentAmountExceeded{maximum = Maximum}).
-
-validate_currency(?cash(_, SymCode), #domain_InvoicePayment{cost = ?cash(_, SymCode)}) ->
-    ok;
-validate_currency(undefined, _Payment) ->
-    ok;
-validate_currency(?cash(_, SymCode), _Payment) ->
-    throw(#payproc_InconsistentChargebackCurrency{currency = SymCode}).
 
 -spec refund(refund_params(), st(), opts()) ->
     {domain_refund(), result()}.
