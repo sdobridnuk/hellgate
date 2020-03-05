@@ -804,20 +804,12 @@ validate_refund_time(RefundCreatedAt, PaymentCreatedAt, TimeSpanSelector, VS, Re
     end.
 
 collect_chargeback_varset(
-    #domain_PaymentChargebackServiceTerms{
-        payment_methods  = PaymentMethodSelector
-    },
+    #domain_PaymentChargebackServiceTerms{ },
     VS,
-    Revision
+    _Revision
 ) ->
-    CBPMs = reduce_selector(payment_methods, PaymentMethodSelector, VS, Revision),
-    case ordsets:is_element(hg_payment_tool:get_method(maps:get(payment_tool, VS)), CBPMs) of
-        true ->
-            % nothing here yet
-            VS#{chargebacks => #{}};
-        false ->
-            VS
-    end;
+    % nothing here yet
+    VS;
 collect_chargeback_varset(undefined, VS, _Revision) ->
     VS.
 

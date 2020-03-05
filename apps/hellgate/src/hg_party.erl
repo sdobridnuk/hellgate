@@ -626,20 +626,20 @@ merge_partial_refunds_terms(Terms0, Terms1) ->
 
 merge_chargeback_terms(
     #domain_PaymentChargebackServiceTerms{
-        payment_methods = Pm0,
+        allow = Allow0,
         fees = Fee0,
         eligibility_time = ElTime0
     },
     #domain_PaymentChargebackServiceTerms{
-        payment_methods = Pm1,
+        allow = Allow1,
         fees = Fee1,
         eligibility_time = ElTime1
     }
 ) ->
     #domain_PaymentChargebackServiceTerms{
-        payment_methods     = hg_utils:select_defined(Pm1, Pm0),
-        fees                = hg_utils:select_defined(Fee1, Fee0),
-        eligibility_time    = hg_utils:select_defined(ElTime1, ElTime0)
+        allow             = hg_utils:select_defined(Allow1, Allow0),
+        fees              = hg_utils:select_defined(Fee1, Fee0),
+        eligibility_time  = hg_utils:select_defined(ElTime1, ElTime0)
     };
 merge_chargeback_terms(Terms0, Terms1) ->
     hg_utils:select_defined(Terms1, Terms0).

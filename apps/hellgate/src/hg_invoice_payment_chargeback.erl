@@ -258,9 +258,12 @@ process_timeout(finalising_accounter, State, Action, Opts) ->
 -spec do_create(opts(), create_params()) ->
     {chargeback(), result()} | no_return().
 do_create(Opts, CreateParams = ?chargeback_params(Levy, Body)) ->
+    ServiceTerms = get_service_terms(Opts, hg_domain:head()),
     _ = validate_currency(Body, get_opts_payment(Opts)),
     _ = validate_currency(Levy, get_opts_payment(Opts)),
     _ = validate_body_amount(Body, get_opts_payment_state(Opts)),
+    _ = validate_service_terms(ServiceTerms),
+    _ = validate_chargeback_is_allowed(ServiceTerms),
     Chargeback = build_chargeback(Opts, CreateParams),
     Action     = hg_machine_action:instant(),
     Result     = {[?chargeback_created(Chargeback)], Action},
@@ -392,6 +395,7 @@ build_reopen_result(State, ?reopen_params(ParamsLevy, ParamsBody)) ->
 build_chargeback_cash_flow(State, Opts) ->
     Revision        = get_revision(State),
     Payment         = get_opts_payment(Opts),
+    ServiceTerms    = get_service_terms(Opts, Revision),
     Invoice         = get_opts_invoice(Opts),
     Route           = get_opts_route(Opts),
     Party           = get_opts_party(Opts),
@@ -465,13 +469,11 @@ reduce_selector(Name, Selector, VS, Revision) ->
 
 get_merchant_chargeback_terms(#domain_TermSet{payments = PaymentsTerms}) ->
     get_merchant_chargeback_terms(PaymentsTerms);
-get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{chargebacks = Terms}) when Terms /= undefined ->
-    Terms;
-get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{chargebacks = undefined}) ->
-    throw(#payproc_OperationNotPermitted{}).
+get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{chargebacks = Terms}) ->
+    Terms.
 
-get_provider_chargeback_terms(#domain_PaymentsProvisionTerms{chargebacks = undefined}, Payment) ->
-    error({misconfiguration, {'No chargeback terms for a payment', Payment}});
+% get_provider_chargeback_terms(#domain_PaymentsProvisionTerms{chargebacks = undefined}, Payment) ->
+%     error({misconfiguration, {'No chargeback terms for a payment', Payment}});
 get_provider_chargeback_terms(#domain_PaymentsProvisionTerms{chargebacks = Terms}, _Payment) ->
     Terms.
 
@@ -520,6 +522,16 @@ collect_validation_varset(Party, Shop, Payment, State) ->
     }.
 
 %% Validations
+
+validate_chargeback_is_allowed(#domain_PaymentChargebackServiceTerms{allow = {constant, true}}) ->
+    ok;
+validate_chargeback_is_allowed(_Terms) ->
+    throw(#payproc_OperationNotPermitted{}).
+
+validate_service_terms(#domain_PaymentChargebackServiceTerms{}) ->
+    ok;
+validate_service_terms(undefined) ->
+    throw(#payproc_OperationNotPermitted{}).
 
 validate_body_amount(undefined, _PaymentState) ->
     ok;
@@ -740,6 +752,17 @@ get_opts_invoice_id(Opts) ->
 get_opts_payment_id(Opts) ->
     #domain_InvoicePayment{id = ID} = get_opts_payment(Opts),
     ID.
+
+get_service_terms(Opts, Revision) ->
+    Invoice     = get_opts_invoice(Opts),
+    Party       = get_opts_party(Opts),
+    ShopID      = get_invoice_shop_id(Invoice),
+    CreatedAt   = get_invoice_created_at(Invoice),
+    Shop        = hg_party:get_shop(ShopID, Party),
+    ContractID  = get_shop_contract_id(Shop),
+    Contract    = hg_party:get_contract(ContractID, Party),
+    TermSet     = hg_party:get_terms(Contract, CreatedAt, Revision),
+    get_merchant_chargeback_terms(TermSet).
 
 %%
 
