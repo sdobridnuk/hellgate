@@ -26,10 +26,12 @@ build('hellgate', 'docker-host', finalHook) {
           sh 'make wc_compile'
         }
       }
-      runStage('lint') {
-        sh 'make wc_lint'
-      }
       hg_stages = [
+        "lint": {
+          runStage('lint') {
+            sh 'make wc_lint'
+          }
+        },
         "xref": {
           runStage('xref') {
             sh 'make wc_xref'
