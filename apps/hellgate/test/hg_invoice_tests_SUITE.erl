@@ -79,6 +79,7 @@
 -export([invalid_permit_partial_capture_in_provider/1]).
 -export([payment_hold_auto_capturing/1]).
 
+-export([create_chargeback_not_allowed/1]).
 -export([create_chargeback_inconsistent/1]).
 -export([create_chargeback_exceeded/1]).
 -export([create_chargeback_idempotency/1]).
@@ -266,6 +267,7 @@ groups() ->
         ]},
 
         {chargebacks, [parallel], [
+            create_chargeback_not_allowed,
             create_chargeback_inconsistent,
             create_chargeback_exceeded,
             create_chargeback_idempotency,
@@ -1848,6 +1850,20 @@ terminal_cashflow_overrides_provider(C) ->
     } = hg_domain:get(hg_domain:head(), {external_account_set, ?eas(2)}).
 
 %%  CHARGEBACKS
+
+-spec create_chargeback_not_allowed(config()) -> _ | no_return().
+
+create_chargeback_not_allowed(C) ->
+    Cost        = 42000,
+    Client      = cfg(client, C),
+    PartyClient = cfg(party_client, C),
+    ShopID      = hg_ct_helper:create_battle_ready_shop(?cat(1), <<"RUB">>, ?tmpl(1), ?pinst(1), PartyClient),
+    InvoiceID   = start_invoice(ShopID, <<"rubberduck">>, make_due_date(10), Cost, C),
+    PaymentID   = process_payment(InvoiceID, make_payment_params(), Client),
+    PaymentID   = await_payment_capture(InvoiceID, PaymentID, Client),
+    CBParams    = make_chargeback_params(?cash(1000, <<"RUB">>)),
+    Result      = hg_client_invoicing:create_chargeback(InvoiceID, PaymentID, CBParams, Client),
+    ?assertMatch({exception, #payproc_OperationNotPermitted{}}, Result).
 
 -spec create_chargeback_inconsistent(config()) -> _ | no_return().
 
@@ -4925,24 +4941,6 @@ construct_domain_fixture() ->
                     }
                 ]}
             },
-            chargebacks = #domain_PaymentChargebackServiceTerms{
-                payment_methods = {value, ?ordset([
-                    ?pmt(bank_card, visa),
-                    ?pmt(bank_card, mastercard)
-                ])},
-                fees = {value, [
-                    ?cfpost(
-                        {system, settlement},
-                        {provider, settlement},
-                        ?share(1, 1, operation_amount)
-                    ),
-                    ?cfpost(
-                        {system, settlement},
-                        {provider, settlement},
-                        ?share(1, 1, surplus)
-                    )
-                ]}
-            },
             refunds = #domain_PaymentRefundsServiceTerms{
                 payment_methods = {value, ?ordset([
                     ?pmt(bank_card, visa),
@@ -5058,10 +5056,7 @@ construct_domain_fixture() ->
                 ]}
             },
             chargebacks = #domain_PaymentChargebackServiceTerms{
-                payment_methods = {value, ?ordset([
-                    ?pmt(bank_card, visa),
-                    ?pmt(bank_card, mastercard)
-                ])},
+                allow = {constant, true},
                 fees = {value, [
                     ?cfpost(
                         {system, settlement},
