@@ -29,10 +29,12 @@ build('hellgate', 'docker-host', finalHook) {
       runStage('lint') {
         sh 'make wc_lint'
       }
-      runStage('xref') {
-        sh 'make wc_xref'
-      }
       hg_stages = [
+        "xref": {
+          runStage('xref') {
+            sh 'make wc_xref'
+          }
+        },
         "dialyzer": {
           runStage('pre-dialyze') {
             withWsCache("_build/default/rebar3_22.2.6_plt") {
