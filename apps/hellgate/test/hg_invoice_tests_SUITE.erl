@@ -5521,7 +5521,7 @@ construct_domain_fixture() ->
                     chargebacks = #domain_PaymentChargebackProvisionTerms{
                         fees = {value, #domain_Fees{
                             fees = #{
-                                surplus => {fixed, #domain_CashVolumeFixed{cash = ?cash(50, <<"RUB">>)}}
+                                surplus => ?fixed(50, <<"RUB">>)
                             }
                         }},
                         cash_flow = {value, [
@@ -5529,12 +5529,12 @@ construct_domain_fixture() ->
                                 {merchant, settlement},
                                 {provider, settlement},
                                 ?share(1, 1, operation_amount)
+                            ),
+                            ?cfpost(
+                                {merchant, settlement},
+                                {provider, settlement},
+                                ?share(1, 1, surplus)
                             )
-                            % ?cfpost(
-                            %     {merchant, settlement},
-                            %     {system, settlement},
-                            %     ?share(1, 1, surplus)
-                            % )
                         ]}
                     }
                 }
