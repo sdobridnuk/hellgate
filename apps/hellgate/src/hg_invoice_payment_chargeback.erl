@@ -42,7 +42,6 @@
 -record( chargeback_st
        , { chargeback    :: undefined | chargeback()
          , target_status :: undefined | status()
-         , state = init  :: init | active
          , cash_flow_plans =
                #{ ?chargeback_stage_chargeback()      => []
                 , ?chargeback_stage_pre_arbitration() => []
@@ -272,7 +271,9 @@ do_create(Opts, CreateParams = ?chargeback_params(Levy, Body)) ->
 -spec do_cancel(state()) ->
     {ok, result()} | no_return().
 do_cancel(State) ->
-    _ = validate_not_initialising(State),
+    % TODO: might be reasonable to ensure that
+    %       there actually is a cashflow to cancel
+    % _ = validate_cash_flow_held(State),
     _ = validate_chargeback_is_pending(State),
     _ = validate_stage_is_chargeback(State),
     Action = hg_machine_action:instant(),
@@ -406,40 +407,45 @@ build_chargeback_cash_flow(State, Opts) ->
     ProviderTerms   = get_provider_chargeback_terms(PaymentsTerms, Payment),
     ServiceCashFlow = collect_chargeback_service_cash_flow(ServiceTerms, VS, Revision),
     ProviderCashFlow = collect_chargeback_provider_cash_flow(ProviderTerms, VS, Revision),
+    ProviderFees    = collect_chargeback_provider_fees(ProviderTerms, VS, Revision),
     ContractID      = get_shop_contract_id(Shop),
     Contract        = hg_party:get_contract(ContractID, Party),
     PmntInstitution = get_payment_institution(Contract, Revision),
     Provider        = get_route_provider(Route, Revision),
     AccountMap      = collect_account_map(Payment, Shop, PmntInstitution, Provider, VS, Revision),
     ServiceContext  = build_service_cash_flow_context(State),
-    ProviderContext = build_provider_cash_flow_context(State),
+    ProviderContext = build_provider_cash_flow_context(State, ProviderFees),
     ServiceFinalCF  = hg_cashflow:finalize(ServiceCashFlow, ServiceContext, AccountMap),
     ProviderFinalCF = hg_cashflow:finalize(ProviderCashFlow, ProviderContext, AccountMap),
-    ServiceFinalCF + ProviderFinalCF.
+    ServiceFinalCF ++ ProviderFinalCF.
 
 build_service_cash_flow_context(State) ->
     #{surplus => get_levy(State)}.
 
-build_provider_cash_flow_context(State = #chargeback_st{target_status = ?chargeback_status_rejected()}) ->
-    ?cash(_Amount, SymCode) = get_body(State),
-    #{operation_amount => ?cash(0, SymCode), surplus => get_levy(State)};
-build_provider_cash_flow_context(State) ->
-    #{operation_amount => get_body(State), surplus => get_levy(State)}.
+build_provider_cash_flow_context(State, Fees) ->
+    FeesContext = #{operation_amount => get_body(State), surplus => get_levy(State)},
+    ComputedFees = maps:map(fun(_K, V) -> hg_cashflow:compute_volume(V, FeesContext) end, Fees),
+    case get_target_status(State) of
+        ?chargeback_status_rejected() ->
+            ?cash(_Amount, SymCode) = get_body(State),
+            maps:merge(#{operation_amount => ?cash(0, SymCode)}, ComputedFees);
+        _NotRejected ->
+            maps:merge(#{operation_amount => get_body(State)}, ComputedFees)
+    end.
 
 collect_chargeback_service_cash_flow(ServiceTerms, VS, Revision) ->
     #domain_PaymentChargebackServiceTerms{fees = ServiceCashflowSelector} = ServiceTerms,
-    ServiceCF = reduce_selector(merchant_chargeback_fees, ServiceCashflowSelector, VS, Revision),
-    ServiceCF.
+    reduce_selector(merchant_chargeback_fees, ServiceCashflowSelector, VS, Revision).
 
 collect_chargeback_provider_cash_flow(ProviderTerms, VS, Revision) ->
-    #domain_PaymentChargebackProvisionTerms{fees = ProviderFeesSelector} = ProviderTerms,
     #domain_PaymentChargebackProvisionTerms{cash_flow = ProviderCashflowSelector} = ProviderTerms,
-    ProviderCF = reduce_selector(provider_chargeback_cash_flow, ProviderCashflowSelector, VS, Revision),
+    reduce_selector(provider_chargeback_cash_flow, ProviderCashflowSelector, VS, Revision).
 
-    ProviderFees = reduce_selector(provider_chargeback_fees, ProviderFeesSelector, VS, Revision),
-    ct:print("Fees\n~p", [ProviderFees]),
+collect_chargeback_provider_fees(ProviderTerms, VS, Revision) ->
+    #domain_PaymentChargebackProvisionTerms{fees = ProviderFeesSelector} = ProviderTerms,
+    Fees = reduce_selector(provider_chargeback_fees, ProviderFeesSelector, VS, Revision),
+    Fees#domain_Fees.fees.
 
-    ProviderCF.
 
 collect_account_map(
     Payment,
@@ -565,11 +571,6 @@ validate_currency(undefined, _Payment) ->
 validate_currency(?cash(_, SymCode), _Payment) ->
     throw(#payproc_InconsistentChargebackCurrency{currency = SymCode}).
 
-validate_not_initialising(#chargeback_st{state = active}) ->
-    ok;
-validate_not_initialising(#chargeback_st{state = init}) ->
-    throw(#payproc_InvoicePaymentChargebackNotFound{}).
-
 validate_stage_is_chargeback(#chargeback_st{chargeback = Chargeback}) ->
     validate_stage_is_chargeback(Chargeback);
 validate_stage_is_chargeback(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_chargeback()}) ->
@@ -682,7 +683,7 @@ set(Chargeback, #chargeback_st{} = State) ->
 set_cash_flow(CashFlow, #chargeback_st{cash_flow_plans = Plans} = State) ->
     Stage = get_stage(State),
     Plan = build_updated_plan(CashFlow, State),
-    State#chargeback_st{cash_flow_plans = Plans#{Stage := Plan}, state = active}.
+    State#chargeback_st{cash_flow_plans = Plans#{Stage := Plan}}.
 
 -spec set_target_status(status() | undefined, state()) ->
     state().
