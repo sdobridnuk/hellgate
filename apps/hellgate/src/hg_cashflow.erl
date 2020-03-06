@@ -12,7 +12,8 @@
 -type account()         :: dmsl_domain_thrift:'CashFlowAccount'().
 -type account_id()      :: dmsl_domain_thrift:'AccountID'().
 -type account_map()     :: #{account() => account_id()}.
--type context()         :: dmsl_domain_thrift:'CashFlowContext'().
+-type volume()          :: dmsl_domain_thrift:'CashFlowContext'().
+-type context()         :: dmsl_domain_thrift:'CashFlowVolume'().
 -type cash_flow()       :: dmsl_domain_thrift:'CashFlow'().
 -type final_cash_flow() :: dmsl_domain_thrift:'FinalCashFlow'().
 -type cash()            :: dmsl_domain_thrift:'Cash'().
@@ -21,6 +22,8 @@
 
 -export([finalize/3]).
 -export([revert/1]).
+
+-export([compute_volume/2]).
 
 -export([get_partial_remainders/1]).
 
@@ -101,6 +104,8 @@ revert_details(Details) ->
 -define(rational(P, Q),
     #'Rational'{p = P, q = Q}).
 
+-spec compute_volume(volume(), context()) ->
+    cash().
 compute_volume(?fixed(Cash), _Context) ->
     Cash;
 compute_volume(?share(P, Q, Of, RoundingMethod), Context) ->
