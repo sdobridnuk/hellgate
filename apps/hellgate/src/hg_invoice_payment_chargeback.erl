@@ -395,21 +395,18 @@ build_reopen_result(State, ?reopen_params(ParamsLevy, ParamsBody)) ->
 build_chargeback_cash_flow(State, Opts) ->
     Revision        = get_revision(State),
     Payment         = get_opts_payment(Opts),
-    ServiceTerms    = get_service_terms(Opts, Revision),
     Invoice         = get_opts_invoice(Opts),
     Route           = get_opts_route(Opts),
     Party           = get_opts_party(Opts),
-    CreatedAt       = get_invoice_created_at(Invoice),
+    ServiceTerms    = get_service_terms(Opts, Revision),
     ShopID          = get_invoice_shop_id(Invoice),
     Shop            = hg_party:get_shop(ShopID, Party),
-    ContractID      = get_shop_contract_id(Shop),
-    Contract        = hg_party:get_contract(ContractID, Party),
     VS              = collect_validation_varset(Party, Shop, Payment, State),
-    TermSet         = hg_party:get_terms(Contract, CreatedAt, Revision),
-    ServiceTerms    = get_merchant_chargeback_terms(TermSet),
     PaymentsTerms   = hg_routing:get_payments_terms(Route, Revision),
     ProviderTerms   = get_provider_chargeback_terms(PaymentsTerms, Payment),
     CashFlow        = collect_chargeback_cash_flow(ServiceTerms, ProviderTerms, VS, Revision),
+    ContractID      = get_shop_contract_id(Shop),
+    Contract        = hg_party:get_contract(ContractID, Party),
     PmntInstitution = get_payment_institution(Contract, Revision),
     Provider        = get_route_provider(Route, Revision),
     AccountMap      = collect_account_map(Payment, Shop, PmntInstitution, Provider, VS, Revision),
@@ -523,6 +520,7 @@ collect_validation_varset(Party, Shop, Payment, State) ->
 
 %% Validations
 
+% TODO: use hg_selector:reduce_predicate/3 perhaps?
 validate_chargeback_is_allowed(#domain_PaymentChargebackServiceTerms{allow = {constant, true}}) ->
     ok;
 validate_chargeback_is_allowed(_Terms) ->
