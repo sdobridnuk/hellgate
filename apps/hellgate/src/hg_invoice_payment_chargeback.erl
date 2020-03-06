@@ -404,21 +404,42 @@ build_chargeback_cash_flow(State, Opts) ->
     VS              = collect_validation_varset(Party, Shop, Payment, State),
     PaymentsTerms   = hg_routing:get_payments_terms(Route, Revision),
     ProviderTerms   = get_provider_chargeback_terms(PaymentsTerms, Payment),
-    CashFlow        = collect_chargeback_cash_flow(ServiceTerms, ProviderTerms, VS, Revision),
+    ServiceCashFlow = collect_chargeback_service_cash_flow(ServiceTerms, VS, Revision),
+    ProviderCashFlow = collect_chargeback_provider_cash_flow(ProviderTerms, VS, Revision),
     ContractID      = get_shop_contract_id(Shop),
     Contract        = hg_party:get_contract(ContractID, Party),
     PmntInstitution = get_payment_institution(Contract, Revision),
     Provider        = get_route_provider(Route, Revision),
     AccountMap      = collect_account_map(Payment, Shop, PmntInstitution, Provider, VS, Revision),
-    Context         = build_cash_flow_context(State),
-    hg_cashflow:finalize(CashFlow, Context, AccountMap).
+    ServiceContext  = build_service_cash_flow_context(State),
+    ProviderContext = build_provider_cash_flow_context(State),
+    ServiceFinalCF  = hg_cashflow:finalize(ServiceCashFlow, ServiceContext, AccountMap),
+    ProviderFinalCF = hg_cashflow:finalize(ProviderCashFlow, ProviderContext, AccountMap),
+    ServiceFinalCF + ProviderFinalCF.
 
-collect_chargeback_cash_flow(MerchantTerms, ProviderTerms, VS, Revision) ->
-    #domain_PaymentChargebackServiceTerms{fees = MerchantCashflowSelector} = MerchantTerms,
+build_service_cash_fow_context(State) ->
+    #{surplus => get_levy(State)}.
+
+build_provider_cash_flow_context(State = #chargeback_st{target_status = ?chargeback_status_rejected()}) ->
+    ?cash(_Amount, SymCode) = get_body(State),
+    #{operation_amount => ?cash(0, SymCode), surplus => get_levy(State)};
+build_provider_cash_flow_context(State) ->
+    #{operation_amount => get_body(State), surplus => get_levy(State)}.
+
+collect_chargeback_service_cash_flow(ServiceTerms, VS, Revision) ->
+    #domain_PaymentChargebackServiceTerms{fees = ServiceCashflowSelector} = ServiceTerms,
+    ServiceCF = reduce_selector(merchant_chargeback_fees, ServiceCashflowSelector, VS, Revision),
+    ServiceCF.
+
+collect_chargeback_provider_cash_flow(ProviderTerms, VS, Revision) ->
+    #domain_PaymentChargebackProvisionTerms{fees = ProviderFeesSelector} = ProviderTerms,
     #domain_PaymentChargebackProvisionTerms{cash_flow = ProviderCashflowSelector} = ProviderTerms,
-    MerchantCF = reduce_selector(merchant_chargeback_fees, MerchantCashflowSelector, VS, Revision),
     ProviderCF = reduce_selector(provider_chargeback_cash_flow, ProviderCashflowSelector, VS, Revision),
-    MerchantCF ++ ProviderCF.
+
+    ProviderFees = reduce_selector(provider_chargeback_fees, ProviderFeesSelector, VS, Revision),
+    ct:print("Fees\n~p", [ProviderFees]),
+
+    ProviderCF.
 
 collect_account_map(
     Payment,
@@ -449,12 +470,6 @@ collect_account_map(
         undefined ->
             M
     end.
-
-build_cash_flow_context(State = #chargeback_st{target_status = ?chargeback_status_rejected()}) ->
-    ?cash(_Amount, SymCode) = get_body(State),
-    #{operation_amount => ?cash(0, SymCode), surplus => get_levy(State)};
-build_cash_flow_context(State) ->
-    #{operation_amount => get_body(State), surplus => get_levy(State)}.
 
 reduce_selector(Name, Selector, VS, Revision) ->
     case hg_selector:reduce(Selector, VS, Revision) of
