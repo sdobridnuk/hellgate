@@ -1700,20 +1700,6 @@ get_adjustment_fixture(Revision) ->
                                 {exclusive, ?cash(1000000000, <<"RUB">>)}
                             )}
                         }
-                    },
-                    chargebacks = #domain_PaymentChargebackProvisionTerms{
-                        cash_flow = {value, [
-                            ?cfpost(
-                                {merchant, settlement},
-                                {system, settlement},
-                                ?share(1, 1, operation_amount)
-                            ),
-                            ?cfpost(
-                                {merchant, settlement},
-                                {system, settlement},
-                                ?share(1, 1, surplus)
-                            )
-                        ]}
                     }
                 }
             }
@@ -3754,20 +3740,6 @@ get_cashflow_rounding_fixture(Revision) ->
                                 {exclusive, ?cash(1000000000, <<"RUB">>)}
                             )}
                         }
-                    },
-                    chargebacks = #domain_PaymentChargebackProvisionTerms{
-                        cash_flow = {value, [
-                            ?cfpost(
-                                {merchant, settlement},
-                                {system, settlement},
-                                ?share(1, 1, operation_amount)
-                            ),
-                            ?cfpost(
-                                {merchant, settlement},
-                                {system, settlement},
-                                ?share(1, 1, surplus)
-                            )
-                        ]}
                     }
                 }
             }
@@ -5447,6 +5419,7 @@ construct_domain_fixture() ->
                         }
                     },
                     chargebacks = #domain_PaymentChargebackProvisionTerms{
+                        fees = undefined,
                         cash_flow = {value, [
                             ?cfpost(
                                 {merchant, settlement},
@@ -5556,6 +5529,7 @@ construct_domain_fixture() ->
                         }
                     },
                     chargebacks = #domain_PaymentChargebackProvisionTerms{
+                        fees = undefined,
                         cash_flow = {value, [
                             ?cfpost(
                                 {merchant, settlement},
@@ -5900,20 +5874,6 @@ payments_w_bank_card_issuer_conditions_fixture(Revision) ->
                                 {exclusive, ?cash(1000000000, <<"RUB">>)}
                             )}
                         }
-                    },
-                    chargebacks = #domain_PaymentChargebackProvisionTerms{
-                        cash_flow = {value, [
-                            ?cfpost(
-                                {merchant, settlement},
-                                {system, settlement},
-                                ?share(1, 1, operation_amount)
-                            ),
-                            ?cfpost(
-                                {merchant, settlement},
-                                {system, settlement},
-                                ?share(1, 1, surplus)
-                            )
-                        ]}
                     }
                 }
             }
@@ -6140,20 +6100,6 @@ construct_term_set_for_partial_capture_provider_permit(Revision) ->
                                 {exclusive, ?cash(1000000000, <<"RUB">>)}
                             )}
                         }
-                    },
-                    chargebacks = #domain_PaymentChargebackProvisionTerms{
-                        cash_flow = {value, [
-                            ?cfpost(
-                                {merchant, settlement},
-                                {system, settlement},
-                                ?share(1, 1, operation_amount)
-                            ),
-                            ?cfpost(
-                                {merchant, settlement},
-                                {system, settlement},
-                                ?share(1, 1, surplus)
-                            )
-                        ]}
                     },
                     holds = #domain_PaymentHoldsProvisionTerms{
                         lifetime = {decisions, [
