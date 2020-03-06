@@ -417,7 +417,7 @@ build_chargeback_cash_flow(State, Opts) ->
     ProviderFinalCF = hg_cashflow:finalize(ProviderCashFlow, ProviderContext, AccountMap),
     ServiceFinalCF + ProviderFinalCF.
 
-build_service_cash_fow_context(State) ->
+build_service_cash_flow_context(State) ->
     #{surplus => get_levy(State)}.
 
 build_provider_cash_flow_context(State = #chargeback_st{target_status = ?chargeback_status_rejected()}) ->
