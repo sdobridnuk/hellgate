@@ -12,8 +12,8 @@
 -type account()         :: dmsl_domain_thrift:'CashFlowAccount'().
 -type account_id()      :: dmsl_domain_thrift:'AccountID'().
 -type account_map()     :: #{account() => account_id()}.
--type volume()          :: dmsl_domain_thrift:'CashFlowContext'().
--type context()         :: dmsl_domain_thrift:'CashFlowVolume'().
+-type volume()          :: dmsl_domain_thrift:'CashVolume'().
+-type context()         :: dmsl_domain_thrift:'CashFlowContext'().
 -type cash_flow()       :: dmsl_domain_thrift:'CashFlow'().
 -type final_cash_flow() :: dmsl_domain_thrift:'FinalCashFlow'().
 -type cash()            :: dmsl_domain_thrift:'Cash'().
