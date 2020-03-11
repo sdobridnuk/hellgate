@@ -5514,7 +5514,7 @@ construct_domain_fixture() ->
                                 if_   = {condition, {payment_tool, {bank_card, #domain_BankCardCondition{
                                     definition = {payment_system_is, mastercard}
                                 }}}},
-                                then_ = {value, ?hold_lifetime(20)}
+                                then_ = {value, ?hold_lifetime(60)}
                             }
                         ]}
                     },
