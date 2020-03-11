@@ -478,7 +478,7 @@ collect_account_map(
     end.
 
 reduce_selector(Name, Selector, VS, Revision) ->
-    case hg_selector:reduce(Selector, VS, Revision) of
+    case pm_selector:reduce(Selector, VS, Revision) of
         {value, V} ->
             V;
         Ambiguous ->
@@ -772,10 +772,10 @@ get_service_terms(Opts, Revision) ->
     Party       = get_opts_party(Opts),
     ShopID      = get_invoice_shop_id(Invoice),
     CreatedAt   = get_invoice_created_at(Invoice),
-    Shop        = hg_party:get_shop(ShopID, Party),
+    Shop        = pm_party:get_shop(ShopID, Party),
     ContractID  = get_shop_contract_id(Shop),
-    Contract    = hg_party:get_contract(ContractID, Party),
-    TermSet     = hg_party:get_terms(Contract, CreatedAt, Revision),
+    Contract    = pm_party:get_contract(ContractID, Party),
+    TermSet     = pm_party:get_terms(Contract, CreatedAt, Revision),
     get_merchant_chargeback_terms(TermSet).
 
 %%

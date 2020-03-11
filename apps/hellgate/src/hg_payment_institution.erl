@@ -27,7 +27,7 @@
     dmsl_domain_thrift:'SystemAccount'() | no_return().
 
 get_system_account(Currency, VS, Revision, #domain_PaymentInstitution{system_account_set = S}) ->
-    SystemAccountSetRef = hg_selector:reduce_to_value(S, VS, Revision),
+    SystemAccountSetRef = pm_selector:reduce_to_value(S, VS, Revision),
     SystemAccountSet = hg_domain:get(Revision, {system_account_set, SystemAccountSetRef}),
     case maps:find(Currency, SystemAccountSet#domain_SystemAccountSet.accounts) of
         {ok, Account} ->
@@ -63,7 +63,7 @@ choose_provider_account(Currency, Accounts) ->
 choose_external_account(Currency, VS, Revision) ->
     Globals = hg_domain:get(Revision, {globals, #domain_GlobalsRef{}}),
     ExternalAccountSetSelector = Globals#domain_Globals.external_account_set,
-    case hg_selector:reduce(ExternalAccountSetSelector, VS, Revision) of
+    case pm_selector:reduce(ExternalAccountSetSelector, VS, Revision) of
         {value, ExternalAccountSetRef} ->
             ExternalAccountSet = hg_domain:get(Revision, {external_account_set, ExternalAccountSetRef}),
             genlib_map:get(
