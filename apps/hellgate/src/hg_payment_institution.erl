@@ -13,7 +13,7 @@
 %%
 
 -type currency()          :: dmsl_domain_thrift:'CurrencyRef'().
--type varset()            :: hg_selector:varset().
+-type varset()            :: pm_selector:varset().
 -type revision()          :: hg_domain:revision().
 -type payment_inst()      :: dmsl_domain_thrift:'PaymentInstitution'().
 -type realm()             :: dmsl_domain_thrift:'PaymentInstitutionRealm'().
