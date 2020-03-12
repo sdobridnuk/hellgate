@@ -498,8 +498,6 @@ get_merchant_chargeback_terms(#domain_TermSet{payments = PaymentsTerms}) ->
 get_merchant_chargeback_terms(#domain_PaymentsServiceTerms{chargebacks = Terms}) ->
     Terms.
 
-% get_provider_chargeback_terms(#domain_PaymentsProvisionTerms{chargebacks = undefined}, Payment) ->
-%     error({misconfiguration, {'No chargeback terms for a payment', Payment}});
 get_provider_chargeback_terms(#domain_PaymentsProvisionTerms{chargebacks = Terms}, _Payment) ->
     Terms.
 
