@@ -354,7 +354,9 @@ reduce_partial_refunds_terms(#domain_PartialRefundsServiceTerms{} = Terms, VS, R
 
 reduce_chargeback_terms(#domain_PaymentChargebackServiceTerms{} = Terms, VS, Rev) ->
     #domain_PaymentChargebackServiceTerms{
-        allow            = reduce_if_defined(Terms#domain_PaymentChargebackServiceTerms.allow, VS, Rev),
+        allow            = pm_maybe:apply(
+            fun(X) -> pm_selector:reduce_predicate(X, VS, Rev) end,
+            Terms#domain_PaymentChargebackServiceTerms.allow),
         fees             = reduce_if_defined(Terms#domain_PaymentChargebackServiceTerms.fees, VS, Rev),
         eligibility_time = reduce_if_defined(Terms#domain_PaymentChargebackServiceTerms.eligibility_time, VS, Rev)
     }.
