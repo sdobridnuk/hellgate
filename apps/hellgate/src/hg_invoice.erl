@@ -675,11 +675,8 @@ handle_call({{'Invoicing', 'CapturePaymentAdjustment'}, [_UserInfo, _InvoiceID, 
         Adjustment#domain_InvoicePaymentAdjustment.created_at,
         St
     ),
-    wrap_payment_impact(
-        PaymentID,
-        hg_invoice_payment:capture_adjustment(ID, PaymentSession, PaymentOpts),
-        St
-    );
+    Impact = hg_invoice_payment:capture_adjustment(ID, PaymentSession, PaymentOpts),
+    wrap_payment_impact(PaymentID, Impact, St);
 
 handle_call({{'Invoicing', 'CancelPaymentAdjustment'}, [_UserInfo, _InvoiceID, PaymentID, ID]}, St) ->
     _ = assert_invoice_accessible(St),
