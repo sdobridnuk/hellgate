@@ -270,6 +270,7 @@ do_create(Opts, CreateParams = ?chargeback_params(Levy, Body)) ->
     _ = validate_body_amount(Body, get_opts_payment_state(Opts)),
     _ = validate_service_terms(ServiceTerms),
     _ = validate_chargeback_is_allowed(ServiceTerms, VS, Revision),
+    _ = validate_eligibility_time(ServiceTerms, VS, Revision),
     Chargeback = build_chargeback(Opts, CreateParams),
     Action     = hg_machine_action:instant(),
     Result     = {[?chargeback_created(Chargeback)], Action},
@@ -547,10 +548,22 @@ collect_validation_varset(Party, Shop, Payment, Body) ->
 
 %% Validations
 
-validate_chargeback_is_allowed(#domain_PaymentChargebackServiceTerms{allow = Terms}, VS, Revision) ->
-    case pm_selector:reduce_predicate(Terms, VS, Revision) of
+validate_chargeback_is_allowed(#domain_PaymentChargebackServiceTerms{allow = Allow}, VS, Revision) ->
+    case pm_selector:reduce_predicate(Allow, VS, Revision) of
         {constant, true} -> ok;
         _False -> throw(#payproc_OperationNotPermitted{})
+    end.
+
+validate_eligibility_time(#domain_PaymentChargebackServiceTerms{eligibility_time = undefined}, _V, _R) ->
+    ok;
+validate_eligibility_time(Terms, VS, Revision) ->
+    Now              = hg_datetime:format_now(),
+    TimeSpanSelector = Terms#domain_PaymentChargebackServiceTerms.eligibility_time,
+    EligibilityTime  = reduce_selector(eligibility_time, TimeSpanSelector, VS, Revision),
+    EligibleUntil    = hg_datetime:add_time_span(EligibilityTime, Now),
+    case hg_datetime:compare(Now, EligibleUntil) of
+        later -> throw(#payproc_OperationNotPermitted{});
+        _NotLater -> ok
     end.
 
 validate_service_terms(#domain_PaymentChargebackServiceTerms{}) ->
