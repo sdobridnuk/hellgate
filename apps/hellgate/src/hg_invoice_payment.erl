@@ -15,6 +15,7 @@
 %%%    finishes, which could have happened in the past, not just now
 
 -module(hg_invoice_payment).
+-include_lib("damsel/include/dmsl_base_thrift.hrl").
 -include_lib("damsel/include/dmsl_proxy_provider_thrift.hrl").
 -include_lib("damsel/include/dmsl_payment_processing_thrift.hrl").
 -include_lib("damsel/include/dmsl_payment_processing_errors_thrift.hrl").
@@ -125,6 +126,7 @@
     route                  :: undefined | route(),
     cash_flow              :: undefined | cash_flow(),
     partial_cash_flow      :: undefined | cash_flow(),
+    final_cash_flow        :: undefined | cash_flow(),
     trx                    :: undefined | trx_info(),
     target                 :: undefined | target(),
     sessions       = #{}   :: #{target_type() => [session()]},
@@ -159,6 +161,7 @@
 -type invoice_id()          :: dmsl_domain_thrift:'InvoiceID'().
 -type payment()             :: dmsl_domain_thrift:'InvoicePayment'().
 -type payment_id()          :: dmsl_domain_thrift:'InvoicePaymentID'().
+-type payment_status()      :: dmsl_domain_thrift:'InvoicePaymentStatus'().
 -type domain_refund()       :: dmsl_domain_thrift:'InvoicePaymentRefund'().
 -type payment_refund()      :: dmsl_payment_processing_thrift:'InvoicePaymentRefund'().
 -type refund_id()           :: dmsl_domain_thrift:'InvoicePaymentRefundID'().
@@ -168,6 +171,8 @@
 -type adjustment()          :: dmsl_domain_thrift:'InvoicePaymentAdjustment'().
 -type adjustment_id()       :: dmsl_domain_thrift:'InvoicePaymentAdjustmentID'().
 -type adjustment_params()   :: dmsl_payment_processing_thrift:'InvoicePaymentAdjustmentParams'().
+-type adjustment_state()    :: dmsl_domain_thrift:'InvoicePaymentAdjustmentState'().
+-type adjustment_status_change() :: dmsl_domain_thrift:'InvoicePaymentAdjustmentStatusChange'().
 -type target()              :: dmsl_domain_thrift:'TargetInvoicePaymentStatus'().
 -type target_type()         :: 'processed' | 'captured' | 'cancelled' | 'refunded'.
 -type risk_score()          :: dmsl_domain_thrift:'RiskScore'().
@@ -313,6 +318,11 @@ get_refunds(#st{refunds = Rs} = St) ->
         end,
         RefundList
     ).
+
+-spec get_refunds_count(st()) -> non_neg_integer().
+
+get_refunds_count(#st{refunds = Refunds}) ->
+    maps:size(Refunds).
 
 convert_refund_sessions(#{trx := TR}) ->
     #payproc_InvoiceRefundSession{
@@ -1025,30 +1035,19 @@ total_capture(St, Reason, Cart) ->
     Changes = start_capture(Reason, Cost, Cart),
     {ok, {Changes, hg_machine_action:instant()}}.
 
-partial_capture(St, Reason, Cost, Cart, Opts) ->
-    Payment             = get_payment(St),
-    Revision            = get_payment_revision(St),
-    Shop                = get_shop(Opts),
-    PaymentInstitution  = get_payment_institution(Opts, Revision),
-    Route               = get_route(St),
-    VS                  = collect_validation_varset(St, Opts),
-    MerchantTerms   = get_merchant_payments_terms(Opts, Revision),
+partial_capture(St0, Reason, Cost, Cart, Opts) ->
+    Payment         = get_payment(St0),
+    Payment2        = Payment#domain_InvoicePayment{cost = Cost},
+    St              = St0#st{payment = Payment2},
+    Revision        = get_payment_revision(St),
+    Timestamp       = get_payment_created_at(Payment),
+    MerchantTerms   = get_merchant_payments_terms(Opts, Revision, Timestamp),
     ok              = validate_merchant_hold_terms(MerchantTerms),
+    Route           = get_route(St),
     ProviderTerms   = get_provider_payments_terms(Route, Revision),
     ok              = validate_provider_holds_terms(ProviderTerms),
-    Provider        = get_route_provider(Route, Revision),
-    Payment2        = Payment#domain_InvoicePayment{cost = Cost},
-    Cashflow        = collect_cashflow(MerchantTerms, ProviderTerms, VS, Revision),
-    FinalCashflow   = construct_final_cashflow(
-        Payment2,
-        Shop,
-        PaymentInstitution,
-        Provider,
-        Cashflow,
-        VS,
-        Revision
-    ),
-    Changes = start_partial_capture(Reason, Cost, Cart, FinalCashflow),
+    FinalCashflow   = calculate_cashflow(Timestamp, Revision, St, Opts),
+    Changes         = start_partial_capture(Reason, Cost, Cart, FinalCashflow),
     {ok, {Changes, hg_machine_action:instant()}}.
 
 -spec cancel(st(), binary()) -> {ok, result()}.
@@ -1451,39 +1450,230 @@ get_refund_cashflow_plan(RefundSt) ->
     {adjustment(), result()}.
 
 create_adjustment(Timestamp, Params, St, Opts) ->
-    Payment = get_payment(St),
-    Revision = get_adjustment_revision(Params),
-    _ = assert_payment_status(captured, Payment),
     _ = assert_no_adjustment_pending(St),
+    case Params#payproc_InvoicePaymentAdjustmentParams.legacy_domain_revision of
+        undefined ->
+            create_adjustment_with_scenario(Timestamp, Params, St, Opts);
+        DomainRevision -> % FIXME: remove this check when new control center will be deployed
+            create_cash_flow_adjustment(Timestamp, Params, DomainRevision, St, Opts)
+    end.
+
+-spec create_adjustment_with_scenario(hg_datetime:timestamp(), adjustment_params(), st(), opts()) ->
+    {adjustment(), result()}.
+
+create_adjustment_with_scenario(Timestamp, Params, St, Opts) ->
+    case Params#payproc_InvoicePaymentAdjustmentParams.scenario of
+        undefined ->
+            create_cash_flow_adjustment(Timestamp, Params, undefined, St, Opts);
+        {cash_flow, #domain_InvoicePaymentAdjustmentCashFlow{domain_revision = DomainRevision}} ->
+            create_cash_flow_adjustment(Timestamp, Params, DomainRevision, St, Opts);
+        {status_change, Change} ->
+            create_status_adjustment(Timestamp, Params, Change, St, Opts)
+    end.
+
+-spec create_cash_flow_adjustment(
+    hg_datetime:timestamp(),
+    adjustment_params(),
+    undefined | hg_domain:revision(),
+    st(),
+    opts()
+) ->
+    {adjustment(), result()}.
+
+create_cash_flow_adjustment(Timestamp, Params, DomainRevision, St, Opts) ->
+    Payment = get_payment(St),
+    _ = assert_payment_status(captured, Payment),
+    NewRevision = maybe_get_domain_revision(DomainRevision),
+    PartyRevision = get_opts_party_revision(Opts),
+    OldCashFlow = get_final_cash_flow(St),
+    NewCashFlow = calculate_cashflow(Timestamp, NewRevision, St, Opts),
+    AdjState = {cash_flow, #domain_InvoicePaymentAdjustmentCashFlowState{
+        scenario = #domain_InvoicePaymentAdjustmentCashFlow{domain_revision = DomainRevision}
+    }},
+    construct_adjustment(
+        Timestamp,
+        Params,
+        NewRevision,
+        PartyRevision,
+        OldCashFlow,
+        NewCashFlow,
+        AdjState,
+        St
+    ).
+
+-spec create_status_adjustment(
+    hg_datetime:timestamp(),
+    adjustment_params(),
+    adjustment_status_change(),
+    st(),
+    opts()
+) ->
+    {adjustment(), result()}.
+
+create_status_adjustment(Timestamp, Params, Change, St, Opts) ->
+    #domain_InvoicePaymentAdjustmentStatusChange{
+        target_status = TargetStatus
+    } = Change,
+    #domain_InvoicePayment{
+        status = Status,
+        domain_revision = DomainRevision,
+        party_revision  = PartyRevision
+    } = get_payment(St),
+    ok = assert_adjustment_payment_status(Status),
+    ok = assert_no_refunds(St),
+    ok = assert_adjustment_payment_statuses(TargetStatus, Status),
+    OldCashFlow = get_cash_flow_for_status(Status, St),
+    NewCashFlow = get_cash_flow_for_target_status(TargetStatus, St, Opts),
+    AdjState = {status_change, #domain_InvoicePaymentAdjustmentStatusChangeState{
+        scenario = Change
+    }},
+    construct_adjustment(
+        Timestamp,
+        Params,
+        DomainRevision,
+        PartyRevision,
+        OldCashFlow,
+        NewCashFlow,
+        AdjState,
+        St
+    ).
+
+-spec maybe_get_domain_revision(undefined | hg_domain:revision()) ->
+    hg_domain:revision().
+
+maybe_get_domain_revision(undefined) ->
+    hg_domain:head();
+maybe_get_domain_revision(DomainRevision) ->
+    DomainRevision.
+
+-spec assert_adjustment_payment_status(payment_status()) ->
+    ok | no_return().
+
+assert_adjustment_payment_status(Status) ->
+    case is_adjustment_payment_status_final(Status) of
+        true ->
+            ok;
+        false ->
+            erlang:throw(#payproc_InvalidPaymentStatus{status = Status})
+    end.
+
+assert_no_refunds(St) ->
+    case get_refunds_count(St) of
+        0 ->
+            ok;
+        _ ->
+            Details = <<"Cannot change status of payment with refunds.">>,
+            erlang:throw(#'InvalidRequest'{errors = [Details]})
+    end.
+
+-spec assert_adjustment_payment_statuses(TargetStatus :: payment_status(), Status :: payment_status()) ->
+    ok | no_return().
+
+assert_adjustment_payment_statuses(Status, Status) ->
+    erlang:throw(#payproc_InvoicePaymentAlreadyHasStatus{status = Status});
+assert_adjustment_payment_statuses(TargetStatus, _Status) ->
+    case is_adjustment_payment_status_final(TargetStatus) of
+        true ->
+            ok;
+        false ->
+            erlang:throw(#payproc_InvalidPaymentTargetStatus{status = TargetStatus})
+    end.
+
+-spec is_adjustment_payment_status_final(payment_status()) ->
+    boolean().
+
+is_adjustment_payment_status_final({captured, _}) ->
+    true;
+is_adjustment_payment_status_final({cancelled, _}) ->
+    true;
+is_adjustment_payment_status_final({failed, _}) ->
+    true;
+is_adjustment_payment_status_final(_) ->
+    false.
+
+-spec get_cash_flow_for_status(payment_status(), st()) ->
+    cash_flow().
+
+get_cash_flow_for_status({captured, _}, St) ->
+    get_final_cash_flow(St);
+get_cash_flow_for_status({cancelled, _}, _St) ->
+    [];
+get_cash_flow_for_status({failed, _}, _St) ->
+    [].
+
+-spec get_cash_flow_for_target_status(payment_status(), st(), opts()) ->
+    cash_flow().
+
+get_cash_flow_for_target_status({captured, Captured}, St0, Opts) ->
+    Payment0 = get_payment(St0),
+    Cost = get_captured_cost(Captured, Payment0),
+    Payment = Payment0#domain_InvoicePayment{
+        cost = Cost
+    },
+    Timestamp = get_payment_created_at(Payment),
+    St = St0#st{payment = Payment},
+    Revision = Payment#domain_InvoicePayment.domain_revision,
+    calculate_cashflow(Timestamp, Revision, St, Opts);
+get_cash_flow_for_target_status({cancelled, _}, _St, _Opts) ->
+    [];
+get_cash_flow_for_target_status({failed, _}, _St, _Opts) ->
+    [].
+
+-spec calculate_cashflow(hg_datetime:timestamp(), hg_domain:revision(), st(), opts()) ->
+    cash_flow().
+
+calculate_cashflow(Timestamp, Revision, St, Opts) ->
+    Payment = get_payment(St),
+    Route = get_route(St),
+    VS = collect_validation_varset(St, Opts),
+    calculate_cashflow(Route, Payment, VS, Timestamp, Revision, Opts).
+
+-spec calculate_cashflow(
+    route(),
+    payment(),
+    map(),
+    hg_datetime:timestamp(),
+    hg_domain:revision(),
+    opts()
+) ->
+    cash_flow().
+
+calculate_cashflow(Route, Payment, VS, Timestamp, Revision, Opts) ->
     Shop = get_shop(Opts),
     PaymentInstitution = get_payment_institution(Opts, Revision),
-    MerchantTerms = get_merchant_payments_terms(Opts, Revision, Timestamp),
-    PartyRevision = get_opts_party_revision(Opts),
-    Route = get_route(St),
     Provider = get_route_provider(Route, Revision),
+    MerchantTerms = get_merchant_payments_terms(Opts, Revision, Timestamp),
     ProviderTerms = get_provider_payments_terms(Route, Revision),
-    VS = collect_validation_varset(St, Opts),
     Cashflow = collect_cashflow(MerchantTerms, ProviderTerms, VS, Revision),
-    FinalCashflow = construct_final_cashflow(Payment, Shop, PaymentInstitution, Provider, Cashflow, VS, Revision),
+    construct_final_cashflow(Payment, Shop, PaymentInstitution, Provider, Cashflow, VS, Revision).
+
+-spec construct_adjustment(
+    Timestamp       :: hg_datetime:timestamp(),
+    Params          :: adjustment_params(),
+    DomainRevision  :: hg_domain:revision(),
+    PartyRevision   :: hg_party:party_revision(),
+    OldCashFlow     :: cash_flow(),
+    NewCashFlow     :: cash_flow(),
+    State           :: adjustment_state(),
+    St              :: st()
+) ->
+    {adjustment(), result()}.
+
+construct_adjustment(Timestamp, Params, DomainRevision, PartyRevision, OldCashFlow, NewCashFlow, State, St) ->
     ID = construct_adjustment_id(St),
     Adjustment = #domain_InvoicePaymentAdjustment{
         id                    = ID,
         status                = ?adjustment_pending(),
         created_at            = Timestamp,
-        domain_revision       = Revision,
+        domain_revision       = DomainRevision,
         party_revision        = PartyRevision,
         reason                = Params#payproc_InvoicePaymentAdjustmentParams.reason,
-        old_cash_flow_inverse = hg_cashflow:revert(get_cashflow(St)),
-        new_cash_flow         = FinalCashflow
+        old_cash_flow_inverse = hg_cashflow:revert(OldCashFlow),
+        new_cash_flow         = NewCashFlow,
+        state                 = State
     },
     Event = ?adjustment_ev(ID, ?adjustment_created(Adjustment)),
     {Adjustment, {[Event], hg_machine_action:instant()}}.
-
-get_adjustment_revision(Params) ->
-    hg_utils:select_defined(
-        Params#payproc_InvoicePaymentAdjustmentParams.legacy_domain_revision,
-        hg_domain:head()
-    ).
 
 construct_adjustment_id(#st{adjustments = As}) ->
     erlang:integer_to_binary(length(As) + 1).
@@ -1538,42 +1728,68 @@ capture_adjustment(ID, St, Options) ->
 cancel_adjustment(ID, St, Options) ->
     finalize_adjustment(ID, cancel, St, Options).
 
+-spec finalize_adjustment(adjustment_id(), capture | cancel, st(), opts()) ->
+    {ok, result()}.
+
 finalize_adjustment(ID, Intent, St, Options) ->
     Adjustment = get_adjustment(ID, St),
     ok = assert_adjustment_status(processed, Adjustment),
-    _Clocks = finalize_adjustment_cashflow(Intent, Adjustment, St, Options),
-    Status = case Intent of
+    ok = finalize_adjustment_cashflow(Intent, Adjustment, St, Options),
+    {Status, AdditionalEvents} = case Intent of
         capture ->
-            ?adjustment_captured(hg_datetime:format_now());
+            {?adjustment_captured(hg_datetime:format_now()),
+             get_ajustment_additional_events(Adjustment)};
         cancel ->
-            ?adjustment_cancelled(hg_datetime:format_now())
+            {?adjustment_cancelled(hg_datetime:format_now()), []}
     end,
     Event = ?adjustment_ev(ID, ?adjustment_status_changed(Status)),
-    {ok, {[Event], hg_machine_action:new()}}.
+    {ok, {AdditionalEvents ++ [Event], hg_machine_action:new()}}.
 
 prepare_adjustment_cashflow(Adjustment, St, Options) ->
     PlanID = construct_adjustment_plan_id(Adjustment, St, Options),
     Plan = get_adjustment_cashflow_plan(Adjustment),
-    hg_accounting:plan(PlanID, Plan).
+    plan(PlanID, Plan).
 
 finalize_adjustment_cashflow(Intent, Adjustment, St, Options) ->
     PlanID = construct_adjustment_plan_id(Adjustment, St, Options),
     Plan = get_adjustment_cashflow_plan(Adjustment),
     case Intent of
         capture ->
-            hg_accounting:commit(PlanID, Plan);
+            commit(PlanID, Plan);
         cancel ->
-            hg_accounting:rollback(PlanID, Plan)
+            rollback(PlanID, Plan)
     end.
 
 get_adjustment_cashflow_plan(#domain_InvoicePaymentAdjustment{
     old_cash_flow_inverse = CashflowInverse,
     new_cash_flow         = Cashflow
 }) ->
-    [
-        {1, CashflowInverse},
-        {2, Cashflow}
-    ].
+    number_plan([CashflowInverse, Cashflow], 1, []).
+
+number_plan([], _Number, Acc) ->
+    lists:reverse(Acc);
+number_plan([[] | Tail], Number, Acc) ->
+    number_plan(Tail, Number, Acc);
+number_plan([NonEmpty | Tail], Number, Acc) ->
+    number_plan(Tail, Number + 1, [{Number, NonEmpty} | Acc]).
+
+plan(_PlanID, []) ->
+    ok;
+plan(PlanID, Plan) ->
+    _ = hg_accounting:plan(PlanID, Plan),
+    ok.
+
+commit(_PlanID, []) ->
+    ok;
+commit(PlanID, Plan) ->
+    _ = hg_accounting:commit(PlanID, Plan),
+    ok.
+
+rollback(_PlanID, []) ->
+    ok;
+rollback(PlanID, Plan) ->
+    _ = hg_accounting:rollback(PlanID, Plan),
+    ok.
 
 assert_adjustment_status(Status, #domain_InvoicePaymentAdjustment{status = {Status, _}}) ->
     ok;
@@ -1595,6 +1811,23 @@ get_adjustment_status(#domain_InvoicePaymentAdjustment{status = Status}) ->
 
 get_adjustment_cashflow(#domain_InvoicePaymentAdjustment{new_cash_flow = Cashflow}) ->
     Cashflow.
+
+-define(
+    adjustment_target_status(Status),
+    #domain_InvoicePaymentAdjustment{
+        state = {status_change, #domain_InvoicePaymentAdjustmentStatusChangeState{
+            scenario = #domain_InvoicePaymentAdjustmentStatusChange{target_status = Status}}
+        }
+    }
+).
+
+-spec get_ajustment_additional_events(adjustment()) ->
+    events().
+
+get_ajustment_additional_events(?adjustment_target_status(Status)) ->
+    [?payment_status_changed(Status)];
+get_ajustment_additional_events(_Adjustment) ->
+    [].
 
 %%
 
@@ -1688,7 +1921,7 @@ process_routing(Action, St) ->
     VS1 = VS0#{risk_score => RiskScore},
     case choose_route(PaymentInstitution, VS1, Revision, St) of
         {ok, Route} ->
-            process_cash_flow_building(Route, VS1, Payment, PaymentInstitution, Revision, Opts, Events0, Action);
+            process_cash_flow_building(Route, VS1, Payment, Revision, Opts, Events0, Action);
         {error, {no_route_found, {Reason, _Details}}} ->
             Failure = {failure, payproc_errors:construct('PaymentFailure',
                 {no_route_found, {Reason, #payprocerr_GeneralFailure{}}}
@@ -1696,13 +1929,9 @@ process_routing(Action, St) ->
             process_failure(get_activity(St), Events0, Action, Failure, St)
     end.
 
-process_cash_flow_building(Route, VS, Payment, PaymentInstitution, Revision, Opts, Events0, Action) ->
-    MerchantTerms = get_merchant_payments_terms(Opts, Revision),
-    ProviderTerms = get_provider_payments_terms(Route, Revision),
-    Provider = get_route_provider(Route, Revision),
-    Cashflow = collect_cashflow(MerchantTerms, ProviderTerms, VS, Revision),
-    Shop = get_shop(Opts),
-    FinalCashflow = construct_final_cashflow(Payment, Shop, PaymentInstitution, Provider, Cashflow, VS, Revision),
+process_cash_flow_building(Route, VS, Payment, Revision, Opts, Events0, Action) ->
+    Timestamp = get_payment_created_at(Payment),
+    FinalCashflow = calculate_cashflow(Route, Payment, VS, Timestamp, Revision, Opts),
     Invoice = get_invoice(Opts),
     _Clock = hg_accounting:hold(
         construct_payment_plan_id(Invoice, Payment),
@@ -1784,7 +2013,7 @@ get_manual_refund_events(#refund_st{transaction_info = TransactionInfo}) ->
 process_adjustment_cashflow(ID, _Action, St) ->
     Opts = get_opts(St),
     Adjustment = get_adjustment(ID, St),
-    _Clock = prepare_adjustment_cashflow(Adjustment, St, Opts),
+    ok = prepare_adjustment_cashflow(Adjustment, St, Opts),
     Events = [?adjustment_ev(ID, ?adjustment_status_changed(?adjustment_processed()))],
     {done, {Events, hg_machine_action:new()}}.
 
@@ -1964,17 +2193,17 @@ process_result({payment, finalizing_accounter}, Action, St) ->
 process_result({refund_accounter, ID}, Action, St) ->
     RefundSt = try_get_refund_state(ID, St),
     _Clocks = commit_refund_cashflow(RefundSt, St),
-        Events2 = [
-            ?refund_ev(ID, ?refund_status_changed(?refund_succeeded()))
-        ],
-        Events3 = case get_remaining_payment_amount(get_refund_cash(get_refund(RefundSt)), St) of
-            ?cash(Amount, _) when Amount =:= 0 ->
-                [
-                    ?payment_status_changed(?refunded())
-                ];
-            ?cash(Amount, _) when Amount > 0 ->
-                []
-        end,
+    Events2 = [
+        ?refund_ev(ID, ?refund_status_changed(?refund_succeeded()))
+    ],
+    Events3 = case get_remaining_payment_amount(get_refund_cash(get_refund(RefundSt)), St) of
+        ?cash(Amount, _) when Amount =:= 0 ->
+            [
+                ?payment_status_changed(?refunded())
+            ];
+        ?cash(Amount, _) when Amount > 0 ->
+            []
+    end,
     {done, {Events2 ++ Events3, Action}}.
 
 process_failure(Activity, Events, Action, Failure, St) ->
@@ -2594,11 +2823,12 @@ merge_change(Change = ?payment_capture_started(Params), #st{} = St, Opts) ->
         capture_params = Params,
         activity = {payment, processing_capture}
     };
-merge_change(Change = ?cash_flow_changed(Cashflow), #st{activity = Activity} = St, Opts) ->
+merge_change(Change = ?cash_flow_changed(Cashflow), #st{activity = Activity} = St0, Opts) ->
     _ = validate_transition([{payment, S} || S <- [
         cash_flow_building,
         processing_capture
-    ]], Change, St, Opts),
+    ]], Change, St0, Opts),
+    St = St0#st{final_cash_flow = Cashflow},
     case Activity of
         {payment, cash_flow_building} ->
             St#st{
@@ -2616,6 +2846,14 @@ merge_change(Change = ?cash_flow_changed(Cashflow), #st{activity = Activity} = S
 merge_change(Change = ?rec_token_acquired(Token), #st{} = St, Opts) ->
     _ = validate_transition([{payment, processing_session}, {payment, finalizing_session}], Change, St, Opts),
     St#st{recurrent_token = Token};
+merge_change(?payment_status_changed(Status), #st{activity = {adjustment_pending, _ID}} = St, _Opts) ->
+    Payment = get_payment(St),
+    St#st{
+        payment = Payment#domain_InvoicePayment{
+            status = Status,
+            cost   = maybe_get_captured_cost(Status, Payment)
+        }
+    };
 merge_change(Change = ?payment_status_changed({failed, _} = Status), #st{payment = Payment} = St, Opts) ->
     _ = validate_transition([{payment, S} || S <- [
         risk_scoring,
@@ -2874,7 +3112,15 @@ get_cashflow(#st{cash_flow = FinalCashflow}) ->
     FinalCashflow.
 
 set_cashflow(Cashflow, St = #st{}) ->
-    St#st{cash_flow = Cashflow}.
+    St#st{
+        cash_flow = Cashflow,
+        final_cash_flow = Cashflow
+    }.
+
+-spec get_final_cash_flow(st()) -> cash_flow().
+
+get_final_cash_flow(#st{final_cash_flow = Cashflow}) ->
+    Cashflow.
 
 get_trx(#st{trx = Trx}) ->
     Trx.
@@ -2909,6 +3155,14 @@ get_captured_cost(#domain_InvoicePaymentCaptured{cost = Cost}, _) when
 ->
     Cost;
 get_captured_cost(_, #domain_InvoicePayment{cost = Cost}) ->
+    Cost.
+
+-spec maybe_get_captured_cost(payment_status(), payment()) ->
+    cash().
+
+maybe_get_captured_cost({captured, Captured}, Payment) ->
+    get_captured_cost(Captured, Payment);
+maybe_get_captured_cost(_OtherStatus, #domain_InvoicePayment{cost = Cost}) ->
     Cost.
 
 get_refund_session(#refund_st{sessions = []}) ->
