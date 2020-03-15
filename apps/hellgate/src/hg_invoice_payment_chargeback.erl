@@ -455,7 +455,6 @@ collect_chargeback_provider_fees(ProviderTerms, VS, Revision) ->
     Fees = reduce_selector(provider_chargeback_fees, ProviderFeesSelector, VS, Revision),
     Fees#domain_Fees.fees.
 
-
 collect_account_map(
     Payment,
     #domain_Shop{account = MerchantAccount},
@@ -492,6 +491,14 @@ reduce_selector(Name, Selector, VS, Revision) ->
             V;
         Ambiguous ->
             error({misconfiguration, {'Could not reduce selector to a value', {Name, Ambiguous}}})
+    end.
+
+reduce_predicate(Name, Selector, VS, Revision) ->
+    case pm_selector:reduce_predicate(Selector, VS, Revision) of
+        {constant, Boolean} ->
+            Boolean;
+        Ambiguous ->
+            error({misconfiguration, {'Could not reduce predicate to a value', {Name, Ambiguous}}})
     end.
 
 get_merchant_chargeback_terms(#domain_TermSet{payments = PaymentsTerms}) ->
@@ -549,7 +556,7 @@ collect_validation_varset(Party, Shop, Payment, Body) ->
 %% Validations
 
 validate_chargeback_is_allowed(#domain_PaymentChargebackServiceTerms{allow = Allow}, VS, Revision) ->
-    case pm_selector:reduce_predicate(Allow, VS, Revision) of
+    case reduce_predicate(allow_chargeback, Allow, VS, Revision) of
         {constant, true} -> ok;
         _False -> throw(#payproc_OperationNotPermitted{})
     end.
