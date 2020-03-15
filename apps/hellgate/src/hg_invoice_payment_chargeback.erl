@@ -641,18 +641,17 @@ get_current_plan(#chargeback_st{cash_flow_plans = Plans} = State) ->
     #{Stage := Plan} = Plans,
     Plan.
 
--spec get_reverted_previous_stage(stage(), state()) ->
+-spec get_reverted_previous_stage(state()) ->
     [batch()].
-get_reverted_previous_stage(?chargeback_stage_chargeback(), _State) ->
-    [];
-get_reverted_previous_stage(?chargeback_stage_arbitration(), State) ->
-    #chargeback_st{cash_flow_plans = #{?chargeback_stage_pre_arbitration() := Plan}} = State,
-    {_ID, CashFlow} = lists:last(Plan),
-    [{1, hg_cashflow:revert(CashFlow)}];
-get_reverted_previous_stage(?chargeback_stage_pre_arbitration(), State) ->
-    #chargeback_st{cash_flow_plans = #{?chargeback_stage_chargeback() := Plan}} = State,
-    {_ID, CashFlow} = lists:last(Plan),
-    [{1, hg_cashflow:revert(CashFlow)}].
+get_reverted_previous_stage(State) ->
+    case get_previous_stage(State) of
+        undefined ->
+            [];
+        Stage ->
+            #chargeback_st{cash_flow_plans = #{Stage := Plan}} = State,
+            {_ID, CashFlow} = lists:last(Plan),
+            [{1, hg_cashflow:revert(CashFlow)}]
+    end.
 
 -spec get_revision(state() | chargeback()) ->
     hg_domain:revision().
@@ -684,16 +683,16 @@ get_next_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_charge
 get_next_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_pre_arbitration()}) ->
     ?chargeback_stage_arbitration().
 
-% -spec get_previous_stage(state() | chargeback()) ->
-%     undefined | ?chargeback_stage_pre_arbitration() | ?chargeback_stage_chargeback().
-% get_next_stage(#chargeback_st{chargeback = Chargeback}) ->
-%     get_next_stage(Chargeback);
-% get_next_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_chargeback()}) ->
-%     undefined;
-% get_next_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_pre_arbitration()}) ->
-%     ?chargeback_stage_chargeback();
-% get_next_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_arbitration()}) ->
-%     ?chargeback_stage_pre_arbitration().
+-spec get_previous_stage(state() | chargeback()) ->
+    undefined | ?chargeback_stage_pre_arbitration() | ?chargeback_stage_chargeback().
+get_previous_stage(#chargeback_st{chargeback = Chargeback}) ->
+    get_previous_stage(Chargeback);
+get_previous_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_chargeback()}) ->
+    undefined;
+get_previous_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_pre_arbitration()}) ->
+    ?chargeback_stage_chargeback();
+get_previous_stage(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_arbitration()}) ->
+    ?chargeback_stage_pre_arbitration().
 
 %% Setters
 
@@ -854,7 +853,7 @@ build_updated_plan(CashFlow, #chargeback_st{cash_flow_plans = Plans} = State) ->
     Stage = get_stage(State),
     case Plans of
         #{Stage := []} ->
-            Reverted = get_reverted_previous_stage(Stage, State),
+            Reverted = get_reverted_previous_stage(State),
             add_batch(CashFlow, Reverted);
         #{Stage := Plan} ->
             {_, PreviousCashFlow} = lists:last(Plan),
