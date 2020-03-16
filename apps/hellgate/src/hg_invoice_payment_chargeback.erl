@@ -557,8 +557,8 @@ collect_validation_varset(Party, Shop, Payment, Body) ->
 
 validate_chargeback_is_allowed(#domain_PaymentChargebackServiceTerms{allow = Allow}, VS, Revision) ->
     case reduce_predicate(allow_chargeback, Allow, VS, Revision) of
-        {constant, true} -> ok;
-        _False -> throw(#payproc_OperationNotPermitted{})
+        true  -> ok;
+        false -> throw(#payproc_OperationNotPermitted{})
     end.
 
 validate_eligibility_time(#domain_PaymentChargebackServiceTerms{eligibility_time = undefined}, _V, _R) ->
