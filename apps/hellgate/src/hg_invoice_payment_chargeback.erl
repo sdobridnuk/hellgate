@@ -40,8 +40,9 @@
     ]).
 
 -record( chargeback_st
-       , { chargeback    :: undefined | chargeback()
-         , target_status :: undefined | status()
+       , { chargeback     :: undefined | chargeback()
+         , target_status  :: undefined | status()
+         , cash_flow = [] :: cash_flow()
          , cash_flow_plans =
                #{ ?chargeback_stage_chargeback()      => []
                 , ?chargeback_stage_pre_arbitration() => []
@@ -82,6 +83,11 @@
     :: dmsl_domain_thrift:'InvoicePaymentChargebackStatus'().
 -type stage()
     :: dmsl_domain_thrift:'InvoicePaymentChargebackStage'().
+
+-type timestamp()
+    :: dmsl_base_thrift:'Timestamp'().
+-type revision()
+    :: dmsl_domain_thrift:'DataRevision'().
 
 -type cash()
     :: dmsl_domain_thrift:'Cash'().
@@ -258,20 +264,25 @@ process_timeout(finalising_accounter, State, Action, Opts) ->
     {chargeback(), result()} | no_return().
 do_create(Opts, CreateParams = ?chargeback_params(Levy, Body)) ->
     Revision     = hg_domain:head(),
-    ServiceTerms = get_service_terms(Opts, Revision),
+    CreatedAt    = hg_datetime:format_now(),
+    Invoice      = get_opts_invoice(Opts),
     Party        = get_opts_party(Opts),
     Payment      = get_opts_payment(Opts),
-    Invoice      = get_opts_invoice(Opts),
     ShopID       = get_invoice_shop_id(Invoice),
-    Shop         = hg_party:get_shop(ShopID, Party),
+    Shop         = pm_party:get_shop(ShopID, Party),
+    ContractID   = get_shop_contract_id(Shop),
+    Contract     = pm_party:get_contract(ContractID, Party),
+    TermSet      = pm_party:get_terms(Contract, CreatedAt, Revision),
+    ServiceTerms = get_merchant_chargeback_terms(TermSet),
     VS           = collect_validation_varset(Party, Shop, Payment, Body),
-    _ = validate_currency(Body, get_opts_payment(Opts)),
-    _ = validate_currency(Levy, get_opts_payment(Opts)),
+    _ = validate_contract_active(Contract),
+    _ = validate_currency(Body, Payment),
+    _ = validate_currency(Levy, Payment),
     _ = validate_body_amount(Body, get_opts_payment_state(Opts)),
     _ = validate_service_terms(ServiceTerms),
     _ = validate_chargeback_is_allowed(ServiceTerms, VS, Revision),
     _ = validate_eligibility_time(ServiceTerms, VS, Revision),
-    Chargeback = build_chargeback(Opts, CreateParams),
+    Chargeback = build_chargeback(Opts, CreateParams, Revision, CreatedAt),
     Action     = hg_machine_action:instant(),
     Result     = {[?chargeback_created(Chargeback)], Action},
     {Chargeback, Result}.
@@ -283,7 +294,6 @@ do_cancel(State) ->
     %       there actually is a cashflow to cancel
     % _ = validate_cash_flow_held(State),
     _ = validate_chargeback_is_pending(State),
-    _ = validate_stage_is_chargeback(State),
     Action = hg_machine_action:instant(),
     Status = ?chargeback_status_cancelled(),
     Result = {[?chargeback_target_status_changed(Status)], Action},
@@ -334,25 +344,22 @@ finalise(#chargeback_st{target_status = Status}, Action, _Opts)
 when Status =:= ?chargeback_status_pending() ->
     {[?chargeback_status_changed(Status)], Action};
 finalise(State = #chargeback_st{target_status = Status}, Action, Opts)
-when Status =:= ?chargeback_status_cancelled() ->
-    _ = rollback_cash_flow(State, Opts),
-    {[?chargeback_status_changed(Status)], Action};
-finalise(State = #chargeback_st{target_status = Status}, Action, Opts)
 when Status =:= ?chargeback_status_rejected();
-     Status =:= ?chargeback_status_accepted() ->
+     Status =:= ?chargeback_status_accepted();
+     Status =:= ?chargeback_status_cancelled() ->
     _ = commit_cash_flow(State, Opts),
     {[?chargeback_status_changed(Status)], Action}.
 
--spec build_chargeback(opts(), create_params()) ->
+-spec build_chargeback(opts(), create_params(), revision(), timestamp()) ->
     chargeback() | no_return().
-build_chargeback(Opts, Params = ?chargeback_params(Levy, Body, Reason)) ->
+build_chargeback(Opts, Params = ?chargeback_params(Levy, Body, Reason), Revision, CreatedAt) ->
     Revision      = hg_domain:head(),
     PartyRevision = get_opts_party_revision(Opts),
     #domain_InvoicePaymentChargeback{
         id              = Params#payproc_InvoicePaymentChargebackParams.id,
         levy            = Levy,
         body            = define_body(Body, get_opts_payment_state(Opts)),
-        created_at      = hg_datetime:format_now(),
+        created_at      = CreatedAt,
         stage           = ?chargeback_stage_chargeback(),
         status          = ?chargeback_status_pending(),
         domain_revision = Revision,
@@ -401,24 +408,28 @@ build_reopen_result(State, ?reopen_params(ParamsLevy, ParamsBody)) ->
 
 -spec build_chargeback_cash_flow(state(), opts()) ->
     cash_flow() | no_return().
+build_chargeback_cash_flow(#chargeback_st{target_status = ?chargeback_status_cancelled()}, _Opts) ->
+    [];
 build_chargeback_cash_flow(State, Opts) ->
+    CreatedAt        = get_created_at(State),
     Revision         = get_revision(State),
     Body             = get_body(State),
     Payment          = get_opts_payment(Opts),
     Invoice          = get_opts_invoice(Opts),
     Route            = get_opts_route(Opts),
     Party            = get_opts_party(Opts),
-    ServiceTerms     = get_service_terms(Opts, Revision),
     ShopID           = get_invoice_shop_id(Invoice),
-    Shop             = hg_party:get_shop(ShopID, Party),
+    Shop             = pm_party:get_shop(ShopID, Party),
+    ContractID       = get_shop_contract_id(Shop),
+    Contract         = pm_party:get_contract(ContractID, Party),
+    TermSet          = pm_party:get_terms(Contract, CreatedAt, Revision),
+    ServiceTerms     = get_merchant_chargeback_terms(TermSet),
     VS               = collect_validation_varset(Party, Shop, Payment, Body),
     PaymentsTerms    = hg_routing:get_payments_terms(Route, Revision),
     ProviderTerms    = get_provider_chargeback_terms(PaymentsTerms, Payment),
     ServiceCashFlow  = collect_chargeback_service_cash_flow(ServiceTerms, VS, Revision),
     ProviderCashFlow = collect_chargeback_provider_cash_flow(ProviderTerms, VS, Revision),
     ProviderFees     = collect_chargeback_provider_fees(ProviderTerms, VS, Revision),
-    ContractID       = get_shop_contract_id(Shop),
-    Contract         = hg_party:get_contract(ContractID, Party),
     PmntInstitution  = get_payment_institution(Contract, Revision),
     Provider         = get_route_provider(Route, Revision),
     AccountMap       = collect_account_map(Payment, Shop, PmntInstitution, Provider, VS, Revision),
@@ -437,7 +448,7 @@ build_provider_cash_flow_context(State, Fees) ->
     case get_target_status(State) of
         ?chargeback_status_rejected() ->
             ?cash(_Amount, SymCode) = get_body(State),
-            maps:merge(#{operation_amount => ?cash(0, SymCode)}, ComputedFees);
+            maps:merge(ComputedFees, #{operation_amount => ?cash(0, SymCode)});
         _NotRejected ->
             maps:merge(#{operation_amount => get_body(State)}, ComputedFees)
     end.
@@ -523,11 +534,6 @@ commit_cash_flow(State, Opts) ->
     PlanID       = construct_chargeback_plan_id(State, Opts),
     hg_accounting:commit(PlanID, CashFlowPlan).
 
-rollback_cash_flow(State, Opts) ->
-    CashFlowPlan = get_current_plan(State),
-    PlanID       = construct_chargeback_plan_id(State, Opts),
-    hg_accounting:rollback(PlanID, CashFlowPlan).
-
 construct_chargeback_plan_id(State, Opts) ->
     {Stage, _} = get_stage(State),
     hg_utils:construct_complex_id([
@@ -578,6 +584,11 @@ validate_service_terms(#domain_PaymentChargebackServiceTerms{}) ->
 validate_service_terms(undefined) ->
     throw(#payproc_OperationNotPermitted{}).
 
+validate_contract_active(#domain_Contract{status = {active, _}}) ->
+    ok;
+validate_contract_active(#domain_Contract{status = Status}) ->
+    throw(#payproc_InvalidContractStatus{status = Status}).
+
 validate_body_amount(undefined, _PaymentState) ->
     ok;
 validate_body_amount(?cash(_, _) = Cash, PaymentState) ->
@@ -596,13 +607,6 @@ validate_currency(undefined, _Payment) ->
     ok;
 validate_currency(?cash(_, SymCode), _Payment) ->
     throw(#payproc_InconsistentChargebackCurrency{currency = SymCode}).
-
-validate_stage_is_chargeback(#chargeback_st{chargeback = Chargeback}) ->
-    validate_stage_is_chargeback(Chargeback);
-validate_stage_is_chargeback(#domain_InvoicePaymentChargeback{stage = ?chargeback_stage_chargeback()}) ->
-    ok;
-validate_stage_is_chargeback(#domain_InvoicePaymentChargeback{stage = Stage}) ->
-    throw(#payproc_InvoicePaymentChargebackInvalidStage{stage = Stage}).
 
 validate_not_arbitration(#chargeback_st{chargeback = Chargeback}) ->
     validate_not_arbitration(Chargeback);
@@ -647,18 +651,24 @@ get_reverted_previous_stage(State) ->
     case get_previous_stage(State) of
         undefined ->
             [];
-        Stage ->
-            #chargeback_st{cash_flow_plans = #{Stage := Plan}} = State,
-            {_ID, CashFlow} = lists:last(Plan),
-            [{1, hg_cashflow:revert(CashFlow)}]
+        _Stage ->
+            #chargeback_st{cash_flow = CashFlow} = State,
+            add_batch(hg_cashflow:revert(CashFlow), [])
     end.
 
 -spec get_revision(state() | chargeback()) ->
-    hg_domain:revision().
+    revision().
 get_revision(#chargeback_st{chargeback = Chargeback}) ->
     get_revision(Chargeback);
 get_revision(#domain_InvoicePaymentChargeback{domain_revision = Revision}) ->
     Revision.
+
+-spec get_created_at(state() | chargeback()) ->
+    timestamp().
+get_created_at(#chargeback_st{chargeback = Chargeback}) ->
+    get_created_at(Chargeback);
+get_created_at(#domain_InvoicePaymentChargeback{created_at = CreatedAt}) ->
+    CreatedAt.
 
 -spec get_levy(state() | chargeback()) ->
     cash().
@@ -708,7 +718,7 @@ set(Chargeback, #chargeback_st{} = State) ->
 set_cash_flow(CashFlow, #chargeback_st{cash_flow_plans = Plans} = State) ->
     Stage = get_stage(State),
     Plan = build_updated_plan(CashFlow, State),
-    State#chargeback_st{cash_flow_plans = Plans#{Stage := Plan}}.
+    State#chargeback_st{cash_flow_plans = Plans#{Stage := Plan}, cash_flow = CashFlow}.
 
 -spec set_target_status(status() | undefined, state()) ->
     state().
@@ -792,17 +802,6 @@ get_opts_payment_id(Opts) ->
     #domain_InvoicePayment{id = ID} = get_opts_payment(Opts),
     ID.
 
-get_service_terms(Opts, Revision) ->
-    Invoice     = get_opts_invoice(Opts),
-    Party       = get_opts_party(Opts),
-    ShopID      = get_invoice_shop_id(Invoice),
-    CreatedAt   = get_invoice_created_at(Invoice),
-    Shop        = pm_party:get_shop(ShopID, Party),
-    ContractID  = get_shop_contract_id(Shop),
-    Contract    = pm_party:get_contract(ContractID, Party),
-    TermSet     = pm_party:get_terms(Contract, CreatedAt, Revision),
-    get_merchant_chargeback_terms(TermSet).
-
 %%
 
 get_payment_cost(#domain_InvoicePayment{cost = Cost}) ->
@@ -826,9 +825,6 @@ get_resource_payment_tool(#domain_DisposablePaymentResource{payment_tool = Payme
 get_invoice_shop_id(#domain_Invoice{shop_id = ShopID}) ->
     ShopID.
 
-get_invoice_created_at(#domain_Invoice{created_at = Dt}) ->
-    Dt.
-
 %%
 
 body_change(Body,        Body) -> [];
@@ -841,23 +837,22 @@ levy_change(ParamsLevy, _Levy) -> [?chargeback_levy_changed(ParamsLevy)].
 
 %%
 
-add_batch([], CashFlow) ->
-    CashFlow;
+add_batch([], Batches) ->
+    Batches;
 add_batch(FinalCashFlow, []) ->
     [{1, FinalCashFlow}];
 add_batch(FinalCashFlow, Batches) ->
     {ID, _CF} = lists:last(Batches),
     Batches ++ [{ID + 1, FinalCashFlow}].
 
-build_updated_plan(CashFlow, #chargeback_st{cash_flow_plans = Plans} = State) ->
+build_updated_plan(NewCashFlow, #chargeback_st{cash_flow_plans = Plans, cash_flow = OldCashFlow} = State) ->
     Stage = get_stage(State),
     case Plans of
         #{Stage := []} ->
             Reverted = get_reverted_previous_stage(State),
-            add_batch(CashFlow, Reverted);
+            add_batch(NewCashFlow, Reverted);
         #{Stage := Plan} ->
-            {_, PreviousCashFlow} = lists:last(Plan),
-            RevertedPrevious = hg_cashflow:revert(PreviousCashFlow),
+            RevertedPrevious = hg_cashflow:revert(OldCashFlow),
             RevertedPlan     = add_batch(RevertedPrevious, Plan),
-            add_batch(CashFlow, RevertedPlan)
+            add_batch(NewCashFlow, RevertedPlan)
     end.

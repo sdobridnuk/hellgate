@@ -2923,9 +2923,6 @@ merge_change(Change = ?chargeback_ev(ID, Event), St, Opts) ->
                 #st{activity = {chargeback, ID, updating_cash_flow}} ->
                     St#st{activity = {chargeback, ID, finalising_accounter}}
             end;
-        ?chargeback_target_status_changed(?chargeback_status_cancelled()) ->
-            _ = validate_transition(idle, Change, St, Opts),
-            St#st{activity = {chargeback, ID, finalising_accounter}};
         ?chargeback_target_status_changed(?chargeback_status_accepted()) ->
             _ = validate_transition([idle, {chargeback, ID, updating_chargeback}], Change, St, Opts),
             case St of
