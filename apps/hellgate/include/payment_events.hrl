@@ -186,7 +186,6 @@
         levy   = Levy
     }
 ).
-
 -define(chargeback_params(Levy, Body, Reason),
     #payproc_InvoicePaymentChargebackParams{
         body   = Body,
@@ -194,9 +193,28 @@
         reason = Reason
     }
 ).
+-define(chargeback_params(Levy, Body, Reason, OccurredAt),
+    #payproc_InvoicePaymentChargebackParams{
+        body        = Body,
+        levy        = Levy,
+        reason      = Reason,
+        occurred_at = OccurredAt
+    }
+).
+
+-define(cancel_params(),
+    #payproc_InvoicePaymentChargebackCancelParams{}).
+-define(cancel_params(OccurredAt),
+    #payproc_InvoicePaymentChargebackCancelParams{occurred_at = OccurredAt}).
 
 -define(reject_params(Levy),
     #payproc_InvoicePaymentChargebackRejectParams{levy = Levy}).
+-define(reject_params(Levy, OccurredAt),
+    #payproc_InvoicePaymentChargebackRejectParams{
+        levy        = Levy,
+        occurred_at = OccurredAt
+    }
+).
 
 -define(accept_params(Levy),
     #payproc_InvoicePaymentChargebackAcceptParams{levy = Levy}).
@@ -206,6 +224,13 @@
         levy = Levy
     }
 ).
+-define(accept_params(Levy, Body, OccurredAt),
+    #payproc_InvoicePaymentChargebackAcceptParams{
+        body        = Body,
+        levy        = Levy,
+        occurred_at = OccurredAt
+    }
+).
 
 -define(reopen_params(Levy),
     #payproc_InvoicePaymentChargebackReopenParams{levy = Levy}).
@@ -213,6 +238,13 @@
     #payproc_InvoicePaymentChargebackReopenParams{
         body = Body,
         levy = Levy
+    }
+).
+-define(reopen_params(Levy, Body, OccurredAt),
+    #payproc_InvoicePaymentChargebackReopenParams{
+        body        = Body,
+        levy        = Levy,
+        occurred_at = occurredat
     }
 ).
 
@@ -227,6 +259,15 @@
     {invoice_payment_chargeback_created,
         #payproc_InvoicePaymentChargebackCreated{
             chargeback = Chargeback
+        }
+    }
+).
+
+-define(chargeback_created(Chargeback, OccurredAt),
+    {invoice_payment_chargeback_created,
+        #payproc_InvoicePaymentChargebackCreated{
+            chargeback = Chargeback,
+            occurred_at = OccurredAt
         }
     }
 ).
