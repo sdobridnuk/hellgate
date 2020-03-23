@@ -27,7 +27,7 @@
 -export([get_payment_refund/4]).
 
 -export([create_chargeback/4]).
--export([cancel_chargeback/4]).
+-export([cancel_chargeback/5]).
 -export([reject_chargeback/5]).
 -export([accept_chargeback/5]).
 -export([reopen_chargeback/5]).
@@ -73,6 +73,7 @@
 -type chargeback()               :: dmsl_domain_thrift:'InvoicePaymentChargeback'().
 -type chargeback_id()            :: dmsl_domain_thrift:'InvoicePaymentChargebackID'().
 -type chargeback_params()        :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackParams'().
+-type chargeback_cancel_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackCancelParams'().
 -type chargeback_accept_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackAcceptParams'().
 -type chargeback_reject_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackRejectParams'().
 -type chargeback_reopen_params() :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackReopenParams'().
@@ -214,11 +215,11 @@ capture_payment(InvoiceID, PaymentID, Reason, Cash, Cart, Client) ->
 create_chargeback(InvoiceID, PaymentID, Params, Client) ->
     map_result_error(gen_server:call(Client, {call, 'CreateChargeback', [InvoiceID, PaymentID, Params]})).
 
--spec cancel_chargeback(invoice_id(), payment_id(), chargeback_id(), pid()) ->
+-spec cancel_chargeback(invoice_id(), payment_id(), chargeback_id(), chargeback_cancel_params(), pid()) ->
     chargeback() | woody_error:business_error().
 
-cancel_chargeback(InvoiceID, PaymentID, ChargebackID, Client) ->
-    map_result_error(gen_server:call(Client, {call, 'CancelChargeback', [InvoiceID, PaymentID, ChargebackID]})).
+cancel_chargeback(InvoiceID, PaymentID, ChargebackID, Params, Client) ->
+    map_result_error(gen_server:call(Client, {call, 'CancelChargeback', [InvoiceID, PaymentID, ChargebackID, Params]})).
 
 -spec reject_chargeback(invoice_id(), payment_id(), chargeback_id(), chargeback_reject_params(), pid()) ->
     chargeback() | woody_error:business_error().
