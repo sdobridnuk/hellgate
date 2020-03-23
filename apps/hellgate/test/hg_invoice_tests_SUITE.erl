@@ -2199,7 +2199,8 @@ create_chargeback_idempotency(C) ->
     NewCBParams   = make_chargeback_params(Levy),
     ?assertMatch(?chargeback_pending(), hg_client_invoicing:create_chargeback(IID, PID, NewCBParams, Client)),
     Settlement0 = hg_ct_helper:get_balance(SID),
-    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
+    CancelParams = make_chargeback_cancel_params(),
+    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, CancelParams, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
@@ -2234,16 +2235,18 @@ cancel_payment_chargeback(C) ->
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
     ] = next_event(IID, Client),
     Settlement0 = hg_ct_helper:get_balance(SID),
-    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
+    CancelParams = make_chargeback_cancel_params(),
+    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, CancelParams, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
     [
-        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(CF)))
     ] = next_event(IID, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
+    ct:print("CF\n~p", [CF]),
     Settlement1 = hg_ct_helper:get_balance(SID),
     ?assertEqual(Paid - Cost - LevyAmount,  maps:get(min_available_amount, Settlement0)),
     ?assertEqual(Paid,                      maps:get(max_available_amount, Settlement0)),
@@ -2270,7 +2273,8 @@ cancel_partial_payment_chargeback(C) ->
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
     ] = next_event(IID, Client),
     Settlement0 = hg_ct_helper:get_balance(SID),
-    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
+    CancelParams = make_chargeback_cancel_params(),
+    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, CancelParams, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
@@ -2316,7 +2320,8 @@ cancel_payment_chargeback_refund(C) ->
     ] = next_event(IID, Client),
     RefundParams = make_refund_params(),
     RefundError = hg_client_invoicing:refund_payment(IID, PID, RefundParams, Client),
-    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
+    CancelParams = make_chargeback_cancel_params(),
+    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, CancelParams, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
@@ -2348,7 +2353,8 @@ reject_payment_chargeback_inconsistent(C) ->
     ] = next_event(IID, Client),
     InconsistentParams = make_chargeback_reject_params(?cash(10, <<"USD">>)),
     Inconsistent = hg_client_invoicing:reject_chargeback(IID, PID, CBID, InconsistentParams, Client),
-    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
+    CancelParams = make_chargeback_cancel_params(),
+    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, CancelParams, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
@@ -2456,7 +2462,8 @@ accept_payment_chargeback_inconsistent(C) ->
     InconsistentBodyParams = make_chargeback_accept_params(undefined, ?cash(10, <<"USD">>)),
     InconsistentLevy = hg_client_invoicing:accept_chargeback(IID, PID, CBID, InconsistentLevyParams, Client),
     InconsistentBody = hg_client_invoicing:accept_chargeback(IID, PID, CBID, InconsistentBodyParams, Client),
-    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
+    CancelParams = make_chargeback_cancel_params(),
+    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, CancelParams, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
@@ -2488,7 +2495,8 @@ accept_payment_chargeback_exceeded(C) ->
     ExceedBody   = 200000,
     ExceedParams = make_chargeback_accept_params(?cash(LevyAmount, <<"RUB">>), ?cash(ExceedBody, <<"RUB">>)),
     Exceeded = hg_client_invoicing:accept_chargeback(IID, PID, CBID, ExceedParams, Client),
-    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
+    CancelParams = make_chargeback_cancel_params(),
+    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, CancelParams, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
@@ -2811,13 +2819,15 @@ reopen_payment_chargeback_cancel(C) ->
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_pending())))
     ] = next_event(IID, Client),
     Settlement2  = hg_ct_helper:get_balance(SID),
-    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, Client),
+    CancelParams = make_chargeback_cancel_params(),
+    ok = hg_client_invoicing:cancel_chargeback(IID, PID, CBID, CancelParams, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
     [
-        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(CF)))
     ] = next_event(IID, Client),
+    ct:print("CF\n~p", [CF]),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
@@ -4794,6 +4804,9 @@ make_payment_params(PaymentTool, Session, FlowType) ->
 set_payment_context(Context, Params = #payproc_InvoicePaymentParams{}) ->
     Params#payproc_InvoicePaymentParams{context = Context}.
 
+make_chargeback_cancel_params() ->
+    #payproc_InvoicePaymentChargebackCancelParams{}.
+
 make_chargeback_reject_params(Levy) ->
     #payproc_InvoicePaymentChargebackRejectParams{
         levy = Levy
@@ -4824,7 +4837,8 @@ make_chargeback_params(Levy) ->
             code = <<"CB.C0DE">>,
             category = {fraud, #domain_InvoicePaymentChargebackCategoryFraud{}}
         },
-        levy = Levy
+        levy = Levy,
+        occurred_at = hg_datetime:format_now()
     }.
 make_chargeback_params(Levy, Body) ->
     #payproc_InvoicePaymentChargebackParams{
@@ -4834,7 +4848,8 @@ make_chargeback_params(Levy, Body) ->
             category = {fraud, #domain_InvoicePaymentChargebackCategoryFraud{}}
         },
         body = Body,
-        levy = Levy
+        levy = Levy,
+        occurred_at = hg_datetime:format_now()
     }.
 
 make_refund_params() ->
