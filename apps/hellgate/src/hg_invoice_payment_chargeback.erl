@@ -34,6 +34,7 @@
 
 -export_type(
     [ create_params/0
+    , cancel_params/0
     , accept_params/0
     , reject_params/0
     , reopen_params/0
