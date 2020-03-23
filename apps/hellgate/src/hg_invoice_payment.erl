@@ -60,7 +60,7 @@
 -export([cancel_adjustment/3]).
 
 -export([create_chargeback/3]).
--export([cancel_chargeback/2]).
+-export([cancel_chargeback/3]).
 -export([reject_chargeback/3]).
 -export([accept_chargeback/3]).
 -export([reopen_chargeback/3]).
@@ -1142,11 +1142,11 @@ create_chargeback(St, Opts, Params) ->
     {Chargeback, {Changes, Action}} = hg_invoice_payment_chargeback:create(CBOpts, Params),
     {Chargeback, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
 
--spec cancel_chargeback(chargeback_id(), st()) ->
+-spec cancel_chargeback(chargeback_id(), st(), hg_invoice_payment_chargeback:cancel_params()) ->
     {ok, result()}.
-cancel_chargeback(ChargebackID, St) ->
+cancel_chargeback(ChargebackID, St, Params) ->
     ChargebackState = get_chargeback_state(ChargebackID, St),
-    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:cancel(ChargebackState),
+    {ok, {Changes, Action}} = hg_invoice_payment_chargeback:cancel(ChargebackState, Params),
     {ok, {[?chargeback_ev(ChargebackID, C) || C <- Changes], Action}}.
 
 -spec reject_chargeback(chargeback_id(), st(), hg_invoice_payment_chargeback:reject_params()) ->

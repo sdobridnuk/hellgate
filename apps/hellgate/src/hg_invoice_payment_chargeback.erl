@@ -6,7 +6,7 @@
 
 -export(
     [ create/2
-    , cancel/1
+    , cancel/2
     , reject/3
     , accept/3
     , reopen/3
@@ -98,6 +98,8 @@
 
 -type create_params()
     :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackParams'().
+-type cancel_params()
+    :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackCancelParams'().
 -type accept_params()
     :: dmsl_payment_processing_thrift:'InvoicePaymentChargebackAcceptParams'().
 -type reject_params()
@@ -176,10 +178,10 @@ create(Opts, CreateParams) ->
 %% will be trasferred back to the merchant as a result of this operation.
 %% @end
 %%----------------------------------------------------------------------------
--spec cancel(state()) ->
+-spec cancel(state(), cancel_params()) ->
     {ok, result()} | no_return().
-cancel(State) ->
-    do_cancel(State).
+cancel(State, CancelParams) ->
+    do_cancel(State, CancelParams).
 
 %%----------------------------------------------------------------------------
 %% @doc
@@ -262,7 +264,7 @@ process_timeout(finalising_accounter, State, Action, Opts) ->
 
 -spec do_create(opts(), create_params()) ->
     {chargeback(), result()} | no_return().
-do_create(Opts, CreateParams = ?chargeback_params(Levy, Body)) ->
+do_create(Opts, CreateParams = ?chargeback_params(Levy, Body, _Reason)) ->
     Revision     = hg_domain:head(),
     CreatedAt    = hg_datetime:format_now(),
     Invoice      = get_opts_invoice(Opts),
@@ -287,9 +289,9 @@ do_create(Opts, CreateParams = ?chargeback_params(Levy, Body)) ->
     Result     = {[?chargeback_created(Chargeback)], Action},
     {Chargeback, Result}.
 
--spec do_cancel(state()) ->
+-spec do_cancel(state(), cancel_params()) ->
     {ok, result()} | no_return().
-do_cancel(State) ->
+do_cancel(State, ?cancel_params()) ->
     % TODO: might be reasonable to ensure that
     %       there actually is a cashflow to cancel
     % _ = validate_cash_flow_held(State),
@@ -340,13 +342,9 @@ update_cash_flow(State, Action, Opts) ->
 
 -spec finalise(state(), action(), opts()) ->
     result() | no_return().
-finalise(#chargeback_st{target_status = Status}, Action, _Opts)
-when Status =:= ?chargeback_status_pending() ->
+finalise(#chargeback_st{target_status = Status = ?chargeback_status_pending()}, Action, _Opts) ->
     {[?chargeback_status_changed(Status)], Action};
-finalise(State = #chargeback_st{target_status = Status}, Action, Opts)
-when Status =:= ?chargeback_status_rejected();
-     Status =:= ?chargeback_status_accepted();
-     Status =:= ?chargeback_status_cancelled() ->
+finalise(State = #chargeback_st{target_status = Status}, Action, Opts) ->
     _ = commit_cash_flow(State, Opts),
     {[?chargeback_status_changed(Status)], Action}.
 
@@ -450,7 +448,7 @@ build_provider_cash_flow_context(State, Fees) ->
             ?cash(_Amount, SymCode) = get_body(State),
             maps:merge(ComputedFees, #{operation_amount => ?cash(0, SymCode)});
         _NotRejected ->
-            maps:merge(#{operation_amount => get_body(State)}, ComputedFees)
+            maps:merge(ComputedFees, #{operation_amount => get_body(State)})
     end.
 
 collect_chargeback_service_cash_flow(ServiceTerms, VS, Revision) ->
