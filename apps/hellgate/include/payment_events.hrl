@@ -244,7 +244,7 @@
     #payproc_InvoicePaymentChargebackReopenParams{
         body        = Body,
         levy        = Levy,
-        occurred_at = occurredat
+        occurred_at = OccurredAt
     }
 ).
 
