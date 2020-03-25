@@ -2242,12 +2242,11 @@ cancel_payment_chargeback(C) ->
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
     [
-        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(CF)))
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
     ] = next_event(IID, Client),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
-    ct:print("CF\n~p", [CF]),
     Settlement1 = hg_ct_helper:get_balance(SID),
     ?assertEqual(Paid - Cost - LevyAmount,  maps:get(min_available_amount, Settlement0)),
     ?assertEqual(Paid,                      maps:get(max_available_amount, Settlement0)),
@@ -2826,9 +2825,8 @@ reopen_payment_chargeback_cancel(C) ->
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_target_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
     [
-        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(CF)))
+        ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_cash_flow_changed(_)))
     ] = next_event(IID, Client),
-    ct:print("CF\n~p", [CF]),
     [
         ?payment_ev(PID, ?chargeback_ev(CBID, ?chargeback_status_changed(?chargeback_status_cancelled())))
     ] = next_event(IID, Client),
