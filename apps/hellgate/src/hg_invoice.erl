@@ -626,11 +626,10 @@ handle_call({{'Invoicing', 'CreateManualRefund'}, [_UserInfo, _InvoiceID, Paymen
     start_refund(manual_refund, Params, PaymentID, PaymentSession, St);
 
 handle_call({{'Invoicing', 'CreateChargeback'}, [_UserInfo, _InvoiceID, PaymentID, Params]}, St) ->
-    #payproc_InvoicePaymentChargebackParams{occurred_at = OccurredAt} = Params,
     _ = assert_invoice_accessible(St),
     PaymentSession = get_payment_session(PaymentID, St),
     PaymentOpts    = get_payment_opts(St),
-    start_chargeback(Params, PaymentID, PaymentSession, PaymentOpts, St, OccurredAt);
+    start_chargeback(Params, PaymentID, PaymentSession, PaymentOpts, St);
 
 handle_call({{'Invoicing', 'CancelChargeback'}, [_UserInfo, _InvoiceID, PaymentID, ChargebackID, Params]}, St) ->
     #payproc_InvoicePaymentChargebackCancelParams{occurred_at = OccurredAt} = Params,
@@ -952,10 +951,10 @@ start_new_refund(RefundType, PaymentID, Params, PaymentSession, St) when
 
 %%
 
-start_chargeback(Params, PaymentID, PaymentSession, PaymentOpts, St, OccurredAt) ->
+start_chargeback(Params, PaymentID, PaymentSession, PaymentOpts, St) ->
     case get_chargeback_state(get_chargeback_id(Params), PaymentSession) of
         undefined ->
-            start_new_chargeback(PaymentID, Params, PaymentSession, PaymentOpts, St, OccurredAt);
+            start_new_chargeback(PaymentID, Params, PaymentSession, PaymentOpts, St);
         ChargebackState ->
             #{
                 response => hg_invoice_payment_chargeback:get(ChargebackState),
@@ -963,7 +962,8 @@ start_chargeback(Params, PaymentID, PaymentSession, PaymentOpts, St, OccurredAt)
             }
     end.
 
-start_new_chargeback(PaymentID, Params, PaymentSession, PaymentOpts, St, OccurredAt) ->
+start_new_chargeback(PaymentID, Params, PaymentSession, PaymentOpts, St) ->
+    #payproc_InvoicePaymentChargebackParams{occurred_at = OccurredAt} = Params,
     CreateResult = hg_invoice_payment:create_chargeback(PaymentSession, PaymentOpts, Params),
     wrap_payment_impact(PaymentID, CreateResult, St, OccurredAt).
 
