@@ -281,9 +281,8 @@ groups() ->
             create_chargeback_exceeded,
             create_chargeback_idempotency,
             cancel_payment_chargeback,
-            % flappy
-            % cancel_partial_payment_chargeback,
-            % cancel_partial_payment_chargeback_exceeded,
+            cancel_partial_payment_chargeback,
+            cancel_partial_payment_chargeback_exceeded,
             cancel_payment_chargeback_refund,
             reject_payment_chargeback_inconsistent,
             reject_payment_chargeback,
@@ -5472,6 +5471,12 @@ construct_domain_fixture() ->
                     ?pmt(bank_card, mastercard)
                 ])},
                 lifetime = {decisions, [
+                    #domain_HoldLifetimeDecision{
+                        if_ = {condition, {payment_tool, {bank_card, #domain_BankCardCondition{
+                            definition = {payment_system_is, mastercard}
+                        }}}},
+                        then_ = {value, ?hold_lifetime(120)}
+                    },
                     #domain_HoldLifetimeDecision{
                         if_ = {condition, {currency_is, ?cur(<<"RUB">>)}},
                         then_ = {value, #domain_HoldLifetime{seconds = 3}}
