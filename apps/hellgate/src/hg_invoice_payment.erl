@@ -87,6 +87,7 @@
 -export_type([activity/0]).
 -export_type([machine_result/0]).
 -export_type([opts/0]).
+-export_type([payment/0]).
 
 -type activity()            :: payment_activity()
                              | refund_activity()
@@ -915,7 +916,7 @@ construct_final_cashflow(Payment, Shop, PaymentInstitution, Provider, Cashflow, 
     hg_cashflow:finalize(
         Cashflow,
         collect_cash_flow_context(Payment),
-        collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS, Revision)
+        hg_accounting:collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS, Revision)
     ).
 
 construct_final_cashflow(Cashflow, Context, AccountMap) ->
@@ -933,44 +934,6 @@ collect_cash_flow_context(
     #{
         operation_amount => Cash
     }.
-
-collect_account_map(
-    Payment,
-    #domain_Shop{account = MerchantAccount},
-    PaymentInstitution,
-    #domain_Provider{accounts = ProviderAccounts},
-    VS,
-    Revision
-) ->
-    Currency = get_currency(get_payment_cost(Payment)),
-    ProviderAccount = hg_payment_institution:choose_provider_account(Currency, ProviderAccounts),
-    SystemAccount = hg_payment_institution:get_system_account(Currency, VS, Revision, PaymentInstitution),
-    M = #{
-        {merchant , settlement} => MerchantAccount#domain_ShopAccount.settlement     ,
-        {merchant , guarantee } => MerchantAccount#domain_ShopAccount.guarantee      ,
-        {provider , settlement} => ProviderAccount#domain_ProviderAccount.settlement ,
-        {system   , settlement} => SystemAccount#domain_SystemAccount.settlement     ,
-        {system   , subagent  } => SystemAccount#domain_SystemAccount.subagent
-    },
-    % External account probably can be optional for some payments
-    case hg_payment_institution:choose_external_account(Currency, VS, Revision) of
-        #domain_ExternalAccount{income = Income, outcome = Outcome} ->
-            M#{
-                {external, income} => Income,
-                {external, outcome} => Outcome
-            };
-        undefined ->
-            M
-    end.
-
-get_account_id(AccountType, AccountMap) ->
-    % FIXME move me closer to hg_accounting
-    case AccountMap of
-        #{AccountType := AccountID} ->
-            AccountID;
-        #{} ->
-            undefined
-    end.
 
 get_available_amount(AccountID, Clock) ->
     #{
@@ -1240,7 +1203,7 @@ make_refund_cashflow(Refund, Payment, Revision, St, Opts) ->
     Cashflow = collect_refund_cashflow(MerchantTerms, ProviderTerms, VS1, Revision),
     PaymentInstitution = get_payment_institution(Opts, Revision),
     Provider = get_route_provider(Route, Revision),
-    AccountMap = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS1, Revision),
+    AccountMap = hg_accounting:collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS1, Revision),
     construct_final_cashflow(Cashflow, collect_cash_flow_context(Refund), AccountMap).
 
 assert_refund_cash(Cash, St) ->
@@ -1973,18 +1936,11 @@ maybe_set_charged_back_status(_ChargebackStatus, _ChargebackBody, _St) ->
 -spec process_refund_cashflow(refund_id(), action(), st()) -> machine_result().
 process_refund_cashflow(ID, Action, St) ->
     Opts = get_opts(St),
-    Shop = get_shop(Opts),
-    Payment = get_payment(St),
+    #domain_Shop{account = #domain_ShopAccount{settlement = SettlementID}} = get_shop(Opts),
     RefundSt = try_get_refund_state(ID, St),
-    Route = get_route(St),
-    Revision = get_refund_revision(RefundSt),
-    Provider = get_route_provider(Route, Revision),
-    VS = collect_validation_varset(St, Opts),
-    PaymentInstitution = get_payment_institution(Opts, Revision),
-    AccountMap = collect_account_map(Payment, Shop, PaymentInstitution, Provider, VS, Revision),
     Clock = prepare_refund_cashflow(RefundSt, St),
     % NOTE we assume that posting involving merchant settlement account MUST be present in the cashflow
-    case get_available_amount(get_account_id({merchant, settlement}, AccountMap), Clock) of
+    case get_available_amount(SettlementID, Clock) of
         % TODO we must pull this rule out of refund terms
         Available when Available >= 0 ->
             Events0 = [?session_ev(?refunded(), ?session_started())],
@@ -2769,9 +2725,6 @@ get_payer_payment_tool(?customer_payer(_CustomerID, _, _, PaymentTool, _)) ->
 get_payer_payment_tool(?recurrent_payer(PaymentTool, _, _)) ->
     PaymentTool.
 
-get_currency(#domain_Cash{currency = Currency}) ->
-    Currency.
-
 get_resource_payment_tool(#domain_DisposablePaymentResource{payment_tool = PaymentTool}) ->
     PaymentTool.
 %%
@@ -3340,9 +3293,6 @@ get_recurrent_token(#st{recurrent_token = Token}) ->
     Token.
 
 get_payment_revision(#st{payment = #domain_InvoicePayment{domain_revision = Revision}}) ->
-    Revision.
-
-get_refund_revision(#refund_st{refund = #domain_InvoicePaymentRefund{domain_revision = Revision}}) ->
     Revision.
 
 get_payment_payer(#st{payment = #domain_InvoicePayment{payer = Payer}}) ->
