@@ -64,10 +64,14 @@ compute_postings(CF, Context, AccountMap) ->
             construct_final_account(Source, AccountMap),
             construct_final_account(Destination, AccountMap),
             compute_volume(Volume, Context),
-            Details
+            attach_nosync_mark(Details)
         ) ||
             ?posting(Source, Destination, Volume, Details) <- CF
     ].
+
+% FIXME TEMPORARY MEASURES
+attach_nosync_mark(undefined) -> <<"[nosync]">>;
+attach_nosync_mark(Details) -> <<Details/binary, " [nosync]">>.
 
 -spec construct_final_account(account(), account_map()) ->
     final_cash_flow_account() | no_return().
@@ -94,7 +98,7 @@ resolve_account(AccountType, AccountMap) ->
 -spec revert(final_cash_flow()) -> final_cash_flow().
 
 revert(CF) ->
-    [?final_posting(Destination, Source, Volume, revert_details(Details))
+    [?final_posting(Destination, Source, Volume, attach_nosync_mark(revert_details(Details)))
         || ?final_posting(Source, Destination, Volume, Details) <- CF].
 
 revert_details(undefined) ->

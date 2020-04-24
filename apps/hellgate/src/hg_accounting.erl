@@ -7,6 +7,11 @@
 
 -module(hg_accounting).
 
+-define(FIXME_TEMPORARY_VCLOCK, <<"FIXME_TEMPORARY_VCLOCK">>).
+-define(FIXME_TEMPORARY_OWN_AMOUNT, 5000000).
+-define(FIXME_TEMPORARY_MAXAVAIL_AMOUNT, 5000000).
+-define(FIXME_TEMPORARY_MINAVAIL_AMOUNT, 5000000).
+
 -export([get_account/1]).
 -export([get_balance/1]).
 -export([get_balance/2]).
@@ -47,10 +52,9 @@
 -spec get_account(account_id()) ->
     account().
 
-get_account(AccountID) ->
-    case call_accounter('GetAccountByID', [AccountID]) of
-        {ok, Result} ->
-            construct_account(AccountID, Result);
+get_account(_AccountID) ->
+    % FIXME TEMPORARY MEASURES
+    case {exception, #shumpune_AccountNotFound{}} of
         {exception, #shumpune_AccountNotFound{}} ->
             hg_woody_wrapper:raise(#payproc_AccountNotFound{})
     end.
@@ -64,12 +68,17 @@ get_balance(AccountID) ->
 -spec get_balance(account_id(), clock()) ->
     balance().
 
-get_balance(AccountID, Clock) ->
-    case call_accounter('GetBalanceByID', [AccountID, Clock]) of
+get_balance(AccountID, _Clock) ->
+    % FIXME TEMPORARY MEASURES
+    case {ok, #shumpune_Balance{
+        id                   = AccountID,
+        own_amount           = ?FIXME_TEMPORARY_OWN_AMOUNT,
+        max_available_amount = ?FIXME_TEMPORARY_MAXAVAIL_AMOUNT,
+        min_available_amount = ?FIXME_TEMPORARY_MINAVAIL_AMOUNT,
+        clock                = {vector, ?FIXME_TEMPORARY_VCLOCK}
+    }} of
         {ok, Result} ->
-            construct_balance(AccountID, Result);
-        {exception, #shumpune_AccountNotFound{}} ->
-            hg_woody_wrapper:raise(#payproc_AccountNotFound{})
+            construct_balance(AccountID, Result)
     end.
 
 -spec create_account(currency_code()) ->
@@ -128,12 +137,11 @@ commit(PlanID, Batches) ->
 rollback(PlanID, Batches) ->
     do('RollbackPlan', construct_plan(PlanID, Batches)).
 
-do(Op, Plan) ->
-    case call_accounter(Op, [Plan]) of
+do(_Op, _Plan) ->
+    % FIXME TEMPORARY MEASURES
+    case {ok, {vector, ?FIXME_TEMPORARY_VCLOCK}} of
         {ok, Clock} ->
-            Clock;
-        {exception, Exception} ->
-            error({accounting, Exception}) % FIXME
+            Clock
     end.
 
 construct_plan_change(PlanID, {BatchID, Cashflow}) ->
@@ -183,16 +191,16 @@ construct_posting_description(undefined) ->
 
 %%
 
-construct_account(
-    AccountID,
-    #shumpune_Account{
-        currency_sym_code = CurrencyCode
-    }
-) ->
-    #{
-        account_id => AccountID,
-        currency_code => CurrencyCode
-    }.
+% construct_account(
+%     AccountID,
+%     #shumpune_Account{
+%         currency_sym_code = CurrencyCode
+%     }
+% ) ->
+%     #{
+%         account_id => AccountID,
+%         currency_code => CurrencyCode
+%     }.
 
 construct_balance(
     AccountID,
